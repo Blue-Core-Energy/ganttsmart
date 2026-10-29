@@ -169,8 +169,8 @@ describe('identity middleware', () => {
       },
     });
     const res = await app.request('/api/me', { headers: authed() });
-    expect([401, 500]).toContain(res.status);
-    expect(await res.text()).not.toContain('someone@');
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: 'internal error' });
     expect(errorLog).toHaveBeenCalled();
   });
 });
@@ -534,12 +534,43 @@ describe('POST /api/linear/graphql', () => {
     expect(res.status).toBe(502);
   });
 
-  it('never logs tokens or request bodies', async () => {
-    const { app } = await connected({ replies: [json({}, 401)] });
-    await app.request('/api/linear/graphql', post(JSON.stringify({ query: 'secret-query-text' })));
-    const logged = JSON.stringify(errorLog.mock.calls);
-    expect(logged).not.toContain('access-');
-    expect(logged).not.toContain('refresh-');
-    expect(logged).not.toContain('secret-query-text');
+  it.each([
+    [
+      'Linear cannot be reached',
+      {
+        replies: [
+          () => {
+            throw new TypeError('fetch failed');
+          },
+        ],
+      },
+    ],
+    [
+      'the forced refresh fails',
+      {
+        oauth: stubOAuth({
+          refresh: async () => {
+            throw new Error('Linear token request (refresh_token) failed: HTTP 500');
+          },
+        }),
+        replies: [json({}, 401)],
+      },
+    ],
+  ])('never logs tokens, secrets or request bodies when %s', async (_name, opts) => {
+    const { app } = await connected(opts);
+    const res = await app.request(
+      '/api/linear/graphql',
+      post(JSON.stringify({ query: 'secret-query-text', variables: { v: 'secret-variable' } })),
+    );
+    expect(res.status).toBe(502);
+    expect(errorLog).toHaveBeenCalled();
+    const logged = errorLog.mock.calls
+      .flat()
+      .map((arg: unknown) => (typeof arg === 'string' ? arg : JSON.stringify(arg)))
+      .join('\n');
+    expect(logged).toContain('Linear GraphQL relay failed');
+    for (const secret of ['access-', 'refresh-', config.linearClientSecret, 'secret-query-text', 'secret-variable']) {
+      expect(logged).not.toContain(secret);
+    }
   });
 });

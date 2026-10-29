@@ -339,6 +339,37 @@ describe('history: middleware', () => {
   });
 });
 
+describe('error handling', () => {
+  it('returns a JSON 500 and logs safely when the store fails in /api/me', async () => {
+    const store = createMemoryStore();
+    store.getTokens = async () => {
+      throw new Error('firestore unavailable', { cause: Object.assign(new Error('deadline'), { code: 'ETIMEDOUT' }) });
+    };
+    const { app } = setup(store);
+    const res = await app.request('/api/me', { headers: as() });
+    expect(res.status).toBe(500);
+    expect(res.headers.get('content-type')).toMatch(/^application\/json/);
+    await expect(res.json()).resolves.toEqual({ error: 'internal error' });
+    expect(errorLog).toHaveBeenCalledWith('Request failed', {
+      name: 'Error',
+      message: 'firestore unavailable',
+      cause: { name: 'Error', message: 'deadline', code: 'ETIMEDOUT' },
+    });
+    const logged = JSON.stringify(errorLog.mock.calls);
+    expect(logged).not.toContain(ALICE.email);
+    expect(logged).not.toContain('    at ');
+  });
+
+  it('still answers a history InvalidInput with 400', async () => {
+    const { app } = setup();
+    const res = await app.request('/api/history/baselines', { headers: as() });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: unknown };
+    expect(body.error).toEqual(expect.any(String));
+    expect(body.error).not.toBe('internal error');
+  });
+});
+
 describe('static hosting', () => {
   it('serves /assets/* with an immutable cache header', async () => {
     const { app } = setup();
@@ -403,22 +434,28 @@ describe('static hosting', () => {
     }
   });
 
+  // Plain `/../` and `/%2e%2e/` segments are normalised away by the URL parser before the request
+  // reaches the app (they become `/secret.txt`), so only encoded separators and double encoding
+  // actually reach serveStatic. Each must yield the SPA shell or a 404, never the file.
   it.each([
-    '/../secret.txt',
-    '/../../secret.txt',
-    '/assets/../../secret.txt',
-    '/..%2fsecret.txt',
-    '/%2e%2e/secret.txt',
-    '/%2e%2e%2fsecret.txt',
-    '/assets/..%2f..%2fsecret.txt',
-    '/assets/%2e%2e/%2e%2e/secret.txt',
-    '/..%5csecret.txt',
-    '/assets/..%5c..%5csecret.txt',
-    '/%252e%252e/secret.txt',
-  ])('cannot escape staticDir via %s', async (path) => {
+    ['/..%2fsecret.txt', 'index'],
+    ['/%2e%2e%2fsecret.txt', 'index'],
+    ['/assets/..%2f..%2fsecret.txt', 404],
+    ['/..%5csecret.txt', 'index'],
+    ['/assets/..%5c..%5csecret.txt', 404],
+    ['/%252e%252e/secret.txt', 'index'],
+  ] as const)('cannot escape staticDir via %s', async (path, expected) => {
     const { app } = setup();
     // Build the Request by hand so the path reaches the app exactly as a client could send it.
     const res = await app.fetch(new Request(`http://localhost${path}`));
-    expect(await res.text()).not.toContain(SECRET);
+    const body = await res.text();
+    expect(body).not.toContain(SECRET);
+    if (expected === 'index') {
+      expect(res.status).toBe(200);
+      expect(body).toBe(INDEX_HTML);
+    } else {
+      expect(res.status).toBe(404);
+      expect(body).toBe('not found');
+    }
   });
 });

@@ -66,6 +66,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   const tokens = createTokenService({ store, oauth });
   const app = new Hono<AppEnv>();
 
+  // Anything a route does not handle itself is a JSON 500. Logs only the error's name, message and
+  // cause code: never the stack, the request or any token.
+  app.onError((err, c) => {
+    console.error('Request failed', describeFailure(err));
+    return c.json({ error: 'internal error' }, 500);
+  });
+
   // 1. Every /api route requires an IAP identity. Any failure, expected or not, fails closed.
   app.use('/api/*', async (c, next) => {
     let identity: Identity;
