@@ -25,6 +25,7 @@ Browser ─HTTPS─► Load balancer (static IP, Google-managed certificate for 
 - Admin access to Bluecore's Linear workspace, to create an OAuth application.
 - Access to Bluecore's DNS provider for `bluecore.energy`, to add one record.
 - A second Google account that is **not** `@bluecore.energy` (a personal Gmail is fine), to test that outsiders are refused.
+- All the Google Cloud pull requests merged into `main` of `Blue-Core-Energy/ganttsmart`, including the one that added this guide. Steps 6 and 7 build the code from `main`, so anything not merged yet won't be deployed.
 
 ## Names used in this guide
 
@@ -295,6 +296,12 @@ Start the emulator. It keeps running, so leave this tab alone (answer `Y` if it 
 
 ```bash
 gcloud emulators firestore start --host-port=localhost:8085
+```
+
+If it instead says the component manager is disabled (Cloud Shell installs `gcloud` with the system package manager), install the emulator that way and run the start command again:
+
+```bash
+sudo apt-get install google-cloud-cli-firestore-emulator
 ```
 
 Wait for `Dev App Server is now running`. Then open a **second Cloud Shell tab** (the `+` next to the tab name) and run:
@@ -576,7 +583,7 @@ Do every check. Use a normal browser window for your Bluecore account and a priv
 - [ ] **Connecting Linear keeps the IAP session.** Click **Connect Linear**, approve in Linear, and you are sent back through `https://ganttsmart.bluecore.energy/api/linear/callback`. **Expected:** you land on `/app` connected, with your Linear projects loading. **Not expected:** a Google sign-in page, a sign-in loop, or an error banner. If you see either, note the exact URL and stop.
 - [ ] **Edit and reload.** Drag an issue's dates in the Gantt chart, confirm the change in Linear, then reload the page. The change is still there, and the issue's history panel shows the edit.
 - [ ] **Disconnect and reconnect.** Disconnect Linear in the app (it shows the connect prompt), then connect again; it works without errors.
-- [ ] **No errors in the logs.** `gcloud run services logs read $SERVICE --region=$REGION --limit=50` shows no `ERROR` lines from these checks.
+- [ ] **No errors in the logs.** `gcloud run services logs read $SERVICE --region=$REGION --limit=50` shows only the `IAP identity check failed` errors caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above, and no other `ERROR` lines.
 - [ ] **Secret rotation works.** Do the rotation in [Rotate the Linear client secret](#rotate-the-linear-client-secret) once, then repeat the Linear connect check.
 
 ---
@@ -621,9 +628,23 @@ gcloud run revisions list --service=$SERVICE --region=$REGION
 gcloud run services update-traffic $SERVICE --region=$REGION --to-revisions=GOOD_REVISION_NAME=100
 ```
 
-Then fix or revert the change on `main`. The next push redeploys and sends traffic to the newest revision again. To do that without a push: `gcloud run services update-traffic $SERVICE --region=$REGION --to-latest`.
+**Traffic stays pinned after a rollback.** Once traffic is assigned to a particular revision, every later deploy keeps that assignment: Cloud Build keeps reporting successful deploys, but nobody sees them ([Rollbacks and traffic migration](https://cloud.google.com/run/docs/rollouts-rollbacks-traffic-migration)). So after you fix or revert the change on `main` and Cloud Build has deployed it, you **must** send traffic back to the newest revision:
 
-To stop automatic deploys temporarily: `gcloud builds triggers update github ganttsmart-main --region=$REGION --disabled` (`--no-disabled` turns it back on). *Verify:* if `update github … --disabled` is rejected, disable the trigger on the Cloud Build **Triggers** page instead.
+```bash
+gcloud run services update-traffic $SERVICE --region=$REGION --to-latest
+```
+
+**Check:** `gcloud run services describe $SERVICE --region=$REGION --format='value(status.traffic)'` shows the latest revision (`latestRevision=True`) at `percent=100`.
+
+To stop automatic deploys temporarily, open the Cloud Build **Triggers** page (<https://console.cloud.google.com/cloud-build/triggers>, region `us-west2`), click **⋮** on `ganttsmart-main` and choose **Disable**; choose **Enable** to turn it back on.
+
+From Cloud Shell instead, export the trigger, change it and import it back ([`triggers export`](https://cloud.google.com/sdk/gcloud/reference/beta/builds/triggers/export) is a beta command; [`triggers import`](https://cloud.google.com/sdk/gcloud/reference/builds/triggers/import)):
+
+```bash
+gcloud beta builds triggers export ganttsmart-main --region=$REGION --destination=trigger.yaml
+# Edit trigger.yaml: add or change the line `disabled: true` (set it to false to re-enable)
+gcloud builds triggers import --region=$REGION --source=trigger.yaml
+```
 
 ## Taking it down
 
@@ -636,6 +657,8 @@ gcloud projects delete $PROJECT_ID
 Then remove the `ganttsmart` A record at the DNS provider and delete the OAuth application in Linear.
 
 **Only the public entry point** (keeps data, image and service; nobody can reach the app):
+
+First remove the `ganttsmart` A record at the DNS provider (before, or immediately after, deleting `ganttsmart-ip`). Once the IP is released Google can give it to someone else, and a record still pointing at it would let them serve content as `ganttsmart.bluecore.energy`.
 
 ```bash
 gcloud compute forwarding-rules delete ganttsmart-https-rule ganttsmart-http-rule --global --quiet
