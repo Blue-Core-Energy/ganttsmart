@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { saveLinearTokens } from "../_shared/linear-token.ts";
 
 const LINEAR_CLIENT_ID = Deno.env.get("LINEAR_CLIENT_ID") ?? "";
 const LINEAR_CLIENT_SECRET = Deno.env.get("LINEAR_CLIENT_SECRET") ?? "";
@@ -85,20 +86,11 @@ Deno.serve(async (req: Request) => {
     }
 
     const tokenData = await tokenRes.json();
-    const accessToken = tokenData.access_token;
-    const tokenType = tokenData.token_type || "Bearer";
 
-    const { error: dbError } = await supabaseClient
-      .from("user_settings")
-      .upsert({
-        id: user.id,
-        linear_access_token: accessToken,
-        linear_token_type: tokenType,
-        updated_at: new Date().toISOString(),
-      });
-
-    if (dbError) {
-      return new Response(JSON.stringify({ error: `Failed to save token: ${dbError.message}` }), {
+    try {
+      await saveLinearTokens(supabaseClient, user.id, tokenData);
+    } catch (dbError) {
+      return new Response(JSON.stringify({ error: (dbError as Error).message }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
