@@ -225,6 +225,7 @@ export default function App() {
     user,
     loading,
     linearToken,
+    connectLinear,
     signUp,
     signIn,
     signInWithGoogle,
@@ -259,11 +260,13 @@ export default function App() {
   }
 
   if (!user) {
+    // Password login is only offered by backends that provide it (always true for Supabase)
+    if (!signIn || !signUp || !signInWithGoogle) return null;
     return <AuthPage onSignIn={signIn} onSignUp={signUp} onGoogleSignIn={signInWithGoogle} />;
   }
 
   if (!linearToken) {
-    return <LinearConnect userEmail={user.email || ''} onSignOut={signOut} />;
+    return <LinearConnect userEmail={user.email} onConnect={connectLinear} onSignOut={signOut} />;
   }
 
   return (
