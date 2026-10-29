@@ -44,13 +44,20 @@ export async function saveLinearTokens(supabase: SupabaseClient, userId: string,
   return { accessToken: tokenData.access_token, expiresAt };
 }
 
-/** Exchange the stored refresh token for a new access token. Throws LinearReauthRequired if Linear rejects it. */
+/**
+ * Exchange the stored refresh token for a new access token.
+ * Throws LinearReauthRequired only when no refresh token is stored or Linear
+ * answers `invalid_grant`. Every other failure (DB error, invalid_client,
+ * 5xx, unparseable body) throws a plain Error and leaves stored tokens alone,
+ * so a transient problem or a server misconfiguration can't disconnect users.
+ */
 export async function refreshLinearToken(supabase: SupabaseClient, userId: string) {
-  const { data: row } = await supabase
+  const { data: row, error: readError } = await supabase
     .from("linear_refresh_tokens")
     .select("refresh_token")
     .eq("id", userId)
     .maybeSingle();
+  if (readError) throw new Error(`Failed to read refresh token: ${readError.message}`);
   if (!row?.refresh_token) throw new LinearReauthRequired("No refresh token stored");
 
   const res = await fetch("https://api.linear.app/oauth/token", {
@@ -66,13 +73,23 @@ export async function refreshLinearToken(supabase: SupabaseClient, userId: strin
 
   if (!res.ok) {
     const body = await res.text();
-    if (res.status === 400 || res.status === 401) {
-      // Refresh token revoked or invalid — the user has to reconnect Linear.
+    let errorCode: string | undefined;
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed.error === "string") errorCode = parsed.error;
+    } catch {
+      // unparseable body: not a recognised OAuth error
+    }
+    if (errorCode === "invalid_grant") {
+      // Refresh token revoked, expired or invalid — the user has to reconnect Linear.
       // Clearing is best effort; the caller must still learn that reauth is needed.
       await clearLinearTokens(supabase, userId).catch(() => {});
-      throw new LinearReauthRequired(`Linear refresh failed: ${body}`);
+      throw new LinearReauthRequired(`Linear refresh failed: ${errorCode}`);
     }
-    throw new Error(`Linear refresh failed (${res.status}): ${body}`);
+    // invalid_client (wrong LINEAR_CLIENT_SECRET), invalid_request, 5xx, …: keep stored
+    // tokens so fixing the configuration or waiting out the outage recovers every user.
+    console.error(`Linear token refresh failed: status=${res.status} error=${errorCode ?? "unparseable body"}`);
+    throw new Error(`Linear refresh failed (${res.status}${errorCode ? `: ${errorCode}` : ""})`);
   }
 
   return saveLinearTokens(supabase, userId, await res.json());
@@ -80,11 +97,13 @@ export async function refreshLinearToken(supabase: SupabaseClient, userId: strin
 
 /** Return a usable access token for the user, refreshing it first if it is about to expire. */
 export async function getValidLinearToken(supabase: SupabaseClient, userId: string): Promise<string | null> {
-  const { data: settings } = await supabase
+  const { data: settings, error } = await supabase
     .from("user_settings")
     .select("linear_access_token, linear_token_expires_at")
     .eq("id", userId)
-    .single();
+    .maybeSingle();
+  // A DB failure must not look like "not connected"
+  if (error) throw new Error(`Failed to read Linear token: ${error.message}`);
   if (!settings?.linear_access_token) return null;
 
   const expiresAt = settings.linear_token_expires_at ? new Date(settings.linear_token_expires_at).getTime() : null;
