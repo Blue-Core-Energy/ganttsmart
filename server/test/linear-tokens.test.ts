@@ -101,6 +101,22 @@ describe('createTokenService.getAccessToken', () => {
     await expect(store.getTokens(SUB)).resolves.toBeNull();
   });
 
+  it('uses tokens another instance rotated meanwhile when Linear rejects the old refresh token', async () => {
+    // Linear says invalid_grant for refresh-0 because another instance already rotated it to
+    // refresh-1 (and its grace period is over); that instance wrote the new set before we re-read.
+    const rotated: LinearTokens = { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: NOW + 60 * MINUTE };
+    const store = await storeWith(old(4 * MINUTE));
+    const { oauth, refreshTokensSeen } = stubLinear(() => {
+      void store.saveTokens(SUB, EMAIL, rotated);
+      return { status: 400, body: { error: 'invalid_grant' } };
+    });
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    await expect(tokens.getAccessToken(SUB)).resolves.toBe('access-1');
+    expect(refreshTokensSeen).toEqual(['refresh-0']);
+    await expect(store.getTokens(SUB)).resolves.toEqual(rotated);
+  });
+
   it.each([
     ['401 invalid_client', { status: 401, body: { error: 'invalid_client' } }],
     ['500', { status: 500, body: { error: 'server_error' } }],
