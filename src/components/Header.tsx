@@ -1,10 +1,13 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
 import { TIME_SCALES } from '@/types';
 import type { Task, TimeScale } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import { toastError, toastSuccess } from './Toast';
-import ShareDialog from './ShareDialog';
+
+// Loaded on demand: it pulls in the Supabase client, which only the Supabase backend has
+const ShareDialog = lazy(() => import('./ShareDialog'));
 
 interface Props {
   projectName: string;
@@ -267,23 +270,27 @@ export default memo(function Header({
         </div>
 
         {/* Share */}
-        <button
-          onClick={() => setShowShareDialog(true)}
-          className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-light transition-colors cursor-pointer"
-          title="Share roadmap"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="18" cy="5" r="3" />
-            <circle cx="6" cy="12" r="3" />
-            <circle cx="18" cy="19" r="3" />
-            <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-            <line x1="15.41" y1="6.51" x2="8.59" y2="11.49" />
-          </svg>
-          Share
-        </button>
+        {backend.capabilities.sharing && (
+          <button
+            onClick={() => setShowShareDialog(true)}
+            className="flex items-center gap-1.5 px-3 h-8 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-light transition-colors cursor-pointer"
+            title="Share roadmap"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="18" cy="5" r="3" />
+              <circle cx="6" cy="12" r="3" />
+              <circle cx="18" cy="19" r="3" />
+              <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+              <line x1="15.41" y1="6.51" x2="8.59" y2="11.49" />
+            </svg>
+            Share
+          </button>
+        )}
 
-        {showShareDialog && (
-          <ShareDialog projectId={projectId} projectName={projectName} onClose={() => setShowShareDialog(false)} />
+        {backend.capabilities.sharing && showShareDialog && (
+          <Suspense fallback={null}>
+            <ShareDialog projectId={projectId} projectName={projectName} onClose={() => setShowShareDialog(false)} />
+          </Suspense>
         )}
 
         {/* Divider */}
@@ -321,16 +328,20 @@ export default memo(function Header({
               >
                 Disconnect Linear
               </button>
-              <div className="border-t border-border-primary my-0.5" />
-              <button
-                onClick={() => {
-                  setShowAccountMenu(false);
-                  onSignOut();
-                }}
-                className="w-full text-left px-3 py-2 text-xs text-urgent hover:bg-bg-hover transition-colors cursor-pointer"
-              >
-                Sign out
-              </button>
+              {backend.capabilities.signOut !== false && (
+                <>
+                  <div className="border-t border-border-primary my-0.5" />
+                  <button
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      onSignOut();
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs text-urgent hover:bg-bg-hover transition-colors cursor-pointer"
+                  >
+                    Sign out
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>

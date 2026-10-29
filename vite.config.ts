@@ -15,6 +15,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    server: {
+      // The GCP backend's API server (npm run dev:server); unused by the Supabase backend
+      proxy: { '/api': 'http://localhost:8080' },
+    },
     resolve: {
       // '@/backend/impl' must come before '@' so the more specific alias wins
       alias: [

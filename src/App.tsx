@@ -6,9 +6,11 @@ import Header from '@/components/Header';
 import LinearConnect from '@/components/LinearConnect';
 import Onboarding from '@/components/Onboarding';
 import StatsRow from '@/components/StatsRow';
+import SessionExpired from '@/components/SessionExpired';
 import ToastContainer, { toastError } from '@/components/Toast';
 import DetailPanel, { setRemoveRelationHandler, setBaselinesForPanel } from '@/components/DetailPanel';
 import MilestonePanel, { setMilestoneDateHandler } from '@/components/MilestonePanel';
+import { backend } from '@/backend';
 import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
 import { usePlanningHistory } from '@/hooks/usePlanningHistory';
@@ -225,6 +227,7 @@ export default function App() {
     user,
     loading,
     linearToken,
+    linearError,
     connectLinear,
     signUp,
     signIn,
@@ -260,13 +263,15 @@ export default function App() {
   }
 
   if (!user) {
-    // Password login is only offered by backends that provide it (always true for Supabase)
-    if (!signIn || !signUp || !signInWithGoogle) return null;
-    return <AuthPage onSignIn={signIn} onSignUp={signUp} onGoogleSignIn={signInWithGoogle} />;
+    // Only backends with password login (Supabase) can sign in here; behind IAP a reload signs in again
+    if (backend.capabilities.passwordLogin && signIn && signUp && signInWithGoogle) {
+      return <AuthPage onSignIn={signIn} onSignUp={signUp} onGoogleSignIn={signInWithGoogle} />;
+    }
+    return <SessionExpired />;
   }
 
   if (!linearToken) {
-    return <LinearConnect userEmail={user.email} onConnect={connectLinear} onSignOut={signOut} />;
+    return <LinearConnect userEmail={user.email} error={linearError} onConnect={connectLinear} onSignOut={signOut} />;
   }
 
   return (

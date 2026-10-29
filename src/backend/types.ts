@@ -51,7 +51,13 @@ export interface HistoryApi {
 
 export interface Backend {
   kind: 'supabase' | 'gcp';
-  capabilities: { sharing: boolean; passwordLogin: boolean; marketingPages: boolean };
+  capabilities: {
+    sharing: boolean;
+    passwordLogin: boolean;
+    marketingPages: boolean;
+    /** Whether the UI offers "Sign out". Absent means true. */
+    signOut?: boolean;
+  };
   useAuth(): AuthState;
   linearRequest(token: string, body: { query: string; variables?: Record<string, unknown> }): Promise<Response>;
   history: HistoryApi;
