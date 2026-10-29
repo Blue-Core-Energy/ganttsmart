@@ -1,6 +1,5 @@
+import { backend } from '@/backend';
 import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
-
-const LINEAR_API = 'https://api.linear.app/graphql';
 
 // ---- Rate limiter: debounce + queue ----
 let pendingRequests = 0;
@@ -30,11 +29,7 @@ function releaseSlot() {
 async function gql(apiKey: string, query: string, variables?: Record<string, unknown>, retries = 2): Promise<Record<string, unknown>> {
   await waitForSlot();
   try {
-    const res = await fetch(LINEAR_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: apiKey },
-      body: JSON.stringify({ query, variables }),
-    });
+    const res = await backend.linearRequest(apiKey, { query, variables });
 
     // Rate limited — retry after delay
     if (res.status === 429) {

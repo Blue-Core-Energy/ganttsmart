@@ -1,26 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { backend, type ChangeEvent, type TaskBaseline } from '@/backend';
 import type { Task } from '@/types';
 
-export interface TaskBaseline {
-  issue_id: string;
-  planned_start: string | null;
-  planned_due: string;
-  first_seen_at: string;
-}
+export type { ChangeEvent, TaskBaseline };
 
-export interface ChangeEvent {
-  issue_id: string;
-  field_changed: string;
-  old_value: string | null;
-  new_value: string | null;
-  changed_at: string;
-}
-
-/** Get the current user ID from the local session (no network call). */
-async function getUserId(): Promise<string | null> {
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.user?.id ?? null;
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 /**
@@ -45,22 +30,17 @@ export function usePlanningHistory(projectId: string) {
   // Load existing baselines from DB
   const loadBaselines = useCallback(async () => {
     if (!projectId) return;
-    const userId = await getUserId();
-    if (!userId) return;
 
-    const { data, error } = await supabase
-      .from('task_baselines')
-      .select('issue_id, planned_start, planned_due, first_seen_at')
-      .eq('user_id', userId)
-      .eq('project_id', projectId);
-
-    if (error) {
-      console.warn('Failed to load baselines:', error.message);
+    let rows: TaskBaseline[];
+    try {
+      rows = await backend.history.loadBaselines(projectId);
+    } catch (e) {
+      console.warn('Failed to load baselines:', errorMessage(e));
       return;
     }
 
     const map = new Map<string, TaskBaseline>();
-    for (const row of data || []) {
+    for (const row of rows) {
       map.set(row.issue_id, row);
     }
     setBaselines(map);
@@ -71,9 +51,6 @@ export function usePlanningHistory(projectId: string) {
   const syncBaselines = useCallback(
     async (tasks: Task[]) => {
       if (!projectId || baselinesSynced.current) return;
-
-      const userId = await getUserId();
-      if (!userId) return;
       baselinesSynced.current = true;
 
       // Load current baselines first
@@ -88,19 +65,15 @@ export function usePlanningHistory(projectId: string) {
       if (newBaselines.length === 0) return;
 
       const rows = newBaselines.map((t) => ({
-        user_id: userId,
         issue_id: t.id,
-        project_id: projectId,
         planned_start: t.startDate,
         planned_due: t.due,
       }));
 
-      const { error } = await supabase
-        .from('task_baselines')
-        .upsert(rows, { onConflict: 'user_id,issue_id', ignoreDuplicates: true });
-
-      if (error) {
-        console.warn('Failed to save baselines:', error.message);
+      try {
+        await backend.history.addBaselines(projectId, rows);
+      } catch (e) {
+        console.warn('Failed to save baselines:', errorMessage(e));
         return;
       }
 
@@ -123,20 +96,10 @@ export function usePlanningHistory(projectId: string) {
   const logChange = useCallback(
     async (issueId: string, field: string, oldValue: string | null, newValue: string | null) => {
       if (!projectId) return;
-      const userId = await getUserId();
-      if (!userId) return;
-
-      const { error } = await supabase.from('issue_change_history').insert({
-        user_id: userId,
-        issue_id: issueId,
-        project_id: projectId,
-        field_changed: field,
-        old_value: oldValue,
-        new_value: newValue,
-      });
-
-      if (error) {
-        console.warn('Failed to log change:', error.message);
+      try {
+        await backend.history.logChange(projectId, issueId, field, oldValue, newValue);
+      } catch (e) {
+        console.warn('Failed to log change:', errorMessage(e));
       }
     },
     [projectId],
@@ -146,19 +109,10 @@ export function usePlanningHistory(projectId: string) {
   const logStatusTransition = useCallback(
     async (issueId: string, fromStatus: string | null, toStatus: string) => {
       if (!projectId) return;
-      const userId = await getUserId();
-      if (!userId) return;
-
-      const { error } = await supabase.from('status_transition_log').insert({
-        user_id: userId,
-        issue_id: issueId,
-        project_id: projectId,
-        from_status: fromStatus,
-        to_status: toStatus,
-      });
-
-      if (error) {
-        console.warn('Failed to log status transition:', error.message);
+      try {
+        await backend.history.logStatusTransition(projectId, issueId, fromStatus, toStatus);
+      } catch (e) {
+        console.warn('Failed to log status transition:', errorMessage(e));
       }
     },
     [projectId],
@@ -168,22 +122,12 @@ export function usePlanningHistory(projectId: string) {
   const getTaskHistory = useCallback(
     async (issueId: string): Promise<ChangeEvent[]> => {
       if (!projectId) return [];
-      const userId = await getUserId();
-      if (!userId) return [];
-
-      const { data, error } = await supabase
-        .from('issue_change_history')
-        .select('issue_id, field_changed, old_value, new_value, changed_at')
-        .eq('user_id', userId)
-        .eq('issue_id', issueId)
-        .order('changed_at', { ascending: false })
-        .limit(50);
-
-      if (error) {
-        console.warn('Failed to fetch task history:', error.message);
+      try {
+        return await backend.history.getTaskHistory(issueId);
+      } catch (e) {
+        console.warn('Failed to fetch task history:', errorMessage(e));
         return [];
       }
-      return data || [];
     },
     [projectId],
   );

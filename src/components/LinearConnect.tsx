@@ -1,33 +1,10 @@
 interface Props {
   userEmail: string;
+  onConnect: () => void;
   onSignOut: () => void;
 }
 
-const LINEAR_CLIENT_ID = import.meta.env.VITE_LINEAR_CLIENT_ID;
-const LINEAR_REDIRECT_URI = import.meta.env.VITE_LINEAR_REDIRECT_URI;
-
-export default function LinearConnect({ userEmail, onSignOut }: Props) {
-  const handleConnect = () => {
-    if (!LINEAR_CLIENT_ID) {
-      alert('Linear OAuth Client ID not configured. Set VITE_LINEAR_CLIENT_ID in .env');
-      return;
-    }
-
-    // Generate state for CSRF protection
-    const state = crypto.randomUUID();
-    sessionStorage.setItem('linear_oauth_state', state);
-
-    const params = new URLSearchParams({
-      client_id: LINEAR_CLIENT_ID,
-      redirect_uri: LINEAR_REDIRECT_URI,
-      response_type: 'code',
-      scope: 'read,write',
-      state,
-    });
-
-    window.location.href = `https://linear.app/oauth/authorize?${params}`;
-  };
-
+export default function LinearConnect({ userEmail, onConnect, onSignOut }: Props) {
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center z-200">
       <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[480px] w-full text-center">
@@ -40,7 +17,7 @@ export default function LinearConnect({ userEmail, onSignOut }: Props) {
         </p>
 
         <button
-          onClick={handleConnect}
+          onClick={onConnect}
           className="w-full py-3.5 px-4 bg-[#5E6AD2] border-none rounded-lg text-white text-sm font-semibold cursor-pointer flex items-center justify-center gap-2.5 hover:bg-[#4E5BBF] transition-colors mb-4"
         >
           <svg width="20" height="20" viewBox="0 0 100 100" fill="none">
