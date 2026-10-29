@@ -1,4 +1,5 @@
 import { Firestore } from '@google-cloud/firestore';
+import { afterAll } from 'vitest';
 import { createFirestoreStore } from '../src/store/firestore.js';
 import { runStoreContract } from './store.contract.js';
 
@@ -14,3 +15,8 @@ runStoreContract(
   },
   emulator,
 );
+
+// Close the client's gRPC channels so the run exits instead of hanging on open handles.
+afterAll(async () => {
+  await db?.terminate();
+});

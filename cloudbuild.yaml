@@ -1,0 +1,32 @@
+# Cloud Build: build the GanttSmart image, push it to Artifact Registry and roll it out to the
+# existing Cloud Run service. Runs from the trigger on pushes to main (see docs/gcp-deployment.md).
+#
+# This file deploys the image only. Environment variables, the Linear secret reference, ingress,
+# authentication and the runtime service account are set once by the guide and carried over to
+# every new revision, so no configuration or secrets belong here.
+
+steps:
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', 'us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA', '.']
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args: ['push', 'us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA']
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ganttsmart
+      - --image=us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA
+      - --region=us-west2
+
+images:
+  - us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA
+
+options:
+  # Required when the trigger runs as a user-managed service account (ganttsmart-build).
+  logging: CLOUD_LOGGING_ONLY
