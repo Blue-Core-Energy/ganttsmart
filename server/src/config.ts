@@ -1,3 +1,5 @@
+import { isAllowedEmail } from './identity.js';
+
 export interface Config {
   port: number;
   isProduction: boolean;
@@ -34,17 +36,39 @@ function parsePort(raw: string | null): number {
   return port;
 }
 
+function parseOrigin(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('Invalid APP_ORIGIN: must be an absolute http(s) URL');
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('Invalid APP_ORIGIN: must be an absolute http(s) URL');
+  }
+  return url.origin;
+}
+
 /**
  * Builds the server config from environment variables. Throws (so the server refuses to start)
  * on anything missing or unsafe. Error messages name variables but never include secret values.
  */
 export function loadConfig(env: Env): Config {
-  const isProduction = env.NODE_ENV === 'production';
+  const isProduction = env.NODE_ENV?.trim().toLowerCase() === 'production';
   const devUserEmail = optional(env, 'DEV_USER_EMAIL');
   const iapAudience = optional(env, 'IAP_AUDIENCE');
+  const onCloudRun = optional(env, 'K_SERVICE') !== null;
+  const allowedDomain = (optional(env, 'ALLOWED_EMAIL_DOMAIN') ?? 'bluecore.energy').toLowerCase();
 
-  if (isProduction && devUserEmail !== null) {
-    throw new Error('DEV_USER_EMAIL is not allowed when NODE_ENV=production');
+  // The dev bypass replaces IAP verification with one fixed user, so refuse it on anything that
+  // looks like a deployment, not only when NODE_ENV is spelled exactly right.
+  if (devUserEmail !== null) {
+    if (isProduction) throw new Error('DEV_USER_EMAIL is not allowed when NODE_ENV=production');
+    if (iapAudience !== null) throw new Error('DEV_USER_EMAIL is not allowed when IAP_AUDIENCE is set');
+    if (onCloudRun) throw new Error('DEV_USER_EMAIL is not allowed on Cloud Run (K_SERVICE is set)');
+    if (!isAllowedEmail(devUserEmail, allowedDomain)) {
+      throw new Error('DEV_USER_EMAIL must be an address in ALLOWED_EMAIL_DOMAIN');
+    }
   }
   if (devUserEmail === null && iapAudience === null) {
     throw new Error(
@@ -57,8 +81,8 @@ export function loadConfig(env: Env): Config {
   return {
     port: parsePort(optional(env, 'PORT')),
     isProduction,
-    appOrigin: required(env, 'APP_ORIGIN'),
-    allowedDomain: (optional(env, 'ALLOWED_EMAIL_DOMAIN') ?? 'bluecore.energy').toLowerCase(),
+    appOrigin: parseOrigin(required(env, 'APP_ORIGIN')),
+    allowedDomain,
     iapAudience,
     devUserEmail,
     linearClientId: required(env, 'LINEAR_CLIENT_ID'),

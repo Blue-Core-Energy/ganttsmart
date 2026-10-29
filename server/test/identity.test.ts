@@ -92,6 +92,17 @@ describe('createIapVerifier', () => {
     await expect(verifier()(token)).rejects.toBeInstanceOf(UnauthorizedError);
   });
 
+  it('rejects a token without iat', async () => {
+    const token = await new SignJWT({ email: 'someone@bluecore.energy' })
+      .setProtectedHeader({ alg: 'ES256', kid: 'test-key' })
+      .setSubject('accounts.google.com:1')
+      .setAudience(AUDIENCE)
+      .setIssuer(ISSUER)
+      .setExpirationTime('10m')
+      .sign(privateKey);
+    await expect(verifier()(token)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
   it('rejects a token signed with an unexpected algorithm', async () => {
     const token = await new SignJWT({ email: 'someone@bluecore.energy' })
       .setProtectedHeader({ alg: 'HS256', kid: 'test-key' })
@@ -101,7 +112,11 @@ describe('createIapVerifier', () => {
       .setIssuedAt()
       .setExpirationTime('10m')
       .sign(new TextEncoder().encode('a-shared-secret-that-is-long-enough-123'));
-    await expect(verifier()(token)).rejects.toBeInstanceOf(UnauthorizedError);
+    // jose checks `algorithms` before resolving a key, so this code proves the ES256 pin (without
+    // the pin the token would still fail, but with a different code, e.g. ERR_JOSE_NOT_SUPPORTED).
+    const err = await verifier()(token).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UnauthorizedError);
+    expect((err as Error).message).toMatch(/ERR_JOSE_ALG_NOT_ALLOWED/);
   });
 
   it('rejects a missing header', async () => {

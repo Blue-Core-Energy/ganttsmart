@@ -20,6 +20,58 @@ describe('loadConfig', () => {
     ).toThrow(/DEV_USER_EMAIL/);
   });
 
+  it('treats NODE_ENV as production regardless of case and whitespace', () => {
+    expect(() => loadConfig({ ...base, NODE_ENV: 'Production ', DEV_USER_EMAIL: 'a@bluecore.energy' })).toThrow(
+      /DEV_USER_EMAIL/,
+    );
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: ' PRODUCTION',
+      IAP_AUDIENCE: '/projects/1/global/backendServices/2',
+    });
+    expect(config.isProduction).toBe(true);
+  });
+
+  it('refuses DEV_USER_EMAIL when IAP_AUDIENCE is set, even without NODE_ENV', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        IAP_AUDIENCE: '/projects/1/global/backendServices/2',
+        DEV_USER_EMAIL: 'a@bluecore.energy',
+      }),
+    ).toThrow(/DEV_USER_EMAIL/);
+  });
+
+  it('refuses DEV_USER_EMAIL on Cloud Run (K_SERVICE set), even without NODE_ENV', () => {
+    expect(() => loadConfig({ ...base, K_SERVICE: 'ganttsmart', DEV_USER_EMAIL: 'a@bluecore.energy' })).toThrow(
+      /DEV_USER_EMAIL/,
+    );
+  });
+
+  it('allows DEV_USER_EMAIL alone in development', () => {
+    const config = loadConfig({ ...base, NODE_ENV: 'development', DEV_USER_EMAIL: 'dev@bluecore.energy' });
+    expect(config).toMatchObject({ isProduction: false, devUserEmail: 'dev@bluecore.energy', iapAudience: null });
+  });
+
+  it('refuses a DEV_USER_EMAIL outside the allowed domain', () => {
+    expect(() => loadConfig({ ...base, DEV_USER_EMAIL: 'dev@gmail.com' })).toThrow(/DEV_USER_EMAIL/);
+  });
+
+  it('normalises APP_ORIGIN to a bare origin', () => {
+    const config = loadConfig({
+      ...base,
+      APP_ORIGIN: 'https://Ganttsmart.Bluecore.Energy/',
+      DEV_USER_EMAIL: 'dev@bluecore.energy',
+    });
+    expect(config.appOrigin).toBe('https://ganttsmart.bluecore.energy');
+  });
+
+  it.each(['not a url', 'ftp://ganttsmart.bluecore.energy'])('rejects APP_ORIGIN %j', (origin) => {
+    expect(() => loadConfig({ ...base, APP_ORIGIN: origin, DEV_USER_EMAIL: 'dev@bluecore.energy' })).toThrow(
+      /APP_ORIGIN/,
+    );
+  });
+
   it('requires IAP_AUDIENCE in production', () => {
     expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/IAP_AUDIENCE/);
   });
