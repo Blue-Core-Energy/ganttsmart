@@ -37,6 +37,25 @@
 - **Git commits:** `git -c user.name="Andrew" -c user.email="andrew@bluecore.energy" commit`, with the trailer `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - **Pull requests:** into the fork's `main` (`origin`, Blue-Core-Energy/ganttsmart); open them as drafts. Never push to `main`.
 
+## PR Breakdown
+
+The work ships as eight small PRs, done strictly one at a time. **Each PR is reviewed and merged by Andrew before the next one starts.**
+- Every branch is created fresh from the fork's up-to-date `main` (`git fetch origin && git checkout -b <branch> origin/main`). Nothing is stacked on an unmerged branch.
+- `main` must stay working after every merge. The server is unused until PR 7, and the Supabase build works throughout.
+
+| PR | Branch | Tasks | Contents |
+|---|---|---|---|
+| 0 | `docs/gcp-plan` | — | This plan and the spec |
+| 1 | `fix/shared-roadmaps-anon-read` | 1 | Drop the `anon_read` policy (U1) |
+| 2 | `fix/linear-token-refresh` | 2 | Supabase token refresh (U2) |
+| 3 | `refactor/backend-seam` | 8 | Frontend backend seam and Supabase implementation, no behavior change |
+| 4 | `feat/server-core` | 3, 4, 5 | Server scaffold, config, IAP identity, storage, Linear OAuth and token service |
+| 5 | `feat/server-api` | 6, 7 | HTTP app, Linear routes and relay, history routes, static hosting, entry point |
+| 6 | `feat/gcp-frontend` | 9 | GCP frontend implementation and capability gating |
+| 7 | `feat/gcp-deploy` | 10 | Container, Cloud Build, setup guide, README |
+
+Each PR's last step is: push the branch, open a draft PR into the fork's `main`, and stop until it's merged. The body summarizes the change, lists which verification steps ran (and which didn't, with the reason), and links this plan.
+
 ## Review Focus
 
 1. **IAP session expires mid-use.** `/api` calls get redirected to Google sign-in. The UI should say "Session expired — reload", not show a broken chart (test in Task 9).
@@ -97,7 +116,7 @@ Branch `fix/linear-token-refresh` has a WIP commit containing:
 
 ### Task 3: Server scaffold, config and IAP identity
 
-First, rebase `feat/gcp-backend` onto `fix/linear-token-refresh` so the frontend seam can include U2. The PR body will note that it's stacked on U2.
+This is PR 4 (`feat/server-core`), which also contains Tasks 4 and 5.
 
 **Files:**
 - Modify: `package.json`:
@@ -124,8 +143,8 @@ First, rebase `feat/gcp-backend` onto `fix/linear-token-refresh` so the frontend
   - `createIapVerifier(opts: { audience: string; allowedDomain: string; keys?: JWTVerifyGetKey }): (assertion: string | undefined) => Promise<Identity>`. It throws `UnauthorizedError`; `keys` defaults to the remote JWK set.
   - `createDevIdentity(email: string): () => Promise<Identity>`, which returns `{ sub: 'dev:' + email, email }`.
 
-- [ ] **Step 1:** Rebase.
-  Run `git checkout feat/gcp-backend && git rebase fix/linear-token-refresh`, then `npm install`.
+- [ ] **Step 1:** Create the branch.
+  Run `git fetch origin && git checkout -b feat/server-core origin/main`, then `npm install`.
 - [ ] **Step 2:** Write failing tests in `config.test.ts`:
   - `loadConfig({NODE_ENV:'production', DEV_USER_EMAIL:'a@bluecore.energy', ...})` throws `/DEV_USER_EMAIL/`.
   - Production without `IAP_AUDIENCE` throws.
@@ -477,5 +496,5 @@ First, rebase `feat/gcp-backend` onto `fix/linear-token-refresh` so the frontend
 - [ ] **Step 3:** Production guard: `podman run --rm -e DEV_USER_EMAIL=x@bluecore.energy … ganttsmart:test` (with `NODE_ENV=production`, the image default). Expected: exits non-zero, logging that `DEV_USER_EMAIL` isn't allowed in production.
 - [ ] **Step 4:** Proofread the guide against spec §5 and §7. Every value (region, names, domain, redirect URI, roles) must match the Global Constraints.
 - [ ] **Step 5:** Commit: `feat: container, Cloud Build config and GCP deployment guide`.
-- [ ] **Step 6:** Push `feat/gcp-backend` and open a draft PR into the fork's `main`.
-  The body notes that it's stacked on the U2 PR, summarizes the work, lists the manual checks run and not run, and links the guide.
+- [ ] **Step 6:** Push `feat/gcp-deploy` and open a draft PR into the fork's `main`.
+  The body summarizes the work, lists the manual checks run and not run, and links the guide.
