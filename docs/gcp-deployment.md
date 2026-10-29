@@ -310,28 +310,29 @@ node --version
 npm ci
 ```
 
-If the repository is private, `git clone` asks you to sign in to GitHub: use your GitHub username and a [personal access token](https://github.com/settings/tokens) as the password.
+The fork is public (GitHub keeps forks of public repositories public), so `git clone` doesn't ask you to sign in. That's expected and safe: no secrets are in the repository. If you later move to a private repository, `git clone` will ask you to sign in: use your GitHub username and a [personal access token](https://github.com/settings/tokens) as the password.
 
-The Firestore emulator needs Java 21. Switch Cloud Shell to it ([Cloud Shell Java versions](https://cloud.google.com/shell/docs/how-cloud-shell-works), [emulator requirements](https://cloud.google.com/firestore/native/docs/emulator)):
+Install the Firestore emulator. Cloud Shell installs `gcloud` with the system package manager, so the emulator comes from `apt` too. The notice about Cloud Shell being ephemeral is normal; the command carries on after 5 seconds.
 
 ```bash
-sudo update-java-alternatives -s java-1.21.0-openjdk-amd64 && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-java -version
+sudo apt-get install -y google-cloud-cli-firestore-emulator
 ```
 
-Start the emulator. It keeps running, so leave this tab alone (answer `Y` if it offers to install the emulator component):
+Start the emulator. It keeps running, so leave this tab alone:
 
 ```bash
 gcloud emulators firestore start --host-port=localhost:8085
 ```
 
-If it instead says the component manager is disabled (Cloud Shell installs `gcloud` with the system package manager), install the emulator that way and run the start command again:
+Wait for `Dev App Server is now running`. A warning that support for Java 21 will be dropped is fine; the emulator still runs. Only if it fails to start because of Java, switch to the newest Java that Cloud Shell offers and start it again ([Cloud Shell Java versions](https://cloud.google.com/shell/docs/how-cloud-shell-works), [emulator requirements](https://cloud.google.com/firestore/native/docs/emulator)):
 
 ```bash
-sudo apt-get install google-cloud-cli-firestore-emulator
+update-java-alternatives --list          # shows the installed versions
+sudo update-java-alternatives -s java-1.21.0-openjdk-amd64 && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+java -version
 ```
 
-Wait for `Dev App Server is now running`. Then open a **second Cloud Shell tab** (the `+` next to the tab name) and run:
+(Use the highest version from the list, e.g. 25, in both places if it's there.) Then open a **second Cloud Shell tab** (the `+` next to the tab name) and run:
 
 ```bash
 source ~/ganttsmart-vars.sh
