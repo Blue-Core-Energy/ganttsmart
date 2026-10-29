@@ -5,6 +5,8 @@ import { toastError } from '@/components/Toast';
 
 // Refresh session 5 minutes before it expires
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+// Retry a failed Linear token refresh (network / server error) after 1 minute
+const LINEAR_RETRY_MS = 60 * 1000;
 
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
@@ -12,6 +14,10 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
   const [linearToken, setLinearToken] = useState<string | null>(null);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linearRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linearRefreshInFlightRef = useRef<Promise<string | null> | null>(null);
+  // Bumped on sign-out and disconnect so a refresh that is still running can't restore the token
+  const linearGenerationRef = useRef(0);
 
   // Schedule automatic session refresh before expiry
   const scheduleRefresh = useCallback((sess: Session) => {
@@ -66,15 +72,18 @@ export function useAuth() {
         loadLinearToken(session.user.id);
         scheduleRefresh(session);
       } else {
+        linearGenerationRef.current += 1;
         setLinearToken(null);
         setLoading(false);
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
       }
     });
 
     return () => {
       subscription.unsubscribe();
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
     };
   }, [scheduleRefresh]);
 
@@ -104,16 +113,105 @@ export function useAuth() {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [session, scheduleRefresh]);
 
+  // Linear access tokens expire after 24h. The refresh token is held server-side
+  // (service-role-only table) and exchanged by the linear-token-refresh function;
+  // the browser only ever sees the new access token and its expiry.
+
+  const clearLinearTimer = useCallback(() => {
+    if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
+    linearRefreshTimerRef.current = null;
+  }, []);
+
+  // Called by the scheduled timer; set below once refreshLinearToken exists.
+  const runScheduledLinearRefreshRef = useRef<() => void>(() => {});
+
+  const scheduleLinearRefreshIn = useCallback(
+    (delayMs: number) => {
+      clearLinearTimer();
+      linearRefreshTimerRef.current = setTimeout(() => runScheduledLinearRefreshRef.current(), Math.max(delayMs, 0));
+    },
+    [clearLinearTimer],
+  );
+
+  const scheduleLinearRefresh = useCallback(
+    (expiresAt: string | null) => {
+      clearLinearTimer();
+      if (!expiresAt) return; // legacy token without expiry: refreshed on the first auth error instead
+      scheduleLinearRefreshIn(new Date(expiresAt).getTime() - Date.now() - REFRESH_BUFFER_MS);
+    },
+    [clearLinearTimer, scheduleLinearRefreshIn],
+  );
+
+  /**
+   * Exchange the server-held refresh token for a new access token.
+   * Resolves to the new token, or null if the user has to reconnect Linear.
+   * Rejects on transient failures (network, 5xx) without touching the current
+   * token; a retry is scheduled in that case.
+   */
+  const refreshLinearToken = useCallback((): Promise<string | null> => {
+    // Share one in-flight request between the timer, initial load and auth-error handlers
+    if (linearRefreshInFlightRef.current) return linearRefreshInFlightRef.current;
+    const generation = linearGenerationRef.current;
+
+    const request = (async () => {
+      clearLinearTimer();
+      try {
+        const { data, error } = await supabase.functions.invoke('linear-token-refresh', {
+          body: { action: 'refresh' },
+        });
+        if (error) throw error;
+        // Signed out or disconnected while the request was running: drop the result
+        if (generation !== linearGenerationRef.current) return null;
+        if (data?.reconnect === true) {
+          setLinearToken(null);
+          return null;
+        }
+        if (typeof data?.accessToken !== 'string') throw new Error('Unexpected linear-token-refresh response');
+        setLinearToken(data.accessToken);
+        scheduleLinearRefresh(data.expiresAt ?? null);
+        return data.accessToken as string;
+      } catch (e) {
+        if (generation === linearGenerationRef.current) scheduleLinearRefreshIn(LINEAR_RETRY_MS);
+        throw e;
+      }
+    })().finally(() => {
+      linearRefreshInFlightRef.current = null;
+    });
+
+    linearRefreshInFlightRef.current = request;
+    return request;
+  }, [clearLinearTimer, scheduleLinearRefresh, scheduleLinearRefreshIn]);
+
+  useEffect(() => {
+    runScheduledLinearRefreshRef.current = () => {
+      // Failures are handled inside (retry scheduled, or token cleared on reconnect)
+      refreshLinearToken().catch(() => {});
+    };
+  }, [refreshLinearToken]);
+
   const loadLinearToken = async (userId: string) => {
     try {
       const { data, error } = await supabase
         .from('user_settings')
-        .select('linear_access_token')
+        .select('linear_access_token, linear_token_expires_at')
         .eq('id', userId)
         .single();
 
       if (error) throw error;
-      setLinearToken(data?.linear_access_token ?? null);
+      const token = data?.linear_access_token ?? null;
+      const expiresAt = data?.linear_token_expires_at ?? null;
+      if (token && expiresAt && new Date(expiresAt).getTime() - Date.now() < REFRESH_BUFFER_MS) {
+        try {
+          await refreshLinearToken();
+        } catch {
+          // Transient failure: keep the stored token; a retry is already scheduled
+          setLinearToken(token);
+        }
+      } else {
+        setLinearToken(token);
+        if (token) scheduleLinearRefresh(expiresAt);
+        else clearLinearTimer();
+      }
     } catch {
       setLinearToken(null);
     } finally {
@@ -140,10 +238,12 @@ export function useAuth() {
   }, []);
 
   const signOut = useCallback(async () => {
+    linearGenerationRef.current += 1;
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    clearLinearTimer();
     await supabase.auth.signOut();
     setLinearToken(null);
-  }, []);
+  }, [clearLinearTimer]);
 
   const saveLinearToken = useCallback(
     async (token: string) => {
@@ -159,12 +259,28 @@ export function useAuth() {
 
   const disconnectLinear = useCallback(async () => {
     if (!user) return;
-    await supabase
-      .from('user_settings')
-      .update({ linear_access_token: null, updated_at: new Date().toISOString() })
-      .eq('id', user.id);
+    linearGenerationRef.current += 1;
+    clearLinearTimer();
+    // The function revokes the token at Linear and deletes both the access token
+    // and the server-only refresh token.
+    let disconnected = false;
+    try {
+      const { data, error } = await supabase.functions.invoke('linear-token-refresh', {
+        body: { action: 'disconnect' },
+      });
+      disconnected = !error && data?.success === true;
+    } catch {
+      disconnected = false;
+    }
+    if (!disconnected) {
+      // Fallback: at least clear the access token the browser can see
+      await supabase
+        .from('user_settings')
+        .update({ linear_access_token: null, linear_token_expires_at: null, updated_at: new Date().toISOString() })
+        .eq('id', user.id);
+    }
     setLinearToken(null);
-  }, [user]);
+  }, [user, clearLinearTimer]);
 
   return {
     session,
@@ -176,6 +292,7 @@ export function useAuth() {
     signInWithGoogle,
     signOut,
     saveLinearToken,
+    refreshLinearToken,
     disconnectLinear,
   };
 }

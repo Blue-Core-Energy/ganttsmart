@@ -6,7 +6,7 @@ import Header from '@/components/Header';
 import LinearConnect from '@/components/LinearConnect';
 import Onboarding from '@/components/Onboarding';
 import StatsRow from '@/components/StatsRow';
-import ToastContainer from '@/components/Toast';
+import ToastContainer, { toastError } from '@/components/Toast';
 import DetailPanel, { setRemoveRelationHandler, setBaselinesForPanel } from '@/components/DetailPanel';
 import MilestonePanel, { setMilestoneDateHandler } from '@/components/MilestonePanel';
 import { useAuth } from '@/hooks/useAuth';
@@ -17,10 +17,12 @@ import { useTheme } from '@/hooks/useTheme';
 function GanttView({
   linearToken,
   onDisconnectLinear,
+  onLinearAuthError,
   onSignOut,
 }: {
   linearToken: string;
   onDisconnectLinear: () => void | Promise<void>;
+  onLinearAuthError: () => Promise<void>;
   onSignOut: () => void;
 }) {
   const { theme, setTheme } = useTheme();
@@ -60,7 +62,7 @@ function GanttView({
     createRelation,
     removeRelation,
     reorderTask,
-  } = useLinearData(linearToken, onDisconnectLinear);
+  } = useLinearData(linearToken, onLinearAuthError);
 
   // Planning history: track baselines and log changes
   const { baselines, syncBaselines, logChange, logStatusTransition } = usePlanningHistory(selectedProjectId);
@@ -219,7 +221,31 @@ function GanttView({
 }
 
 export default function App() {
-  const { user, loading, linearToken, signUp, signIn, signInWithGoogle, signOut, disconnectLinear } = useAuth();
+  const {
+    user,
+    loading,
+    linearToken,
+    signUp,
+    signIn,
+    signInWithGoogle,
+    signOut,
+    refreshLinearToken,
+    disconnectLinear,
+  } = useAuth();
+
+  // Linear rejected the access token: try a refresh first, and only disconnect
+  // if the server says the user has to reconnect. A transient refresh failure
+  // keeps the connection (a retry is scheduled in useAuth).
+  const handleLinearAuthError = useCallback(async () => {
+    let newToken: string | null;
+    try {
+      newToken = await refreshLinearToken();
+    } catch {
+      toastError('Could not refresh the Linear connection. Retrying shortly.');
+      return;
+    }
+    if (newToken === null) await disconnectLinear();
+  }, [refreshLinearToken, disconnectLinear]);
 
   // Initialize theme on app load (applies class to <html> even on auth pages)
   useTheme();
@@ -240,5 +266,12 @@ export default function App() {
     return <LinearConnect userEmail={user.email || ''} onSignOut={signOut} />;
   }
 
-  return <GanttView linearToken={linearToken} onDisconnectLinear={disconnectLinear} onSignOut={signOut} />;
+  return (
+    <GanttView
+      linearToken={linearToken}
+      onDisconnectLinear={disconnectLinear}
+      onLinearAuthError={handleLinearAuthError}
+      onSignOut={signOut}
+    />
+  );
 }

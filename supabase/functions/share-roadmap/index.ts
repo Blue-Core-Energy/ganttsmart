@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { getValidLinearToken } from "../_shared/linear-token.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
@@ -284,12 +285,12 @@ Deno.serve(async (req: Request) => {
       const days = Math.min(Math.max(1, body.expiresInDays || 3), MAX_EXPIRY_DAYS);
       const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
 
-      const { data: settings } = await supabase.from("user_settings").select("linear_access_token").eq("id", user.id).single();
-      if (!settings?.linear_access_token) return json({ error: "No Linear token. Connect Linear first." }, 400);
+      const linearToken = await getValidLinearToken(supabase, user.id);
+      if (!linearToken) return json({ error: "No Linear token. Connect Linear first." }, 400);
 
       let cachedData;
       try {
-        cachedData = await fetchLinearData(settings.linear_access_token, projectId);
+        cachedData = await fetchLinearData(linearToken, projectId);
       } catch (e) {
         return json({ error: "Failed to fetch Linear data: " + (e as Error).message }, 500);
       }
@@ -348,13 +349,9 @@ Deno.serve(async (req: Request) => {
       const ageMs = Date.now() - new Date(cachedAt).getTime();
       if (ageMs > STALE_TTL_MS) {
         try {
-          const { data: settings } = await supabase
-            .from("user_settings")
-            .select("linear_access_token")
-            .eq("id", share.owner_id)
-            .single();
-          if (settings?.linear_access_token) {
-            let fresh = await fetchLinearData(settings.linear_access_token, share.project_id);
+          const linearToken = await getValidLinearToken(supabase, share.owner_id);
+          if (linearToken) {
+            let fresh = await fetchLinearData(linearToken, share.project_id);
             fresh = withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder));
             const newCachedAt = new Date().toISOString();
             await supabase
@@ -395,15 +392,15 @@ Deno.serve(async (req: Request) => {
       const { data: share } = await supabase.from("shared_roadmaps").select("project_id, cached_data").eq("id", shareId).eq("owner_id", user.id).single();
       if (!share) return json({ error: "Share not found" }, 404);
 
-      const { data: settings } = await supabase.from("user_settings").select("linear_access_token").eq("id", user.id).single();
-      if (!settings?.linear_access_token) return json({ error: "No Linear token" }, 400);
+      const linearToken = await getValidLinearToken(supabase, user.id);
+      if (!linearToken) return json({ error: "No Linear token" }, 400);
 
       // Owner may send an updated order; otherwise keep the one stored with the share.
       const customOrder = body.customOrder !== undefined
         ? sanitizeCustomOrder(body.customOrder)
         : sanitizeCustomOrder(share.cached_data?.customOrder);
 
-      let cachedData = await fetchLinearData(settings.linear_access_token, share.project_id);
+      let cachedData = await fetchLinearData(linearToken, share.project_id);
       cachedData = withCustomOrder(cachedData, customOrder);
       await supabase.from("shared_roadmaps").update({ cached_data: cachedData, cached_at: new Date().toISOString() }).eq("id", shareId);
       return json({ success: true, cachedAt: new Date().toISOString() });
