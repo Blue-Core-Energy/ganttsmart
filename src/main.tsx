@@ -1,8 +1,9 @@
 import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import '@/index.css';
 import App from '@/App';
+import { backend } from '@/backend';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
 const Landing = lazy(() => import('@/pages/Landing'));
@@ -11,6 +12,8 @@ const NotFound = lazy(() => import('@/pages/NotFound'));
 const SharedView = lazy(() => import('@/pages/SharedView'));
 const PrivacyPolicy = lazy(() => import('@/pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('@/pages/TermsOfService'));
+
+const { capabilities } = backend;
 
 const Spinner = () => (
   <div className="fixed inset-0 bg-bg-primary flex items-center justify-center">
@@ -24,13 +27,20 @@ createRoot(document.getElementById('root')!).render(
       <ErrorBoundary>
         <Suspense fallback={<Spinner />}>
           <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/app" element={<App />} />
-          <Route path="/callback" element={<Callback />} />
-          <Route path="/share/:shareToken" element={<SharedView />} />
-          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-          <Route path="/terms-of-service" element={<TermsOfService />} />
-          <Route path="*" element={<NotFound />} />
+            {capabilities.marketingPages ? (
+              <>
+                <Route path="/" element={<Landing />} />
+                <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+                <Route path="/terms-of-service" element={<TermsOfService />} />
+              </>
+            ) : (
+              <Route path="/" element={<Navigate to="/app" replace />} />
+            )}
+            <Route path="/app" element={<App />} />
+            {/* Supabase's Linear OAuth redirect; the GCP server handles its own callback under /api */}
+            {backend.kind === 'supabase' && <Route path="/callback" element={<Callback />} />}
+            {capabilities.sharing && <Route path="/share/:shareToken" element={<SharedView />} />}
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </Suspense>
       </ErrorBoundary>

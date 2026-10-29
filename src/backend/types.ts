@@ -19,6 +19,8 @@ export interface AuthState {
   /** Opaque to callers; in GCP mode it is the literal 'server' when connected. */
   linearToken: string | null;
   linearError: string | null;
+  /** Without a user and password login: why, if not an expired session (null = the default message). */
+  signedOutMessage?: string | null;
   connectLinear(): void;
   refreshLinearToken(): Promise<string | null>;
   disconnectLinear(): Promise<void>;
@@ -51,7 +53,13 @@ export interface HistoryApi {
 
 export interface Backend {
   kind: 'supabase' | 'gcp';
-  capabilities: { sharing: boolean; passwordLogin: boolean; marketingPages: boolean };
+  capabilities: {
+    sharing: boolean;
+    passwordLogin: boolean;
+    marketingPages: boolean;
+    /** Whether the UI offers "Sign out". Absent means true. */
+    signOut?: boolean;
+  };
   useAuth(): AuthState;
   linearRequest(token: string, body: { query: string; variables?: Record<string, unknown> }): Promise<Response>;
   history: HistoryApi;

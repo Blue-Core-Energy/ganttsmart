@@ -1,10 +1,14 @@
+import { backend } from '@/backend';
+
 interface Props {
   userEmail: string;
+  /** Why the last connection attempt failed, if it did. */
+  error?: string | null;
   onConnect: () => void;
   onSignOut: () => void;
 }
 
-export default function LinearConnect({ userEmail, onConnect, onSignOut }: Props) {
+export default function LinearConnect({ userEmail, error, onConnect, onSignOut }: Props) {
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center z-200">
       <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[480px] w-full text-center">
@@ -15,6 +19,12 @@ export default function LinearConnect({ userEmail, onConnect, onSignOut }: Props
         <p className="text-[13px] text-text-secondary mb-8 leading-relaxed">
           Connect your Linear account to view and manage your project issues in a Gantt chart.
         </p>
+
+        {error && (
+          <p role="alert" className="text-[13px] text-urgent mb-4 leading-relaxed">
+            {error}
+          </p>
+        )}
 
         <button
           onClick={onConnect}
@@ -29,12 +39,14 @@ export default function LinearConnect({ userEmail, onConnect, onSignOut }: Props
           Connect Linear Account
         </button>
 
-        <button
-          onClick={onSignOut}
-          className="text-xs text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
-        >
-          Sign out
-        </button>
+        {backend.capabilities.signOut !== false && (
+          <button
+            onClick={onSignOut}
+            className="text-xs text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
+          >
+            Sign out
+          </button>
+        )}
       </div>
     </div>
   );
