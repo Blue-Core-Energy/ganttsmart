@@ -49,10 +49,42 @@ describe('apiFetch', () => {
     expect(await res.json()).toEqual(body);
   });
 
-  it('throws SessionExpiredError when fetch rejects with a TypeError', async () => {
-    fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
+  it('rethrows a network TypeError unchanged without notifying session-expiry listeners', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onSessionExpired(listener);
+    const networkError = new TypeError('Failed to fetch');
+    fetchMock.mockRejectedValue(networkError);
+
+    // Unchanged, so gql's "message includes 'fetch'" retry still fires
+    await expect(apiFetch('/api/me')).rejects.toBe(networkError);
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it('notifies session-expiry listeners for an opaque redirect and a non-reconnect 401', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onSessionExpired(listener);
+    const redirect = new Response(null, { status: 200 });
+    Object.defineProperty(redirect, 'type', { value: 'opaqueredirect' });
+    fetchMock.mockResolvedValueOnce(redirect).mockResolvedValueOnce(json(401, { error: 'unauthorized' }));
 
     await expect(apiFetch('/api/me')).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(listener).toHaveBeenCalledTimes(1);
+    await expect(apiFetch('/api/me')).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(listener).toHaveBeenCalledTimes(2);
+    unsubscribe();
+  });
+
+  it('does not notify session-expiry listeners for a reconnect 401', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onSessionExpired(listener);
+    fetchMock.mockResolvedValue(
+      json(401, { error: 'Linear authentication expired. Please reconnect.', reconnect: true }),
+    );
+
+    await apiFetch('/api/linear/graphql', { method: 'POST', body: '{}' });
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
   });
 
   it('rethrows other fetch rejections unchanged', async () => {

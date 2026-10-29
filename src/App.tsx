@@ -228,6 +228,7 @@ export default function App() {
     loading,
     linearToken,
     linearError,
+    signedOutMessage,
     connectLinear,
     signUp,
     signIn,
@@ -267,7 +268,7 @@ export default function App() {
     if (backend.capabilities.passwordLogin && signIn && signUp && signInWithGoogle) {
       return <AuthPage onSignIn={signIn} onSignUp={signUp} onGoogleSignIn={signInWithGoogle} />;
     }
-    return <SessionExpired />;
+    return <SessionExpired message={signedOutMessage ?? undefined} />;
   }
 
   if (!linearToken) {

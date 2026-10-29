@@ -35,19 +35,16 @@ async function isLinearReconnect(res: Response): Promise<boolean> {
  * fetch for the same-origin GanttSmart server behind IAP.
  *
  * IAP answers an expired session with a redirect to Google sign-in; with `redirect: 'manual'` that
- * shows up as an opaque redirect instead of a cross-origin request that fails CORS. That, a 401
- * from the server's identity check, or a network TypeError all throw SessionExpiredError. A 401
- * with `reconnect: true` is the Linear relay asking the user to reconnect Linear and is returned
- * unchanged (its body still readable), like every other response.
+ * shows up as an opaque redirect instead of a cross-origin request that fails CORS. That, or a
+ * 401 from the server's identity check, throws SessionExpiredError. A 401 with `reconnect: true`
+ * is the Linear relay asking the user to reconnect Linear and is returned unchanged (its body
+ * still readable), like every other response.
+ *
+ * fetch rejections (a network TypeError, an AbortError) are rethrown unchanged: they are transient,
+ * not an expired session, and gql retries errors whose message mentions "fetch".
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  let res: Response;
-  try {
-    res = await fetch(path, { ...init, credentials: 'same-origin', redirect: 'manual' });
-  } catch (e) {
-    if (e instanceof TypeError) throw expired();
-    throw e;
-  }
+  const res = await fetch(path, { ...init, credentials: 'same-origin', redirect: 'manual' });
   if (res.type === 'opaqueredirect') throw expired();
   if (res.status === 401 && !(await isLinearReconnect(res))) throw expired();
   return res;

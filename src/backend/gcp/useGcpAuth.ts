@@ -3,6 +3,7 @@ import { toastError } from '@/components/Toast';
 import type { AuthState } from '../types';
 import { getJson, onSessionExpired, postJson, SessionExpiredError } from './api';
 import { readLinearError } from './linearError';
+import { sessionErrorMessage } from './sessionError';
 
 /** Stands in for the Linear token: the real one never leaves the server. */
 const SERVER_TOKEN = 'server';
@@ -26,6 +27,7 @@ export function useGcpAuth(): AuthState {
   const [linearConnected, setLinearConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [linearError, setLinearError] = useState<string | null>(() => readLinearError(window.location.search));
+  const [signedOutMessage, setSignedOutMessage] = useState<string | null>(null);
 
   const applyMe = useCallback((me: Me) => {
     setEmail(me.email);
@@ -37,6 +39,7 @@ export function useGcpAuth(): AuthState {
 
     // Any API call that finds the session gone drops the user, which shows the SessionExpired screen
     const unsubscribe = onSessionExpired(() => {
+      setSignedOutMessage(null);
       setEmail(null);
       setLinearConnected(false);
     });
@@ -48,7 +51,8 @@ export function useGcpAuth(): AuthState {
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        if (!(e instanceof SessionExpiredError)) toastError(`Could not load your account: ${(e as Error).message}`);
+        // Only an expired session says so; a network error or 5xx says the server couldn't be reached
+        setSignedOutMessage(sessionErrorMessage(e));
         setEmail(null);
       })
       .finally(() => {
@@ -96,6 +100,7 @@ export function useGcpAuth(): AuthState {
     loading,
     linearToken: linearConnected ? SERVER_TOKEN : null,
     linearError,
+    signedOutMessage,
     connectLinear,
     refreshLinearToken,
     disconnectLinear,
