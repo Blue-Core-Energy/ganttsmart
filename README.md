@@ -126,6 +126,23 @@ ganttsmart/
 
 ---
 
+## Self-hosting on Google Cloud
+
+GanttSmart can also run entirely on Google Cloud, without Supabase: one Cloud Run container serves the app and a small Node API (`server/`), Firestore stores Linear connections and planning history, and Identity-Aware Proxy (IAP) restricts sign-in to one Google Workspace domain.
+
+The backend is chosen at build time with `VITE_BACKEND`:
+
+| Value | Behavior |
+|---|---|
+| `supabase` (default) | The setup described above: Supabase Auth, Edge Functions and Postgres |
+| `gcp` | Talks to the same-origin API in `server/`; no Supabase variables are needed. Share links and the in-app login screen are off |
+
+The container image (`Dockerfile`) builds with `VITE_BACKEND=gcp`, and `cloudbuild.yaml` redeploys it on every push to `main`. For the full step-by-step setup in Cloud Shell (project, Firestore, Linear OAuth app, load balancer, IAP, DNS and Cloud Build), see [docs/gcp-deployment.md](docs/gcp-deployment.md).
+
+For local development in GCP mode, run `npm run dev:server` with `DEV_USER_EMAIL` and the other variables read by `server/src/config.ts` set, alongside `VITE_BACKEND=gcp npm run dev`.
+
+---
+
 ## Keyboard Shortcuts
 
 | Key | Action |

@@ -1,0 +1,12 @@
+# Keep the build context small and free of local secrets.
+node_modules
+dist
+server-dist
+.env*
+.git
+.claude
+.superpowers
+supabase
+.idea
+.vite
+.netlify
