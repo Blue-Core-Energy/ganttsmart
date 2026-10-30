@@ -83,6 +83,8 @@ source ~/ganttsmart-vars.sh
 
 **If Cloud Shell disconnects or you open a new tab,** run `source ~/ganttsmart-vars.sh` before continuing. Steps 1 and 5 tell you how to fill in the two empty values.
 
+**Pasting commands:** paste one command (or one small group) at a time and read the output before moving on. Some commands stop to ask a question (for example "API not enabled, enable it? (y/N)"); if you pasted several lines at once, the next pasted line is taken as the answer and both commands are lost, and errors are easy to miss in a long scroll. If a command fails, fix it and re-run just that command.
+
 **Check:** `echo $PROJECT_ID $REGION $DOMAIN` prints your three values.
 
 ---
@@ -137,7 +139,9 @@ gcloud services enable \
   iam.googleapis.com
 ```
 
-**Check:** `gcloud services list --enabled` includes all eight.
+If it asks a question, answer `y`. If it prints an error, fix it and run it again; it's safe to re-run.
+
+**Check:** `gcloud services list --enabled` includes all eight. If one is missing, enable it on its own, e.g. `gcloud services enable firestore.googleapis.com`.
 
 ---
 
@@ -151,10 +155,14 @@ gcloud firestore databases create --database='(default)' --location=$REGION --ty
 
 The location can't be changed later. If `--edition` is rejected by your `gcloud` version, run the same command without `--edition=standard` (Standard is the default).
 
-Now apply the deny-all security rules from [`firestore.rules`](../firestore.rules) in this repo. They don't affect the app (server code isn't subject to security rules); they make sure no client SDK can ever get in. *Verify in console:* the exact menu names may differ slightly.
+If it says the Firestore API isn't enabled (or the console asks you to enable Firestore), enable it with `gcloud services enable firestore.googleapis.com` (or the console's **Enable** button), wait a minute, and run the create command again.
 
-1. Open <https://console.cloud.google.com/firestore/databases> (project `bluecore-ganttsmart` or yours), click **(default)**, then **Security rules** in the left menu.
-2. Replace everything in the editor with the contents of `firestore.rules`:
+**Security rules: check them, you normally don't need to edit them.** The app needs Firestore locked to everything except its own service account. That's what the rules in [`firestore.rules`](../firestore.rules) say (`allow read, write: if false;` for everything), and a newly created database normally already has exactly these locked rules. The server isn't affected by security rules; they only stop browsers and phones from reaching the database directly.
+
+1. Open <https://console.cloud.google.com/firestore/databases> (project `bluecore-ganttsmart` or yours) and click **(default)**. *Verify in console:* menu names can differ slightly.
+2. Open the rules view (labelled **Security rules** or **Rules**).
+3. If it shows `allow read, write: if false;` for `match /{document=**}`, you're done. Nothing to change.
+4. Only if it shows something else (for example `allow read, write: if true;`, or a rule with a date such as `request.time < timestamp.date(...)`): click into the editor, replace everything with the contents of `firestore.rules` below, and click **Publish**. If you can't find how to edit it, stop and ask for help. Don't continue with open rules.
 
    ```
    rules_version = '2';
@@ -167,9 +175,10 @@ Now apply the deny-all security rules from [`firestore.rules`](../firestore.rule
    }
    ```
 
-3. Click **Publish**.
+**Check:**
 
-**Check:** `gcloud firestore databases describe --database='(default)' --format='value(locationId,type)'` prints `us-west2 FIRESTORE_NATIVE`, and the Security rules page shows `allow read, write: if false;`.
+- `gcloud firestore databases describe --database='(default)' --format='value(locationId,type)'` prints `us-west2 FIRESTORE_NATIVE`.
+- The rules view shows `allow read, write: if false;`.
 
 ---
 
@@ -200,7 +209,15 @@ gcloud iam service-accounts add-iam-policy-binding $RUN_SA \
   --member=serviceAccount:$BUILD_SA --role=roles/iam.serviceAccountUser
 ```
 
+Run the repository command first and confirm it prints `Created repository [ganttsmart]` before running the rest.
+
 If `add-iam-policy-binding` asks about a condition, choose `None`.
+
+**If you run this step again,** `ALREADY_EXISTS` / "already exists" errors for the repository or service accounts are fine. Those were created the first time.
+
+**If `artifacts repositories add-iam-policy-binding` says `PERMISSION_DENIED`,** first check that the repository exists: `gcloud artifacts repositories describe ganttsmart --location=$REGION`. Artifact Registry reports a missing repository as "permission denied". If `describe` says `NOT_FOUND`, run the `repositories create` command again on its own, then the binding. If the repository does exist, your account lacks permission to change it; you need the **Owner** role on the project.
+
+**If a binding says the service account doesn't exist** right after you created it, wait a minute and run that command again. New accounts take a moment to appear everywhere.
 
 Why a separate build account: Google recommends running builds as your own service account with only the roles they need, instead of a broad default account ([Cloud Build default service account](https://cloud.google.com/build/docs/cloud-build-service-account), [user-specified service accounts](https://cloud.google.com/build/docs/securing-builds/configure-user-specified-service-accounts)).
 
@@ -210,9 +227,19 @@ Why a separate build account: Google recommends running builds as your own servi
 gcloud artifacts repositories list --location=$REGION
 gcloud iam service-accounts list
 gcloud projects get-iam-policy $PROJECT_ID --flatten=bindings --filter="bindings.members:ganttsmart-" --format="table(bindings.role,bindings.members)"
+gcloud artifacts repositories get-iam-policy ganttsmart --location=$REGION
+gcloud iam service-accounts get-iam-policy $RUN_SA
 ```
 
-You should see the `ganttsmart` repository, both service accounts, `roles/datastore.user` for `ganttsmart-run`, and `roles/run.developer` plus `roles/logging.logWriter` for `ganttsmart-build`.
+You should see:
+
+- The `ganttsmart` repository.
+- Both service accounts. Google's default compute account, and a `firebase-adminsdk` account if the project is linked to Firebase, may also be listed. Leave those alone.
+- `roles/datastore.user` for `ganttsmart-run`, and `roles/run.developer` plus `roles/logging.logWriter` for `ganttsmart-build`.
+- `ganttsmart-build` under `roles/artifactregistry.writer` on the repository.
+- `ganttsmart-build` under `roles/iam.serviceAccountUser` on `ganttsmart-run`.
+
+If any of these are missing, re-run just that command from above. The last two are only needed for automatic deploys in step 11, but a missing one fails there in a way that's hard to trace back here.
 
 ---
 
@@ -283,28 +310,29 @@ node --version
 npm ci
 ```
 
-If the repository is private, `git clone` asks you to sign in to GitHub: use your GitHub username and a [personal access token](https://github.com/settings/tokens) as the password.
+The fork is public (GitHub keeps forks of public repositories public), so `git clone` doesn't ask you to sign in. That's expected and safe: no secrets are in the repository. If you later move to a private repository, `git clone` will ask you to sign in: use your GitHub username and a [personal access token](https://github.com/settings/tokens) as the password.
 
-The Firestore emulator needs Java 21. Switch Cloud Shell to it ([Cloud Shell Java versions](https://cloud.google.com/shell/docs/how-cloud-shell-works), [emulator requirements](https://cloud.google.com/firestore/native/docs/emulator)):
+Install the Firestore emulator. Cloud Shell installs `gcloud` with the system package manager, so the emulator comes from `apt` too. The notice about Cloud Shell being ephemeral is normal; the command carries on after 5 seconds.
 
 ```bash
-sudo update-java-alternatives -s java-1.21.0-openjdk-amd64 && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-java -version
+sudo apt-get install -y google-cloud-cli-firestore-emulator
 ```
 
-Start the emulator. It keeps running, so leave this tab alone (answer `Y` if it offers to install the emulator component):
+Start the emulator. It keeps running, so leave this tab alone:
 
 ```bash
 gcloud emulators firestore start --host-port=localhost:8085
 ```
 
-If it instead says the component manager is disabled (Cloud Shell installs `gcloud` with the system package manager), install the emulator that way and run the start command again:
+Wait for `Dev App Server is now running`. A warning that support for Java 21 will be dropped is fine; the emulator still runs. Only if it fails to start because of Java, switch to the newest Java that Cloud Shell offers and start it again ([Cloud Shell Java versions](https://cloud.google.com/shell/docs/how-cloud-shell-works), [emulator requirements](https://cloud.google.com/firestore/native/docs/emulator)):
 
 ```bash
-sudo apt-get install google-cloud-cli-firestore-emulator
+update-java-alternatives --list          # shows the installed versions
+sudo update-java-alternatives -s java-1.21.0-openjdk-amd64 && export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+java -version
 ```
 
-Wait for `Dev App Server is now running`. Then open a **second Cloud Shell tab** (the `+` next to the tab name) and run:
+(Use the highest version from the list, e.g. 25, in both places if it's there.) Then open a **second Cloud Shell tab** (the `+` next to the tab name) and run:
 
 ```bash
 source ~/ganttsmart-vars.sh
