@@ -698,6 +698,8 @@ The image now ends in the 7-character commit hash of the latest `main`, the serv
 
 Do every check. Use a normal browser window for your Bluecore account and a private/incognito window for the outsider account.
 
+**On the [temporary run.app setup](#temporary-option-no-dns-access-yet):** use `$RUN_URL` wherever this list says `https://$DOMAIN` or `https://ganttsmart.bluecore.energy`. Skip the HTTP-to-HTTPS check and the "`.run.app` address is refused" check; on this setup the `.run.app` address *is* the app, protected by IAP, which the "stopped by IAP" check covers. Redo the whole list after switching to the domain.
+
 - [ ] **HTTP redirects to HTTPS.** `curl -sI http://$DOMAIN | head -3` shows `301` and `Location: https://ganttsmart.bluecore.energy:443/` (or without `:443`).
 - [ ] **Unauthenticated requests are stopped by IAP.** `curl -sI https://$DOMAIN/app | grep -iE '^(HTTP|location|x-goog-iap-generated-response)'` shows a `302` redirect to `accounts.google.com` (or a `401`) and `x-goog-iap-generated-response: true`, meaning IAP answered and the app was never reached.
 - [ ] **The `.run.app` address is refused.** `curl -s -o /dev/null -w '%{http_code}\n' $(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')/app` prints `404` or `403`, never `200`.
@@ -707,7 +709,7 @@ Do every check. Use a normal browser window for your Bluecore account and a priv
 - [ ] **Connecting Linear keeps the IAP session.** Click **Connect Linear**, approve in Linear, and you are sent back through `https://ganttsmart.bluecore.energy/api/linear/callback`. **Expected:** you land on `/app` connected, with your Linear projects loading. **Not expected:** a Google sign-in page, a sign-in loop, or an error banner. If you see either, note the exact URL and stop.
 - [ ] **Edit and reload.** Drag an issue's dates in the Gantt chart, confirm the change in Linear, then reload the page. The change is still there, and the issue's history panel shows the edit.
 - [ ] **Disconnect and reconnect.** Disconnect Linear in the app (it shows the connect prompt), then connect again; it works without errors.
-- [ ] **No errors in the logs.** `gcloud run services logs read $SERVICE --region=$REGION --limit=50` shows only the `IAP identity check failed` errors caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above, and no other `ERROR` lines.
+- [ ] **No errors in the logs.** `gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="ganttsmart" AND severity>=ERROR' --limit=20 --format='value(timestamp,jsonPayload.message,textPayload)'` shows only the `IAP identity check failed` errors caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above, and no other `ERROR` lines.
 - [ ] **Secret rotation works.** Do the rotation in [Rotate the Linear client secret](#rotate-the-linear-client-secret) once, then repeat the Linear connect check.
 
 ---
