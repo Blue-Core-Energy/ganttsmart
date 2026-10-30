@@ -684,9 +684,13 @@ gcloud builds triggers run ganttsmart-main --region=$REGION --branch=main
 gcloud builds list --region=$REGION --limit=1          # wait until STATUS is SUCCESS (about 5-10 minutes)
 gcloud run services describe $SERVICE --region=$REGION --format=yaml | grep -E 'image:|run.googleapis.com/ingress:|serviceAccountName:'
 gcloud run services describe $SERVICE --region=$REGION --format=yaml | grep -E -A1 'name: (APP_ORIGIN|IAP_AUDIENCE|LINEAR_CLIENT_SECRET)'
+gcloud run services describe $SERVICE --region=$REGION --format=yaml | grep -i 'iap-enabled'
 ```
 
-The image now ends in a 7-character commit hash instead of `:initial`, the service account and ingress are unchanged, and the three variables are still present. If ingress shows anything other than `internal-and-cloud-load-balancing`, run `gcloud run services update $SERVICE --region=$REGION --ingress=internal-and-cloud-load-balancing` and report it.
+The image now ends in the 7-character commit hash of the latest `main`, the service account is unchanged, and the three variables still have the values you set. Ingress and IAP depend on which setup you're on:
+
+- **Normal setup (IAP on the load balancer, step 10):** ingress `internal-and-cloud-load-balancing`, and no `iap-enabled: 'true'` line. If ingress shows anything else, run `gcloud run services update $SERVICE --region=$REGION --ingress=internal-and-cloud-load-balancing` and report it.
+- **[Temporary run.app setup](#temporary-option-no-dns-access-yet):** ingress `all` **and** `run.googleapis.com/iap-enabled: 'true'`. If the IAP line is missing, run `gcloud run services update $SERVICE --region=$REGION --ingress=internal-and-cloud-load-balancing` at once (that closes the `run.app` address), then `gcloud run services update $SERVICE --region=$REGION --iap`, and report it. Don't set ingress back to `all` until IAP shows as enabled again.
 
 ---
 
