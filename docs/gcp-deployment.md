@@ -518,6 +518,70 @@ The certificate moves from `PROVISIONING` to `ACTIVE`, usually within 15-60 minu
 
 ---
 
+## Temporary option: no DNS access yet
+
+If you can't add the DNS record yet (for example, nobody has the Namecheap login), you can run GanttSmart on the service's built-in address, `https://SERVICE-PROJECT_NUMBER.REGION.run.app` (the `Service URL` printed in step 7), with **IAP turned on directly on the Cloud Run service** instead of on the load balancer. It's still restricted to `@bluecore.energy` accounts: IAP on Cloud Run protects every way in, including the `run.app` address ([Configure IAP for Cloud Run](https://cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run)). The only downside is the unfriendly address. Skip steps 9 and 10 for now; the load balancer from step 8 just sits unused until you switch over (below).
+
+IAP can be on the load balancer **or** on the service, never both ([known limitations](https://cloud.google.com/run/docs/securing/identity-aware-proxy-cloud-run)). The app's IAP audience is different in each case ([signed headers](https://cloud.google.com/iap/docs/signed-headers-howto)): `/projects/PROJECT_NUMBER/locations/REGION/services/SERVICE_NAME` for Cloud Run.
+
+1. Do **10a** below (sign-in screen: Internal).
+2. In the Linear OAuth app, **add** a second callback URL (keep the existing one): `https://SERVICE-PROJECT_NUMBER.REGION.run.app/api/linear/callback`.
+3. In Cloud Shell, one command at a time, in this order (the service stays unreachable until the last command):
+
+```bash
+source ~/ganttsmart-vars.sh
+export RUN_URL=$(gcloud run services describe $SERVICE --region=$REGION --format='value(status.url)')
+echo $RUN_URL
+
+# IAP on the service (ingress is still internal-only at this point)
+gcloud run services update $SERVICE --region=$REGION --iap
+
+# Everyone at Bluecore may sign in
+gcloud iap web add-iam-policy-binding --resource-type=cloud-run --service=$SERVICE --region=$REGION \
+  --member=domain:bluecore.energy --role=roles/iap.httpsResourceAccessor
+
+# Point the app at the run.app address and the Cloud Run IAP audience
+gcloud run services update $SERVICE --region=$REGION \
+  --update-env-vars=APP_ORIGIN=$RUN_URL,LINEAR_REDIRECT_URI=$RUN_URL/api/linear/callback,IAP_AUDIENCE=/projects/$PROJECT_NUMBER/locations/$REGION/services/$SERVICE
+
+# Now let traffic reach it; IAP checks every request
+gcloud run services update $SERVICE --region=$REGION --ingress=all
+```
+
+If `echo $RUN_URL` prints a different-looking address (an older `…-xxxxxxxxxx-wl.a.run.app` form), use the `https://SERVICE-PROJECT_NUMBER.REGION.run.app` form printed by step 7 instead, and use it everywhere above (including Linear).
+
+**Check (before telling anyone the address):**
+
+```bash
+curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" $RUN_URL/app
+```
+
+It must print `302` with a redirect to `accounts.google.com` (IAP's sign-in). If it prints `200`, immediately run `gcloud run services update $SERVICE --region=$REGION --ingress=internal-and-cloud-load-balancing` and find out why before going on. Then, in a browser:
+
+- Your `@bluecore.energy` account: sign in, see the app, **Connect Linear**, land back on the app with your projects.
+- A private window signed in with a personal Gmail account: refused by IAP.
+
+Steps 11 (automatic deploys) and 12 (checklist, using `$RUN_URL` instead of `https://$DOMAIN`) work the same in this setup.
+
+### Switching to `ganttsmart.bluecore.energy` later
+
+1. Do step 9 (DNS) and wait until the certificate is `ACTIVE`.
+2. Take IAP off the service and close the `run.app` address again:
+   ```bash
+   gcloud run services update $SERVICE --region=$REGION --ingress=internal-and-cloud-load-balancing
+   gcloud run services update $SERVICE --region=$REGION --no-iap
+   ```
+3. Do step 10 (10b-10d) as written: IAP on the load balancer, audience `…/global/backendServices/…`.
+4. Point the app back at the domain:
+   ```bash
+   gcloud run services update $SERVICE --region=$REGION \
+     --update-env-vars=APP_ORIGIN=https://$DOMAIN,LINEAR_REDIRECT_URI=https://$DOMAIN/api/linear/callback
+   ```
+5. Remove the `run.app` callback URL from the Linear OAuth app, and tell people the new address. Everyone's Linear connection carries over (it's stored per Google account, not per address).
+6. Run step 12.
+
+---
+
 ## Step 10: Turn on IAP and set the app's IAP audience
 
 **What this does:** puts Google sign-in in front of the app, allows everyone with a `@bluecore.energy` account, and tells the app which IAP-signed header to trust.
