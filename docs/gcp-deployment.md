@@ -682,9 +682,10 @@ source ~/ganttsmart-vars.sh
 cd ~/ganttsmart && git pull
 TAG=$(git rev-parse --short HEAD)
 docker build -t $IMAGE:$TAG .
-docker push $IMAGE:$TAG
-gcloud run deploy $SERVICE --image=$IMAGE:$TAG --region=$REGION
+docker push $IMAGE:$TAG && gcloud run deploy $SERVICE --image=$IMAGE:$TAG --region=$REGION
 ```
+
+The `&&` makes the deploy run only if the upload succeeded. `docker push` from Cloud Shell sometimes fails with `connect: connection refused` (seen repeatedly during the first setup); just run the last line again after a minute (the image is still built). If a deploy runs without the image, it fails with `Image … not found`, harmlessly: the running revision is untouched, though it uses up a revision number. Automatic deploys (step 11) build inside Google's network and avoid this.
 
 Use only the flags shown: the `--set-env-vars`/`--set-secrets` flags from step 7 would *replace* settings, not add to them.
 
