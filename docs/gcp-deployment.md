@@ -360,6 +360,8 @@ docker build -t $IMAGE:initial .
 docker push $IMAGE:initial
 ```
 
+If `docker push` fails with `connect: connection refused`, it's a temporary network problem between Cloud Shell and Artifact Registry, not a permissions problem. Wait a minute and run `docker push $IMAGE:initial` again (no rebuild needed). If it keeps failing, restart Cloud Shell (⋮ → **Restart**), run `source ~/ganttsmart-vars.sh && cd ~/ganttsmart`, and build and push again.
+
 Create the service:
 
 ```bash
@@ -383,22 +385,35 @@ What the flags mean:
 
 Now let IAP call the service. With IAP on the load balancer's backend service, IAP calls Cloud Run as its own service agent, which needs the Cloud Run Invoker role ([Enable IAP for Cloud Run](https://cloud.google.com/iap/docs/enabling-cloud-run)):
 
+First create IAP's service agent. This is a `beta` command; if it asks to install the beta component, answer `y` (if it says the component manager is disabled, run `sudo apt-get install -y google-cloud-cli-beta` and try again):
+
 ```bash
-gcloud services identity create --service=iap.googleapis.com --project=$PROJECT_ID
+gcloud beta services identity create --service=iap.googleapis.com --project=$PROJECT_ID
+```
+
+It prints `Service identity created: service-…@gcp-sa-iap.iam.gserviceaccount.com`. Wait about 30 seconds for the new account to appear everywhere, then grant it the invoker role (if it says the account doesn't exist, wait another minute and run it again):
+
+```bash
 gcloud run services add-iam-policy-binding $SERVICE --region=$REGION \
   --member=serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com \
   --role=roles/run.invoker
 ```
+
+The `Service URL: https://ganttsmart-….run.app` printed by the deploy is locked: ingress refuses it and only IAP may invoke the service (step 12 checks this).
 
 **Check:**
 
 ```bash
 gcloud run services describe $SERVICE --region=$REGION --format=yaml | grep -E 'run.googleapis.com/ingress:|serviceAccountName:'
 gcloud run services get-iam-policy $SERVICE --region=$REGION
-gcloud run services logs read $SERVICE --region=$REGION --limit=20
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="ganttsmart" AND jsonPayload.mode:*' --limit=3 --format='value(timestamp,jsonPayload)'
 ```
 
-You should see `run.googleapis.com/ingress: internal-and-cloud-load-balancing` and `serviceAccountName: ganttsmart-run@…`; an IAM policy whose only `roles/run.invoker` member is `service-…@gcp-sa-iap.iam.gserviceaccount.com` (no `allUsers`); and a `server started` log line with `"mode":"iap"`.
+You should see:
+
+- `run.googleapis.com/ingress: internal-and-cloud-load-balancing` and `serviceAccountName: ganttsmart-run@…`.
+- An IAM policy whose only `roles/run.invoker` member is `service-…@gcp-sa-iap.iam.gserviceaccount.com` (no `allUsers`).
+- A startup log line `message=server started;mode=iap;port=8080;store=firestore`. (The server logs structured JSON, so `gcloud run services logs read` shows these lines as a bare timestamp; use `gcloud logging read` as above to see them.)
 
 ---
 
@@ -439,23 +454,20 @@ gcloud compute forwarding-rules create ganttsmart-https-rule \
   --address=ganttsmart-ip --target-https-proxy=ganttsmart-https-proxy --global --ports=443
 ```
 
-HTTP-to-HTTPS redirect on port 80, on the same IP:
+Run each numbered group separately; each should end with `Created [...]`. Note the IP printed by `echo $LB_IP`; step 9 needs it.
+
+HTTP-to-HTTPS redirect on port 80, on the same IP. Paste the `cat … EOF` block as one piece, then run the other commands one at a time:
 
 ```bash
 cat > /tmp/ganttsmart-http-redirect.yaml <<EOF
-kind: compute#urlMap
 name: ganttsmart-http-redirect
 defaultUrlRedirect:
   redirectResponseCode: MOVED_PERMANENTLY_DEFAULT
   httpsRedirect: true
-tests:
-- description: Redirects to HTTPS
-  host: $DOMAIN
-  path: /app
-  expectedOutputUrl: https://$DOMAIN/app
-  expectedRedirectResponseCode: 301
 EOF
-gcloud compute url-maps validate --source=/tmp/ganttsmart-http-redirect.yaml
+```
+
+```bash
 gcloud compute url-maps import ganttsmart-http-redirect --source=/tmp/ganttsmart-http-redirect.yaml --global --quiet
 gcloud compute target-http-proxies create ganttsmart-http-proxy --url-map=ganttsmart-http-redirect --global
 gcloud compute forwarding-rules create ganttsmart-http-rule \
@@ -463,7 +475,16 @@ gcloud compute forwarding-rules create ganttsmart-http-rule \
   --address=ganttsmart-ip --target-http-proxy=ganttsmart-http-proxy --global --ports=80
 ```
 
-**Check:** `gcloud compute forwarding-rules list --global` shows `ganttsmart-https-rule` (port 443) and `ganttsmart-http-rule` (port 80), both on `$LB_IP`. The certificate stays `PROVISIONING` until DNS is set up in the next step.
+The import should print `Creating URL map...done.` (A version of this file with an extra `tests:` self-check section was rejected by `gcloud` during the first real setup, so it's left out.)
+
+**Check:**
+
+```bash
+gcloud compute forwarding-rules list --global
+gcloud compute ssl-certificates describe ganttsmart-cert --global --format='value(managed.status,managed.domainStatus)'
+```
+
+You should see `ganttsmart-https-rule` and `ganttsmart-http-rule`, both on `$LB_IP`, and the certificate `PROVISIONING`. It stays that way until DNS is set up in the next step.
 
 ---
 
@@ -477,7 +498,14 @@ At Bluecore's DNS provider, in the `bluecore.energy` zone, add:
 |---|---|---|---|
 | `A` | `ganttsmart` | the IP from `echo $LB_IP` | 300 (or the provider's default) |
 
-Don't add an `AAAA` record. If a `CAA` record exists for `bluecore.energy`, it must allow `pki.goog` or Google can't issue the certificate ([Google-managed certificates](https://cloud.google.com/load-balancing/docs/ssl-certificates/google-managed-certs)).
+Don't add an `AAAA` record. If a `CAA` record exists for `bluecore.energy`, it must allow `pki.goog` or Google can't issue the certificate ([Google-managed certificates](https://cloud.google.com/load-balancing/docs/ssl-certificates/google-managed-certs)). (As of October 2026 `bluecore.energy` has no CAA record, so nothing to change.)
+
+**Bluecore's DNS is at Namecheap** (the name servers are `dns1/dns2.registrar-servers.com`; check with `dig +short NS bluecore.energy`). You need a login to the Namecheap account that holds the domain:
+
+1. Sign in to Namecheap → **Domain List** → **Manage** next to `bluecore.energy`.
+2. Open **Advanced DNS**. Under **Host Records**, click **Add New Record**.
+3. Choose **A Record**, **Host** `ganttsmart` (just that; Namecheap adds `.bluecore.energy`), **Value** the IP from `echo $LB_IP`, **TTL** `5 min` (or Automatic).
+4. Click the green ✓ to save. Don't change any other records (especially `MX`/`TXT` mail and verification records, and the `@`/`www` website records).
 
 **Check:**
 
@@ -642,6 +670,32 @@ Do this if the secret may have leaked, or on a regular schedule.
    ```
 
 People who were already connected stay connected: their stored Linear tokens don't depend on the client secret until their next token refresh, which uses the new secret automatically.
+
+---
+
+## Deploying a new version by hand
+
+Once step 11 is done, merging to `main` deploys automatically. Before that (or whenever you want to deploy without the trigger), build and deploy from Cloud Shell. This only changes the image; the service account, secret, environment variables and ingress set in step 7 (and the audience from step 10) are kept.
+
+```bash
+source ~/ganttsmart-vars.sh
+cd ~/ganttsmart && git pull
+TAG=$(git rev-parse --short HEAD)
+docker build -t $IMAGE:$TAG .
+docker push $IMAGE:$TAG
+gcloud run deploy $SERVICE --image=$IMAGE:$TAG --region=$REGION
+```
+
+Use only the flags shown: the `--set-env-vars`/`--set-secrets` flags from step 7 would *replace* settings, not add to them.
+
+**Check:**
+
+```bash
+gcloud run services describe $SERVICE --region=$REGION --format='value(status.latestReadyRevisionName,status.traffic)'
+gcloud run services describe $SERVICE --region=$REGION --format=yaml | grep -E 'IAP_AUDIENCE|LINEAR_CLIENT_ID|APP_ORIGIN|ingress:|serviceAccountName:'
+```
+
+The new revision serves 100% of traffic, and the settings are unchanged.
 
 ---
 
