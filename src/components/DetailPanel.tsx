@@ -9,13 +9,18 @@ import { isTaskDone } from '@/utils/tasks';
 import {
   closeDetailPanel,
   getDetailPanelBaselines,
+  getDetailPanelExternalEditState,
+  getDetailPanelProjectSelectHandler,
+  getDetailPanelTask,
   getRemoveRelationHandler,
   registerDetailPanelHandlers,
+  subscribeDetailPanelContext,
 } from './detailPanelStore';
 
 export default function DetailPanel() {
   const [task, setTask] = useState<Task | null>(null);
   const [visible, setVisible] = useState(false);
+  const [, setContextVersion] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,7 +35,9 @@ export default function DetailPanel() {
         setTimeout(() => setTask(null), 250); // Wait for slide-out animation
       },
     );
+    const unsubscribe = subscribeDetailPanelContext(() => setContextVersion((v) => v + 1));
     return () => {
+      unsubscribe();
       registerDetailPanelHandlers(null, null);
     };
   }, []);
@@ -63,15 +70,19 @@ export default function DetailPanel() {
 
   if (!task) return null;
 
-  const dueDate = new Date(task.due + 'T00:00:00');
+  const currentTask = getDetailPanelTask(task.id) ?? task;
+  const selectProject = getDetailPanelProjectSelectHandler();
+  const { allowExternalEdits, onToggleExternalEdits } = getDetailPanelExternalEditState();
+
+  const dueDate = new Date(currentTask.due + 'T00:00:00');
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const daysLeft = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-  const isDone = isTaskDone(task);
-  const overdue = !isDone && daysLeft < 0;
-  const desc = task.description ? stripMarkdown(task.description) : '';
-  const statusDotColor = statusDotColors[task.statusType] || '#52525b';
-  const priorityColor = priorityColors[task.priority] || '#52525b';
+  const isDone = isTaskDone(currentTask);
+  const overdue = !isDone && !currentTask.isUnscheduledExternal && daysLeft < 0;
+  const desc = currentTask.description ? stripMarkdown(currentTask.description) : '';
+  const statusDotColor = statusDotColors[currentTask.statusType] || '#52525b';
+  const priorityColor = priorityColors[currentTask.priority] || '#52525b';
 
   return (
     <>
@@ -93,7 +104,7 @@ export default function DetailPanel() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-primary shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-xs font-bold tracking-wide" style={{ color: priorityColor }}>
-              {task.id}
+              {currentTask.id}
             </span>
             <span className="text-[10px] text-text-muted">·</span>
             <span
@@ -104,12 +115,17 @@ export default function DetailPanel() {
                 border: `1px solid ${priorityColor}30`,
               }}
             >
-              {task.priority}
+              {currentTask.priority}
             </span>
+            {currentTask.isExternal && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/25 truncate max-w-[140px]">
+                {currentTask.projectName || 'External'}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1">
             <a
-              href={isSafeUrl(task.url) ? task.url : '#'}
+              href={isSafeUrl(currentTask.url) ? currentTask.url : '#'}
               target="_blank"
               rel="noopener noreferrer"
               className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-accent transition-colors"
@@ -152,9 +168,50 @@ export default function DetailPanel() {
 
         {/* Content — scrollable */}
         <div className="flex-1 overflow-y-auto">
+          {currentTask.isExternal && (
+            <div className="mx-5 mt-4 p-3 rounded-lg bg-accent/[0.06] border border-accent/20 flex flex-col gap-2">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="text-text-secondary font-medium">
+                  Cross-project issue ·{' '}
+                  <span className="text-text-primary font-semibold">{currentTask.projectName || 'No Project'}</span>
+                </span>
+                <span className="text-[10px] font-medium text-text-muted">
+                  {allowExternalEdits ? 'Write mode' : 'Read-only'}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {currentTask.projectId && selectProject && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      selectProject(currentTask.projectId!);
+                      closeDetailPanel();
+                    }}
+                    className="px-2.5 py-1 rounded-md bg-accent text-white text-[11px] font-medium hover:bg-accent-light transition-colors cursor-pointer"
+                  >
+                    Open {currentTask.projectName || 'project'}
+                  </button>
+                )}
+                {onToggleExternalEdits && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleExternalEdits(!allowExternalEdits)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors cursor-pointer ${
+                      allowExternalEdits
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-500'
+                        : 'bg-bg-card border-border-secondary text-text-secondary hover:text-text-primary'
+                    }`}
+                  >
+                    {allowExternalEdits ? 'Lock external edits' : 'Unlock editing'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Title section */}
           <div className="px-5 pt-5 pb-4">
-            <h2 className="text-base font-semibold text-text-primary leading-snug mb-4">{task.title}</h2>
+            <h2 className="text-base font-semibold text-text-primary leading-snug mb-4">{currentTask.title}</h2>
 
             {/* Metadata */}
             <div className="space-y-3">
@@ -163,7 +220,7 @@ export default function DetailPanel() {
                 <span className="text-xs text-text-muted">Status</span>
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-primary">
                   <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusDotColor }} />
-                  {task.status}
+                  {currentTask.status}
                 </span>
               </div>
 
@@ -178,7 +235,7 @@ export default function DetailPanel() {
                     border: `1px solid ${priorityColor}30`,
                   }}
                 >
-                  {task.priority}
+                  {currentTask.priority}
                 </span>
               </div>
 
@@ -186,50 +243,55 @@ export default function DetailPanel() {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Assignee</span>
                 <div className="flex items-center gap-2">
-                  <Avatar name={task.assignee} size="sm" />
-                  <span className="text-xs font-medium text-text-primary">{task.assignee}</span>
+                  <Avatar name={currentTask.assignee} size="sm" />
+                  <span className="text-xs font-medium text-text-primary">{currentTask.assignee}</span>
                 </div>
               </div>
 
               {/* Dates */}
-              {task.startDate && (
+              {currentTask.startDate && (
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-text-muted">Start Date</span>
                   <span className="text-xs font-medium text-text-primary tabular-nums">
-                    {formatDateShort(task.startDate)}
+                    {formatDateShort(currentTask.startDate)}
                   </span>
                 </div>
               )}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Due Date</span>
-                <span
-                  className="text-xs font-medium tabular-nums"
-                  style={{
-                    color: isDone
-                      ? 'var(--color-success)'
-                      : overdue
-                        ? 'var(--color-urgent)'
-                        : daysLeft <= 7
-                          ? 'var(--color-high)'
-                          : undefined,
-                  }}
-                >
-                  {formatDateShort(task.due)}
-                  <span className="ml-1.5 text-[11px]">
-                    ({isDone ? 'Completed' : overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
+                {currentTask.isUnscheduledExternal ? (
+                  <span className="text-xs font-medium text-text-muted italic">No due date</span>
+                ) : (
+                  <span
+                    className="text-xs font-medium tabular-nums"
+                    style={{
+                      color: isDone
+                        ? 'var(--color-success)'
+                        : overdue
+                          ? 'var(--color-urgent)'
+                          : daysLeft <= 7
+                            ? 'var(--color-high)'
+                            : undefined,
+                    }}
+                  >
+                    {formatDateShort(currentTask.due)}
+                    <span className="ml-1.5 text-[11px]">
+                      ({isDone ? 'Completed' : overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
+                    </span>
                   </span>
-                </span>
+                )}
               </div>
             </div>
 
             {/* Baseline drift */}
             {(() => {
-              const bl = getDetailPanelBaselines().get(task.id);
+              if (currentTask.isExternal) return null;
+              const bl = getDetailPanelBaselines().get(currentTask.id);
               if (!bl) return null;
-              const actualDue = new Date(task.due + 'T00:00:00');
+              const actualDue = new Date(currentTask.due + 'T00:00:00');
               const plannedDue = new Date(bl.planned_due + 'T00:00:00');
               const dueDrift = Math.round((actualDue.getTime() - plannedDue.getTime()) / 86400000);
-              const actualStart = task.startDate ? new Date(task.startDate + 'T00:00:00') : null;
+              const actualStart = currentTask.startDate ? new Date(currentTask.startDate + 'T00:00:00') : null;
               const plannedStart = bl.planned_start ? new Date(bl.planned_start + 'T00:00:00') : null;
               const startDrift =
                 actualStart && plannedStart
@@ -243,7 +305,7 @@ export default function DetailPanel() {
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-text-muted">Start</span>
                       <span style={{ color: startDrift > 0 ? 'var(--color-high)' : 'var(--color-accent)' }}>
-                        {formatDateShort(bl.planned_start!)} → {formatDateShort(task.startDate!)}
+                        {formatDateShort(bl.planned_start!)} → {formatDateShort(currentTask.startDate!)}
                         <span className="ml-1 font-semibold">
                           ({startDrift > 0 ? '+' : ''}
                           {startDrift}d)
@@ -255,7 +317,7 @@ export default function DetailPanel() {
                     <div className="flex items-center justify-between text-[11px]">
                       <span className="text-text-muted">Due</span>
                       <span style={{ color: dueDrift > 0 ? 'var(--color-high)' : 'var(--color-accent)' }}>
-                        {formatDateShort(bl.planned_due)} → {formatDateShort(task.due)}
+                        {formatDateShort(bl.planned_due)} → {formatDateShort(currentTask.due)}
                         <span className="ml-1 font-semibold">
                           ({dueDrift > 0 ? '+' : ''}
                           {dueDrift}d)
@@ -269,21 +331,21 @@ export default function DetailPanel() {
           </div>
 
           {/* Progress */}
-          {task.totalChildren > 0 && (
+          {currentTask.totalChildren > 0 && (
             <div className="px-5 pb-4">
               <div className="p-3 rounded-lg bg-bg-primary border border-border-primary">
                 <div className="flex items-center justify-between text-[11px] mb-2">
                   <span className="text-text-muted font-medium">Sub-issue Progress</span>
                   <span className="text-text-secondary font-semibold">
-                    {task.completedChildren}/{task.totalChildren} ({task.progress}%)
+                    {currentTask.completedChildren}/{currentTask.totalChildren} ({currentTask.progress}%)
                   </span>
                 </div>
                 <div className="h-2 rounded-full bg-border-primary overflow-hidden">
                   <div
                     className="h-full rounded-full transition-all"
                     style={{
-                      width: `${task.progress}%`,
-                      background: task.progress === 100 ? 'var(--color-success)' : 'var(--color-accent)',
+                      width: `${currentTask.progress}%`,
+                      background: currentTask.progress === 100 ? 'var(--color-success)' : 'var(--color-accent)',
                     }}
                   />
                 </div>
@@ -292,72 +354,128 @@ export default function DetailPanel() {
           )}
 
           {/* Dependencies */}
-          {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
+          {(currentTask.blocks.length > 0 || currentTask.blockedBy.length > 0) && (
             <div className="px-5 pb-4">
               <div className="text-[11px] font-medium text-text-muted mb-2">Dependencies</div>
               <div className="flex flex-wrap gap-1.5">
-                {task.blockedBy.map((blockerId) => (
-                  <span
-                    key={`by-${blockerId}`}
-                    className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-urgent/10 text-urgent border border-urgent/20 font-medium"
-                  >
-                    Blocked by {blockerId}
-                    {getRemoveRelationHandler() && (
-                      <button
-                        className="ml-0.5 p-0.5 rounded hover:bg-urgent/20 transition-colors cursor-pointer"
-                        title={`Remove dependency: ${blockerId} → ${task.id}`}
-                        onClick={() => {
-                          getRemoveRelationHandler()?.(blockerId, task.id);
-                          closeDetailPanel();
-                        }}
-                      >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
+                {currentTask.blockedBy.map((blockerId) => {
+                  const dep = getDetailPanelTask(blockerId);
+                  return (
+                    <span
+                      key={`by-${blockerId}`}
+                      title={
+                        dep
+                          ? `${dep.title}${dep.isExternal ? ` (${dep.projectName || 'External'})` : ''} · ${dep.isUnscheduledExternal ? 'No due date' : formatDateShort(dep.due)}`
+                          : undefined
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-urgent/10 text-urgent border border-urgent/20 font-medium"
+                    >
+                      Blocked by {blockerId}
+                      {dep?.isExternal && (
+                        <>
+                          {dep.projectId && selectProject ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                selectProject(dep.projectId!);
+                                closeDetailPanel();
+                              }}
+                              className="px-1 py-0.2 rounded bg-urgent/15 hover:bg-urgent/25 text-[10px] underline underline-offset-2 cursor-pointer"
+                              title={`Open ${dep.projectName} project`}
+                            >
+                              {dep.projectName}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] opacity-80">· {dep.projectName}</span>
+                          )}
+                          {dep.isUnscheduledExternal && <span className="text-[10px] opacity-75">(unscheduled)</span>}
+                        </>
+                      )}
+                      {getRemoveRelationHandler() && (
+                        <button
+                          className="ml-0.5 p-0.5 rounded hover:bg-urgent/20 transition-colors cursor-pointer"
+                          title={`Remove dependency: ${blockerId} → ${currentTask.id}`}
+                          onClick={() => {
+                            getRemoveRelationHandler()?.(blockerId, currentTask.id);
+                            closeDetailPanel();
+                          }}
                         >
-                          <line x1="18" y1="6" x2="6" y2="18" />
-                          <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
-                    )}
-                  </span>
-                ))}
-                {task.blocks.map((blockedId) => (
-                  <span
-                    key={`blocks-${blockedId}`}
-                    className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-high/10 text-high border border-high/20 font-medium"
-                  >
-                    Blocks {blockedId}
-                    {getRemoveRelationHandler() && (
-                      <button
-                        className="ml-0.5 p-0.5 rounded hover:bg-high/20 transition-colors cursor-pointer"
-                        title={`Remove dependency: ${task.id} → ${blockedId}`}
-                        onClick={() => {
-                          getRemoveRelationHandler()?.(task.id, blockedId);
-                          closeDetailPanel();
-                        }}
-                      >
-                        <svg
-                          width="10"
-                          height="10"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2.5"
-                          strokeLinecap="round"
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                          >
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+                {currentTask.blocks.map((blockedId) => {
+                  const dep = getDetailPanelTask(blockedId);
+                  return (
+                    <span
+                      key={`blocks-${blockedId}`}
+                      title={
+                        dep
+                          ? `${dep.title}${dep.isExternal ? ` (${dep.projectName || 'External'})` : ''} · ${dep.isUnscheduledExternal ? 'No due date' : formatDateShort(dep.due)}`
+                          : undefined
+                      }
+                      className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-high/10 text-high border border-high/20 font-medium"
+                    >
+                      Blocks {blockedId}
+                      {dep?.isExternal && (
+                        <>
+                          {dep.projectId && selectProject ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                selectProject(dep.projectId!);
+                                closeDetailPanel();
+                              }}
+                              className="px-1 py-0.2 rounded bg-high/15 hover:bg-high/25 text-[10px] underline underline-offset-2 cursor-pointer"
+                              title={`Open ${dep.projectName} project`}
+                            >
+                              {dep.projectName}
+                            </button>
+                          ) : (
+                            <span className="text-[10px] opacity-80">· {dep.projectName}</span>
+                          )}
+                          {dep.isUnscheduledExternal && <span className="text-[10px] opacity-75">(unscheduled)</span>}
+                        </>
+                      )}
+                      {getRemoveRelationHandler() && (
+                        <button
+                          className="ml-0.5 p-0.5 rounded hover:bg-high/20 transition-colors cursor-pointer"
+                          title={`Remove dependency: ${currentTask.id} → ${blockedId}`}
+                          onClick={() => {
+                            getRemoveRelationHandler()?.(currentTask.id, blockedId);
+                            closeDetailPanel();
+                          }}
                         >
-                          <line x1="18" y1="6" x2="6" y2="18" />
-                          <line x1="6" y1="6" x2="18" y2="18" />
-                        </svg>
-                      </button>
-                    )}
-                  </span>
-                ))}
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                          >
+                            <line x1="18" y1="6" x2="6" y2="18" />
+                            <line x1="6" y1="6" x2="18" y2="18" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
               </div>
             </div>
           )}

@@ -22,6 +22,14 @@ export interface Task {
   isDueImplicit?: boolean;
   /** Linear project milestone this issue belongs to, if any */
   milestoneId?: string | null;
+  /** Linear project UUID when known (populated for cross-project dependency tasks) */
+  projectId?: string | null;
+  /** Linear project name when task comes from another project */
+  projectName?: string | null;
+  /** True when rendered as a cross-project dependency ghost row */
+  isExternal?: boolean;
+  /** True when an external dependency has no explicit due date or project targetDate */
+  isUnscheduledExternal?: boolean;
 }
 
 export interface Project {

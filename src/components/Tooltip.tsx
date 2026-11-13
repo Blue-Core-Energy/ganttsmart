@@ -60,8 +60,15 @@ export default function Tooltip() {
       <div className="flex items-start gap-3 mb-3.5">
         <Avatar name={task.assignee} size="md" />
         <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold tracking-wide mb-0.5" style={{ color: priorityColor }}>
-            {task.id}
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <span className="text-[11px] font-semibold tracking-wide" style={{ color: priorityColor }}>
+              {task.id}
+            </span>
+            {task.isExternal && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/25">
+                {task.projectName || 'External'}
+              </span>
+            )}
           </div>
           <div className="text-sm font-semibold text-text-primary leading-snug truncate">{task.title}</div>
         </div>

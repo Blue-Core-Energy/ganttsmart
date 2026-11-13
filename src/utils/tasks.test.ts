@@ -230,6 +230,30 @@ describe('computeDepViolations', () => {
     });
     expect(computeDepViolations([activeBlocker, doneBlocked], today).size).toBe(0);
   });
+  it('flags cross-project violations and skips unscheduled external tasks', () => {
+    const extBlocker = makeTask({
+      id: 'CTRL-1',
+      due: '2026-05-12',
+      blocks: ['ENG-2'],
+      isExternal: true,
+    });
+    const localBlocked = makeTask({
+      id: 'ENG-2',
+      startDate: '2026-05-08',
+      due: '2026-05-15',
+      blockedBy: ['CTRL-1'],
+    });
+    const unscheduledExtBlocker = makeTask({
+      id: 'CTRL-9',
+      due: '2026-05-20',
+      blocks: ['ENG-2'],
+      isExternal: true,
+      isUnscheduledExternal: true,
+    });
+
+    const violations = computeDepViolations([extBlocker, localBlocked, unscheduledExtBlocker], today);
+    expect(violations.get('ENG-2')).toEqual(['CTRL-1']);
+  });
 });
 
 describe('computeTaskStats', () => {

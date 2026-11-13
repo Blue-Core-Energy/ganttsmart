@@ -27,6 +27,9 @@ interface Props {
   baselines?: Map<string, TaskBaseline>;
   dateFrom?: string;
   dateTo?: string;
+  externalTasksForViolations?: Task[];
+  allowExternalEdits?: boolean;
+  onSelectProject?: (projectId: string) => void;
 }
 
 export interface ColumnWidths {
@@ -89,6 +92,9 @@ export default function GanttChart({
   baselines,
   dateFrom,
   dateTo,
+  externalTasksForViolations,
+  allowExternalEdits = false,
+  onSelectProject,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
@@ -265,7 +271,21 @@ export default function GanttChart({
   }, [todayKey]); // recompute on a new calendar day
 
   // Detect dependency violations: blocked active task starts before active blocker is due
-  const depViolations = useMemo(() => computeDepViolations(tasks, today), [tasks, today]);
+  // Includes external tasks even when ghost rows are toggled off so local tasks still warn.
+  const depViolations = useMemo(() => {
+    if (!externalTasksForViolations || externalTasksForViolations.length === 0) {
+      return computeDepViolations(tasks, today);
+    }
+    const seen = new Set(tasks.map((t) => t.id));
+    const combined = [...tasks];
+    for (const ext of externalTasksForViolations) {
+      if (!seen.has(ext.id)) {
+        seen.add(ext.id);
+        combined.push(ext);
+      }
+    }
+    return computeDepViolations(combined, today);
+  }, [tasks, externalTasksForViolations, today]);
 
   const { chartStart, totalDays } = useMemo(() => {
     if (!tasks.length) return { chartStart: today, totalDays: 0 };
@@ -716,6 +736,8 @@ export default function GanttChart({
                 depViolations={depViolations}
                 baselines={baselines}
                 onReorder={onReorder}
+                allowExternalEdits={allowExternalEdits}
+                onSelectProject={onSelectProject}
               />
             ))}
           </tbody>
@@ -951,6 +973,8 @@ function GroupRows({
   depViolations,
   baselines,
   onReorder,
+  allowExternalEdits,
+  onSelectProject,
 }: {
   group: { key: string; label: string; tasks: Task[] };
   groupBy: GroupBy;
@@ -971,6 +995,8 @@ function GroupRows({
   depViolations?: Map<string, string[]>;
   baselines?: Map<string, TaskBaseline>;
   onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
+  allowExternalEdits?: boolean;
+  onSelectProject?: (projectId: string) => void;
 }) {
   return (
     <>
@@ -1021,6 +1047,8 @@ function GroupRows({
             depViolation={depViolations?.get(task.id)}
             baseline={baselines?.get(task.id)}
             onReorder={onReorder}
+            isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
+            onSelectProject={onSelectProject}
           />
         ))}
     </>

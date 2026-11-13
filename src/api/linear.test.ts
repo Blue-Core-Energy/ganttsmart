@@ -444,6 +444,193 @@ describe('fetchIssues', () => {
     expect(result.tasks).toEqual([]);
     expect(result.unscheduledTasks).toEqual([]);
   });
+
+  it('extracts cross-project dependencies from Query 2 without extra requests and deduplicates shared blockers', async () => {
+    const queries: string[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: { query: string }) => {
+      queries.push(body.query);
+      if (body.query.includes('project(id:')) {
+        return jsonResponse({
+          project: {
+            name: 'Commissioning',
+            startDate: '2026-05-01',
+            targetDate: '2026-06-01',
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                makeIssueNode({ id: 'uuid-1', identifier: 'COMM-1', title: 'Loop check', dueDate: '2026-05-20' }),
+                makeIssueNode({ id: 'uuid-2', identifier: 'COMM-2', title: 'Pressure test', dueDate: '2026-05-25' }),
+              ],
+            },
+            doneIssues: { nodes: [] },
+          },
+        });
+      }
+
+      return jsonResponse({
+        issues: {
+          nodes: [
+            {
+              id: 'uuid-1',
+              identifier: 'COMM-1',
+              relations: {
+                nodes: [
+                  {
+                    type: 'blocked_by',
+                    relatedIssue: {
+                      id: 'ext-ctrl-1',
+                      identifier: 'CTRL-42',
+                      title: 'Wire PLC panel',
+                      description: 'start: 02-05-26',
+                      dueDate: '2026-05-15',
+                      url: 'https://linear.app/test/CTRL-42',
+                      priority: 1,
+                      completedAt: null,
+                      canceledAt: null,
+                      state: { name: 'In Progress', type: 'started' },
+                      assignee: { name: 'Carol' },
+                      team: { id: 'team-ctrl' },
+                      project: { id: 'proj-ctrl', name: 'Controls', targetDate: '2026-05-30' },
+                    },
+                  },
+                  {
+                    // Same-project unscheduled/known issue should never be duplicated as external
+                    type: 'blocks',
+                    relatedIssue: {
+                      id: 'uuid-2',
+                      identifier: 'COMM-2',
+                      title: 'Pressure test',
+                      project: { id: 'proj-1', name: 'Commissioning', targetDate: '2026-06-01' },
+                    },
+                  },
+                ],
+              },
+              children: { nodes: [] },
+            },
+            {
+              id: 'uuid-2',
+              identifier: 'COMM-2',
+              relations: {
+                nodes: [
+                  {
+                    // Same external blocker linked to second local issue — deduplicated
+                    type: 'blocked_by',
+                    relatedIssue: {
+                      id: 'ext-ctrl-1',
+                      identifier: 'CTRL-42',
+                      title: 'Wire PLC panel',
+                      description: 'start: 02-05-26',
+                      dueDate: '2026-05-15',
+                      url: 'https://linear.app/test/CTRL-42',
+                      priority: 1,
+                      completedAt: null,
+                      canceledAt: null,
+                      state: { name: 'In Progress', type: 'started' },
+                      assignee: { name: 'Carol' },
+                      team: { id: 'team-ctrl' },
+                      project: { id: 'proj-ctrl', name: 'Controls', targetDate: '2026-05-30' },
+                    },
+                  },
+                  {
+                    // External issue with no dueDate falls back to its project.targetDate (isDueImplicit)
+                    type: 'blocks',
+                    relatedIssue: {
+                      id: 'ext-ops-1',
+                      identifier: 'OPS-7',
+                      title: 'Site handover',
+                      description: null,
+                      dueDate: null,
+                      url: 'https://linear.app/test/OPS-7',
+                      priority: 3,
+                      completedAt: null,
+                      canceledAt: null,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      assignee: null,
+                      team: { id: 'team-ops' },
+                      project: { id: 'proj-ops', name: 'Operations', targetDate: '2026-06-10' },
+                    },
+                  },
+                  {
+                    // Unscheduled external issue (no dueDate and no project targetDate)
+                    type: 'blocked_by',
+                    relatedIssue: {
+                      id: 'ext-unsched',
+                      identifier: 'CTRL-99',
+                      title: 'Undated sensor check',
+                      description: null,
+                      dueDate: null,
+                      url: 'https://linear.app/test/CTRL-99',
+                      priority: 4,
+                      completedAt: null,
+                      canceledAt: null,
+                      state: { name: 'Backlog', type: 'backlog' },
+                      assignee: null,
+                      team: { id: 'team-ctrl' },
+                      project: { id: 'proj-ctrl', name: 'Controls', targetDate: null },
+                    },
+                  },
+                  {
+                    // Canceled external issue should be ignored completely
+                    type: 'blocked_by',
+                    relatedIssue: {
+                      id: 'ext-canceled',
+                      identifier: 'CTRL-88',
+                      title: 'Canceled task',
+                      canceledAt: '2026-05-01T00:00:00Z',
+                      state: { name: 'Canceled', type: 'canceled' },
+                      project: { id: 'proj-ctrl', name: 'Controls', targetDate: '2026-05-30' },
+                    },
+                  },
+                ],
+              },
+              children: { nodes: [] },
+            },
+          ],
+        },
+      });
+    });
+
+    const result = await fetchIssues('tok', 'proj-1');
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+    expect(queries[1]).toContain('project {');
+
+    expect(result.externalTasks).toHaveLength(2);
+    expect(result.externalTasks[0]).toMatchObject({
+      id: 'CTRL-42',
+      uuid: 'ext-ctrl-1',
+      isExternal: true,
+      projectId: 'proj-ctrl',
+      projectName: 'Controls',
+      startDate: '2026-05-02',
+      due: '2026-05-15',
+      blocks: ['COMM-1', 'COMM-2'],
+      blockedBy: [],
+      teamId: 'team-ctrl',
+    });
+    expect(result.externalTasks[0].isDueImplicit).toBeUndefined();
+
+    expect(result.externalTasks[1]).toMatchObject({
+      id: 'OPS-7',
+      uuid: 'ext-ops-1',
+      isExternal: true,
+      projectId: 'proj-ops',
+      projectName: 'Operations',
+      due: '2026-06-10',
+      isDueImplicit: true,
+      blocks: [],
+      blockedBy: ['COMM-2'],
+    });
+
+    expect(result.externalUnscheduledTasks).toHaveLength(1);
+    expect(result.externalUnscheduledTasks[0]).toMatchObject({
+      id: 'CTRL-99',
+      isExternal: true,
+      isUnscheduledExternal: true,
+      projectName: 'Controls',
+      blocks: ['COMM-2'],
+    });
+    expect(result.tasks.find((t) => t.id === 'COMM-2')?.blockedBy).toEqual(['CTRL-42', 'CTRL-99']);
+  });
 });
 
 describe('resolveFeedbackTarget', () => {

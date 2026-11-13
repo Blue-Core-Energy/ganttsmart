@@ -32,6 +32,8 @@ interface Props {
   depViolation?: string[]; // list of blocker IDs whose schedule is violated
   baseline?: TaskBaseline;
   onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
+  isExternalReadOnly?: boolean;
+  onSelectProject?: (projectId: string) => void;
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
@@ -52,7 +54,13 @@ export default function GanttRow({
   depViolation,
   baseline,
   onReorder,
+  isExternalReadOnly = false,
+  onSelectProject,
 }: Props) {
+  const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
+  const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
+  const canCycleStatus = Boolean(onCycleStatus) && !isExternalReadOnly;
+  const canConnect = Boolean(onConnectStart) && !isExternalReadOnly;
   const isDone = isTaskDone(task);
   const pCls = priorityClass(task.priorityVal);
   const dueDate = useMemo(() => new Date(task.due + 'T00:00:00'), [task.due]);
@@ -375,10 +383,11 @@ export default function GanttRow({
       data-task-id={task.id}
       data-task-uuid={task.uuid}
       data-task-done={isDone ? 'true' : undefined}
-      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 border-l-transparent hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
+      data-external-task={task.isExternal ? 'true' : undefined}
+      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 ${task.isExternal ? 'border-l-accent/45 bg-bg-header/35' : 'border-l-transparent'} hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
       tabIndex={0}
       role="row"
-      aria-label={`${task.id}: ${task.title}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
+      aria-label={`${task.id}: ${task.title}${task.isExternal ? `, from ${task.projectName || 'External project'}` : ''}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
       draggable={rowDragEnabled}
       onDragStart={(e) => {
         if (!rowDragEnabled) {
@@ -424,7 +433,7 @@ export default function GanttRow({
           e.preventDefault();
           if (isSafeUrl(task.url)) window.open(task.url, '_blank', 'noopener,noreferrer');
         }
-        if (e.key === 's' && onCycleStatus) {
+        if (e.key === 's' && canCycleStatus && onCycleStatus) {
           if (targetEl?.closest('input, select, textarea')) return;
           e.preventDefault();
           onCycleStatus(task.uuid);
@@ -492,6 +501,29 @@ export default function GanttRow({
               >
                 {task.id}
               </a>
+              {task.isExternal &&
+                (task.projectId && onSelectProject ? (
+                  <button
+                    type="button"
+                    data-external-project-jump={task.projectId}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelectProject(task.projectId!);
+                    }}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
+                    title={`From ${task.projectName || 'External project'} — click to open project`}
+                  >
+                    <span className="truncate">{task.projectName || 'External'}</span>
+                  </button>
+                ) : (
+                  <span
+                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
+                    title={`External issue · ${task.projectName || 'No Project'}`}
+                  >
+                    {task.projectName || 'External'}
+                  </span>
+                ))}
               {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
                 <svg
                   width="10"
@@ -527,7 +559,7 @@ export default function GanttRow({
                 </span>
               )}
               {/* Status dot — clickable to cycle through workflow states when interactive */}
-              {onCycleStatus ? (
+              {canCycleStatus && onCycleStatus ? (
                 <button
                   type="button"
                   data-status-bubble={task.id}
@@ -550,9 +582,12 @@ export default function GanttRow({
                 </button>
               ) : (
                 <span
+                  data-status-bubble={task.id}
                   className="w-2 h-2 rounded-full shrink-0 ml-auto"
                   style={{ backgroundColor: statusDotColor }}
-                  title={task.status}
+                  title={
+                    task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status
+                  }
                 />
               )}
             </div>
@@ -653,7 +688,8 @@ export default function GanttRow({
             {/* Main bar */}
             <div
               data-task-bar={task.id}
-              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isDueImplicit ? 'opacity-75' : ''} ${onReschedule || onRescheduleStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
+              data-external-bar={task.isExternal ? 'true' : undefined}
+              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
                 left: 0,
                 width: displayBarWidth,
@@ -668,16 +704,22 @@ export default function GanttRow({
                     ? '0 2px 12px rgba(239,68,68,0.4)'
                     : barShadows[pCls],
                 overflow: 'hidden',
-                outline: task.isDueImplicit ? '1.5px dashed rgba(255,255,255,0.45)' : undefined,
-                outlineOffset: task.isDueImplicit ? '-3px' : undefined,
+                outline: task.isExternal
+                  ? '1.5px dashed rgba(255,255,255,0.6)'
+                  : task.isDueImplicit
+                    ? '1.5px dashed rgba(255,255,255,0.45)'
+                    : undefined,
+                outlineOffset: task.isExternal || task.isDueImplicit ? '-3px' : undefined,
               }}
               onClick={() => {
-                if (!didDragRef.current) openDetailPanel(task);
+                const wasDrag = didDragRef.current;
+                didDragRef.current = false;
+                if (!wasDrag || (!canDragDue && !canDragStart)) openDetailPanel(task);
               }}
-              onMouseDown={onReschedule || onRescheduleStart ? handleMoveStart : undefined}
+              onMouseDown={canDragDue || canDragStart ? handleMoveStart : undefined}
             >
               {/* Left drag handle (start date — works for setting new or editing existing) */}
-              {onRescheduleStart && (
+              {canDragStart && (
                 <div
                   className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-l-md"
                   onMouseDown={handleStartDragStart}
@@ -693,15 +735,38 @@ export default function GanttRow({
               {/* Label inside bar — task title at rest, drag feedback when dragging */}
               {!barIsNarrow && (
                 <span
-                  className="relative z-[1] whitespace-nowrap tracking-[0.01em] overflow-hidden text-ellipsis max-w-full pr-2"
+                  className="relative z-[1] whitespace-nowrap tracking-[0.01em] overflow-hidden text-ellipsis max-w-full pr-2 inline-flex items-center gap-1"
                   style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
-                  title={isAnyDrag ? undefined : task.title}
+                  title={
+                    isAnyDrag
+                      ? undefined
+                      : task.isExternal
+                        ? `${task.projectName || 'External'}: ${task.title}`
+                        : task.title
+                  }
                 >
-                  {isAnyDrag ? barLabel : isDone ? '✓ Done' : task.title}
+                  {task.isExternal && isExternalReadOnly && !isAnyDrag && (
+                    <svg
+                      width="9"
+                      height="9"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0 opacity-85"
+                      aria-hidden="true"
+                    >
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                      <path d="M7 11V7a5 5 0 0110 0v4" />
+                    </svg>
+                  )}
+                  <span className="truncate">{isAnyDrag ? barLabel : isDone ? '✓ Done' : task.title}</span>
                 </span>
               )}
 
-              {onReschedule && (
+              {canDragDue && (
                 <div
                   className="absolute right-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-r-md"
                   onMouseDown={handleDragStart}
@@ -711,7 +776,7 @@ export default function GanttRow({
             </div>
 
             {/* Connection dot — outside bar div to avoid overflow:hidden clipping */}
-            {onConnectStart && !isDone && (
+            {canConnect && !isDone && (
               <div
                 className="absolute w-[12px] h-[12px] rounded-full bg-accent border-2 border-bg-card opacity-0 group-hover/bar:opacity-100 cursor-crosshair z-[5] transition-opacity hover:scale-125 top-1/2 -translate-y-1/2"
                 style={{
@@ -720,7 +785,7 @@ export default function GanttRow({
                 onMouseDown={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  onConnectStart(task.id, e);
+                  onConnectStart?.(task.id, e);
                 }}
                 onClick={(e) => e.stopPropagation()}
                 title="Drag to another task to create a dependency"

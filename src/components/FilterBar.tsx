@@ -20,6 +20,11 @@ interface Props {
   hideProjectSelector?: boolean;
   showBaselines?: boolean;
   onShowBaselinesChange?: (show: boolean) => void;
+  externalCount?: number;
+  showExternal?: boolean;
+  onShowExternalChange?: (show: boolean) => void;
+  allowExternalEdits?: boolean;
+  onAllowExternalEditsChange?: (allow: boolean) => void;
 }
 
 const PRIORITY_CHIPS = [
@@ -147,6 +152,59 @@ function BaselineIcon() {
   );
 }
 
+function CrossProjectIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function LockIcon({ unlocked }: { unlocked?: boolean }) {
+  return unlocked ? (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 019.9-1" />
+    </svg>
+  ) : (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0110 0v4" />
+    </svg>
+  );
+}
+
 function CheckIcon() {
   return (
     <svg
@@ -197,6 +255,11 @@ export default function FilterBar({
   hideProjectSelector,
   showBaselines,
   onShowBaselinesChange,
+  externalCount = 0,
+  showExternal = true,
+  onShowExternalChange,
+  allowExternalEdits = false,
+  onAllowExternalEditsChange,
 }: Props) {
   const togglePriority = (val: number) => {
     const next = new Set(filters.priorities);
@@ -380,6 +443,50 @@ export default function FilterBar({
               <BaselineIcon />
               Plan vs Actual
             </button>
+          </>
+        )}
+
+        {/* Cross-project dependencies visibility + write mode */}
+        {onShowExternalChange && externalCount > 0 && (
+          <>
+            <div className="w-px h-5 bg-border-primary shrink-0" />
+            <button
+              type="button"
+              onClick={() => onShowExternalChange(!showExternal)}
+              aria-pressed={showExternal}
+              title={
+                showExternal ? 'Hide cross-project dependency ghost rows' : 'Show cross-project dependency ghost rows'
+              }
+              className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+                showExternal
+                  ? 'border-accent/60 text-accent bg-accent/10'
+                  : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
+              }`}
+            >
+              <CrossProjectIcon />
+              Cross-project
+              <span className="font-mono text-[10px] opacity-80">{externalCount}</span>
+            </button>
+            {showExternal && onAllowExternalEditsChange && (
+              <button
+                type="button"
+                onClick={() => onAllowExternalEditsChange(!allowExternalEdits)}
+                aria-pressed={allowExternalEdits}
+                title={
+                  allowExternalEdits
+                    ? 'External issues are editable — click to lock read-only'
+                    : 'External issues are read-only — click to enable inline editing'
+                }
+                className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+                  allowExternalEdits
+                    ? 'border-amber-500/60 text-amber-500 bg-amber-500/10'
+                    : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
+                }`}
+              >
+                <LockIcon unlocked={allowExternalEdits} />
+                {allowExternalEdits ? 'Editing external' : 'Edit external'}
+              </button>
+            )}
           </>
         )}
 

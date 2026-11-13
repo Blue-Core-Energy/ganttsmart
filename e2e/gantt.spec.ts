@@ -1830,4 +1830,291 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('renders cross-project dependency ghost rows inline, flags violations, supports reordering, write mode, and project jump', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const stateUpdates: Array<{ id: string; stateId: string }> = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string; stateId?: string; teamId?: string };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              projects: {
+                nodes: [
+                  { id: 'proj-1', name: 'Commissioning' },
+                  { id: 'proj-2', name: 'Controls' },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        const pid = payload?.variables?.id;
+        if (pid === 'proj-2') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                project: {
+                  name: 'Controls',
+                  startDate: isoOffsetDays(-5),
+                  targetDate: isoOffsetDays(20),
+                  projectMilestones: { nodes: [] },
+                  issues: {
+                    nodes: [
+                      {
+                        id: 'uuid-ctrl-42',
+                        identifier: 'CTRL-42',
+                        title: 'Wire PLC cabinet',
+                        description: `${startTagOffsetDays(-3)}\nPLC cabinet wiring`,
+                        dueDate: isoOffsetDays(6),
+                        url: 'https://linear.app/bluecoreenergy/issue/CTRL-42',
+                        priority: 1,
+                        state: { name: 'In Progress', type: 'started' },
+                        createdAt: '2026-01-01T00:00:00Z',
+                        completedAt: null,
+                        assignee: { name: 'Carol Vance' },
+                        team: { id: 'team-ctrl' },
+                        projectMilestone: null,
+                      },
+                    ],
+                  },
+                  doneIssues: { nodes: [] },
+                },
+              },
+            }),
+          });
+          return;
+        }
+
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Commissioning',
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-comm-1',
+                      identifier: 'COMM-101',
+                      title: 'Run commissioning loop check',
+                      description: `${startTagOffsetDays(2)}\nLoop check details`,
+                      dueDate: isoOffsetDays(10),
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-101',
+                      priority: 2,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-comm-1',
+                    identifier: 'COMM-101',
+                    relations: {
+                      nodes: [
+                        {
+                          type: 'blocked_by',
+                          relatedIssue: {
+                            id: 'uuid-ctrl-42',
+                            identifier: 'CTRL-42',
+                            title: 'Wire PLC cabinet',
+                            description: `${startTagOffsetDays(-3)}\nPLC cabinet wiring`,
+                            dueDate: isoOffsetDays(6),
+                            url: 'https://linear.app/bluecoreenergy/issue/CTRL-42',
+                            priority: 1,
+                            completedAt: null,
+                            canceledAt: null,
+                            state: { name: 'In Progress', type: 'started' },
+                            assignee: { name: 'Carol Vance' },
+                            team: { id: 'team-ctrl' },
+                            project: { id: 'proj-2', name: 'Controls', targetDate: isoOffsetDays(20) },
+                          },
+                        },
+                      ],
+                    },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        const teamId = payload?.variables?.teamId;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes:
+                  teamId === 'team-ctrl'
+                    ? [
+                        { id: 'ctrl-todo', name: 'Todo', type: 'unstarted', position: 0 },
+                        { id: 'ctrl-prog', name: 'In Progress', type: 'started', position: 1 },
+                        { id: 'ctrl-done', name: 'Done', type: 'completed', position: 2 },
+                      ]
+                    : [
+                        { id: 'comm-todo', name: 'Todo', type: 'unstarted', position: 0 },
+                        { id: 'comm-done', name: 'Done', type: 'completed', position: 1 },
+                      ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        stateUpdates.push({
+          id: String(payload?.variables?.id ?? ''),
+          stateId: String(payload?.variables?.stateId ?? ''),
+        });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    // 1. Ghost row CTRL-42 renders inline above blocked task COMM-101 with cross-project badge and SVG arrow
+    const rows = page.locator('#gantt-export-target tbody tr[data-task-id]');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toHaveAttribute('data-task-id', 'CTRL-42');
+    await expect(rows.nth(0)).toHaveAttribute('data-external-task', 'true');
+    await expect(rows.nth(1)).toHaveAttribute('data-task-id', 'COMM-101');
+
+    // FilterBar count stays scoped to current project's local tasks (1/1)
+    await expect(page.getByText('1/1')).toBeVisible();
+
+    // Cross-project SVG arrow connects CTRL-42 -> COMM-101 (flagged as violated because COMM-101 starts +2d <= CTRL-42 due +6d)
+    const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');
+    await expect(crossArrow).toHaveCount(1);
+    await expect(crossArrow).toHaveAttribute('data-cross-project', 'true');
+
+    // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
+    await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);
+    await expect(page.locator('span[data-status-bubble="CTRL-42"]')).toBeVisible();
+
+    // 3. Ghost row can be moved up and down like a normal row (Alt+ArrowDown)
+    await rows.nth(0).focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect(rows.nth(0)).toHaveAttribute('data-task-id', 'COMM-101');
+    await expect(rows.nth(1)).toHaveAttribute('data-task-id', 'CTRL-42');
+
+    // 4. Activating write mode ("Edit external") makes CTRL-42 directly editable inline
+    const editExternalBtn = page.getByRole('button', { name: 'Edit external' });
+    await editExternalBtn.click();
+    await expect(page.getByRole('button', { name: 'Editing external' })).toHaveAttribute('aria-pressed', 'true');
+
+    const ctrlBubbleBtn = page.locator('button[data-status-bubble="CTRL-42"]');
+    await expect(ctrlBubbleBtn).toBeVisible();
+    await ctrlBubbleBtn.click();
+    await expect(page.getByText('Status → Done')).toBeVisible();
+    expect(stateUpdates).toEqual([{ id: 'uuid-ctrl-42', stateId: 'ctrl-done' }]);
+
+    // Regression: dragging an external bar while unlocked and then locking must still allow opening DetailPanel on click
+    const ctrlBar = page.locator('[data-task-bar="CTRL-42"]');
+    const ctrlBarBox = await ctrlBar.boundingBox();
+    expect(ctrlBarBox).not.toBeNull();
+    await page.mouse.move(ctrlBarBox!.x + ctrlBarBox!.width / 2, ctrlBarBox!.y + ctrlBarBox!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(ctrlBarBox!.x + ctrlBarBox!.width / 2 + 12, ctrlBarBox!.y - 30);
+    await page.mouse.up();
+    await page.getByRole('button', { name: 'Editing external' }).click();
+    await expect(page.getByRole('button', { name: 'Edit external' })).toBeVisible();
+    await ctrlBar.click();
+    await expect(page.getByText('PLC cabinet wiring')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('PLC cabinet wiring')).toHaveCount(0);
+
+    // 5. Cross-project toggle hides and restores external ghost rows
+    const crossProjectToggle = page.getByRole('button', { name: /Cross-project/ });
+    await crossProjectToggle.click();
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toHaveCount(0);
+    await crossProjectToggle.click();
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toBeVisible();
+
+    // 6. Clicking the external project badge jumps directly to Controls (proj-2)
+    await page.locator('[data-external-project-jump="proj-2"]').click();
+    await expect(page).toHaveURL(/\/app\?project=proj-2$/);
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).not.toHaveAttribute('data-external-task', 'true');
+
+    expect(errors).toEqual([]);
+  });
 });
