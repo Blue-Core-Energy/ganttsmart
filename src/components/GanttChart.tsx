@@ -3,13 +3,13 @@ import type { GroupBy, Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
+import { computeDepViolations, groupTasks } from '@/utils/tasks';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
 import { openMilestonePanel } from './milestonePanelStore';
 
 interface Props {
   tasks: Task[];
-  doneTasks?: Task[];
   unscheduledTasks?: Task[];
   milestones: Milestone[];
   loading: boolean;
@@ -37,24 +37,6 @@ export interface ColumnWidths {
 
 const DEFAULT_WIDTHS: ColumnWidths = { task: 300, priority: 90, due: 78 };
 const MIN_WIDTHS: ColumnWidths = { task: 220, priority: 80, due: 70 };
-
-function groupTasks(tasks: Task[], groupBy: GroupBy): { key: string; label: string; tasks: Task[] }[] {
-  if (groupBy === 'none') return [{ key: '__all', label: '', tasks }];
-
-  const map = new Map<string, Task[]>();
-  for (const t of tasks) {
-    let key: string;
-    if (groupBy === 'assignee') key = t.assignee;
-    else if (groupBy === 'priority') key = t.priority;
-    else key = t.status;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(t);
-  }
-
-  return Array.from(map.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, tasks]) => ({ key, label: key, tasks }));
-}
 
 // Resize handle component
 function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
@@ -91,7 +73,6 @@ function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
 
 export default function GanttChart({
   tasks,
-  doneTasks = [],
   unscheduledTasks = [],
   milestones,
   loading,
@@ -110,7 +91,6 @@ export default function GanttChart({
   dateTo,
 }: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const [doneVisible, setDoneVisible] = useState(false);
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [colWidths, setColWidths] = useState<ColumnWidths>(DEFAULT_WIDTHS);
   const ganttRef = useRef<HTMLDivElement>(null);
@@ -284,38 +264,8 @@ export default function GanttChart({
     return d;
   }, [todayKey]); // recompute on a new calendar day
 
-  // Detect dependency violations: blocked task starts before blocker is due
-  const depViolations = useMemo(() => {
-    const violations = new Map<string, string[]>(); // blocked taskId → list of violated blocker IDs
-    const taskMap = new Map(tasks.map((t) => [t.id, t]));
-
-    const addViolation = (blockedId: string, blockerId: string) => {
-      if (!violations.has(blockedId)) violations.set(blockedId, []);
-      const list = violations.get(blockedId)!;
-      if (!list.includes(blockerId)) list.push(blockerId);
-    };
-
-    for (const task of tasks) {
-      // Check via blockedBy: does this task start before its blockers are due?
-      for (const blockerId of task.blockedBy) {
-        const blocker = taskMap.get(blockerId);
-        if (!blocker) continue;
-        const taskStart = task.startDate ? new Date(task.startDate + 'T00:00:00') : today;
-        const blockerDue = new Date(blocker.due + 'T00:00:00');
-        if (taskStart <= blockerDue) addViolation(task.id, blockerId);
-      }
-
-      // Check via blocks: do the tasks this one blocks start before this one is due?
-      for (const blockedId of task.blocks) {
-        const blocked = taskMap.get(blockedId);
-        if (!blocked) continue;
-        const blockedStart = blocked.startDate ? new Date(blocked.startDate + 'T00:00:00') : today;
-        const blockerDue = new Date(task.due + 'T00:00:00');
-        if (blockedStart <= blockerDue) addViolation(blockedId, task.id);
-      }
-    }
-    return violations;
-  }, [tasks, today]);
+  // Detect dependency violations: blocked active task starts before active blocker is due
+  const depViolations = useMemo(() => computeDepViolations(tasks, today), [tasks, today]);
 
   const { chartStart, totalDays } = useMemo(() => {
     if (!tasks.length) return { chartStart: today, totalDays: 0 };
@@ -430,13 +380,13 @@ export default function GanttChart({
   // Issues per milestone — powers the drawer's progress bar and issue list
   const issuesByMilestone = useMemo(() => {
     const map = new Map<string, Task[]>();
-    for (const t of [...tasks, ...doneTasks, ...unscheduledTasks]) {
+    for (const t of [...tasks, ...unscheduledTasks]) {
       if (!t.milestoneId) continue;
       if (!map.has(t.milestoneId)) map.set(t.milestoneId, []);
       map.get(t.milestoneId)!.push(t);
     }
     return map;
-  }, [tasks, doneTasks, unscheduledTasks]);
+  }, [tasks, unscheduledTasks]);
 
   // Drag a milestone horizontally to reschedule it; a click without movement opens the drawer.
   const handleMilestoneMouseDown = useCallback(
@@ -815,59 +765,6 @@ export default function GanttChart({
           />
         </svg>
       </div>
-
-      {/* Completed tasks section */}
-      {doneTasks.length > 0 && (
-        <div className="border-t border-border-primary">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 text-sm text-text-secondary hover:bg-bg-hover transition-colors"
-            onClick={() => setDoneVisible((v) => !v)}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{ transform: doneVisible ? 'rotate(90deg)' : 'rotate(0deg)' }}
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              <span className="font-medium">Completed</span>
-              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">{doneTasks.length}</span>
-            </div>
-            <span className="text-xs text-text-muted">{doneVisible ? 'Hide' : 'Show'}</span>
-          </button>
-
-          {doneVisible && (
-            <table
-              className="border-collapse opacity-60 hover:opacity-100 transition-opacity"
-              style={{ width: fixedColsWidth + totalDays * dayWidth }}
-            >
-              <tbody>
-                {doneTasks.map((task) => (
-                  <GanttRow
-                    key={task.id}
-                    task={task}
-                    chartStart={chartStart}
-                    totalDays={totalDays}
-                    today={today}
-                    dayWidth={dayWidth}
-                    timeScale={timeScale}
-                    colWidths={colWidths}
-                    isDone
-                  />
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
 
       {/* Unscheduled tasks section */}
       {unscheduledTasks.length > 0 && (

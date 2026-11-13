@@ -1,5 +1,6 @@
 import type { Task } from '@/types';
 import { isIgnoredTask } from '@/utils/issues';
+import { computeTaskStats } from '@/utils/tasks';
 
 interface Props {
   tasks: Task[];
@@ -77,30 +78,11 @@ function CheckIcon() {
   );
 }
 
-function computeSpan(tasks: Task[]): number {
-  const dates: number[] = [];
-  for (const t of tasks) {
-    if (t.startDate) {
-      const d = new Date(t.startDate + 'T00:00:00').getTime();
-      if (!Number.isNaN(d)) dates.push(d);
-    }
-    if (t.due) {
-      const d = new Date(t.due + 'T00:00:00').getTime();
-      if (!Number.isNaN(d)) dates.push(d);
-    }
-  }
-  if (dates.length < 2) return 0;
-  return Math.max(0, Math.round((Math.max(...dates) - Math.min(...dates)) / 86400000));
-}
-
 export default function StatsRow({ tasks }: Props) {
   const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
   if (!visibleTasks.length) return null;
 
-  const active = visibleTasks.filter((t) => t.statusType !== 'completed').length;
-  const inProgress = visibleTasks.filter((t) => t.statusType === 'started').length;
-  const completed = visibleTasks.filter((t) => t.statusType === 'completed').length;
-  const span = computeSpan(visibleTasks);
+  const { active, inProgress, completed, span } = computeTaskStats(visibleTasks);
 
   const cards = [
     {

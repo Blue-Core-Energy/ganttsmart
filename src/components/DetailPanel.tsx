@@ -5,6 +5,7 @@ import { isSafeUrl } from '@/utils/url';
 import { priorityColors, statusDotColors } from '@/utils/colors';
 import { formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
+import { isTaskDone } from '@/utils/tasks';
 import {
   closeDetailPanel,
   getDetailPanelBaselines,
@@ -66,7 +67,8 @@ export default function DetailPanel() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const daysLeft = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-  const overdue = daysLeft < 0;
+  const isDone = isTaskDone(task);
+  const overdue = !isDone && daysLeft < 0;
   const desc = task.description ? stripMarkdown(task.description) : '';
   const statusDotColor = statusDotColors[task.statusType] || '#52525b';
   const priorityColor = priorityColors[task.priority] || '#52525b';
@@ -202,11 +204,19 @@ export default function DetailPanel() {
                 <span className="text-xs text-text-muted">Due Date</span>
                 <span
                   className="text-xs font-medium tabular-nums"
-                  style={{ color: overdue ? 'var(--color-urgent)' : daysLeft <= 7 ? 'var(--color-high)' : undefined }}
+                  style={{
+                    color: isDone
+                      ? 'var(--color-success)'
+                      : overdue
+                        ? 'var(--color-urgent)'
+                        : daysLeft <= 7
+                          ? 'var(--color-high)'
+                          : undefined,
+                  }}
                 >
                   {formatDateShort(task.due)}
                   <span className="ml-1.5 text-[11px]">
-                    ({overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
+                    ({isDone ? 'Completed' : overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
                   </span>
                 </span>
               </div>

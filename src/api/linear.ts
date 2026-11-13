@@ -1,6 +1,7 @@
 import { backend } from '@/backend';
 import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
 import { isIgnoredIssueState, type IssueStateLike } from '@/utils/issues';
+import { sortTasks } from '@/utils/tasks';
 
 // ---- Rate limiter: debounce + queue ----
 let pendingRequests = 0;
@@ -162,7 +163,6 @@ export async function fetchIssues(
 ): Promise<{
   projectName: string;
   tasks: Task[];
-  doneTasks: Task[];
   unscheduledTasks: Task[];
   milestones: Milestone[];
 }> {
@@ -291,46 +291,15 @@ export async function fetchIssues(
     return null;
   }
 
-  // Query 2: fetch relations and children for ALL active issues (scheduled + unscheduled).
-  // We want relation/child counts on every issue so the unscheduled list shows them too.
-  const issueIds = issueNodes.map((n) => n.id);
+  // Query 2: fetch relations and children for all scheduled/unscheduled issues (active + completed).
+  // We want relation/child counts on every issue so dependencies and progress work across all tasks.
+  const issueIds = [...new Set([...issueNodes, ...doneIssueNodes].map((n) => n.id))];
 
   const relationsMap: Record<string, { blocks: string[]; blockedBy: string[] }> = {};
   const childrenMap: Record<string, { total: number; completed: number }> = {};
 
   if (issueIds.length > 0) {
     try {
-      const detailData = await gql(
-        apiKey,
-        `query($ids: [ID!]!) {
-          issues(filter: { id: { in: $ids } }) {
-            nodes {
-              id
-              identifier
-              relations {
-                nodes {
-                  type
-                  relatedIssue {
-                    identifier
-                    canceledAt
-                    state { name type }
-                  }
-                }
-              }
-              children {
-                nodes {
-                  id
-                  completedAt
-                  canceledAt
-                  state { name type }
-                }
-              }
-            }
-          }
-        }`,
-        { ids: issueIds },
-      );
-
       interface RelNode {
         type: string;
         relatedIssue: {
@@ -346,44 +315,78 @@ export async function fetchIssues(
         state?: IssueStateLike | null;
       }
 
-      const issues = detailData.issues as {
-        nodes: Array<{
-          id: string;
-          identifier: string;
-          relations?: { nodes: RelNode[] };
-          children?: { nodes: ChildNode[] };
-        }>;
-      };
+      for (let i = 0; i < issueIds.length; i += 250) {
+        const batchIds = issueIds.slice(i, i + 250);
+        const detailData = await gql(
+          apiKey,
+          `query($ids: [ID!]!) {
+            issues(first: 250, filter: { id: { in: $ids } }) {
+              nodes {
+                id
+                identifier
+                relations {
+                  nodes {
+                    type
+                    relatedIssue {
+                      identifier
+                      canceledAt
+                      state { name type }
+                    }
+                  }
+                }
+                children {
+                  nodes {
+                    id
+                    completedAt
+                    canceledAt
+                    state { name type }
+                  }
+                }
+              }
+            }
+          }`,
+          { ids: batchIds },
+        );
 
-      for (const node of issues.nodes) {
-        const identifier = node.identifier;
-        const relations = node.relations?.nodes || [];
-        const blocks: string[] = [];
-        const blockedBy: string[] = [];
-        for (const rel of relations) {
-          const relType = rel.type?.toLowerCase();
-          if (relType === 'duplicate') {
-            // Issue has an outgoing duplicate relation ("this issue is a duplicate of relatedIssue")
-            ignoredIdentifiers.add(identifier);
-            continue;
-          }
-          if (
-            ignoredIdentifiers.has(rel.relatedIssue.identifier) ||
-            isIgnoredIssueState(rel.relatedIssue.state, rel.relatedIssue.canceledAt)
-          ) {
-            ignoredIdentifiers.add(rel.relatedIssue.identifier);
-            continue;
-          }
-          if (relType === 'blocks') blocks.push(rel.relatedIssue.identifier);
-          else if (relType === 'blocked_by') blockedBy.push(rel.relatedIssue.identifier);
-        }
-        relationsMap[identifier] = { blocks, blockedBy };
-
-        const children = (node.children?.nodes || []).filter((c) => !isIgnoredIssueState(c.state, c.canceledAt));
-        childrenMap[identifier] = {
-          total: children.length,
-          completed: children.filter((c) => c.completedAt !== null).length,
+        const issues = detailData.issues as {
+          nodes: Array<{
+            id: string;
+            identifier: string;
+            relations?: { nodes: RelNode[] };
+            children?: { nodes: ChildNode[] };
+          }>;
         };
+
+        for (const node of issues.nodes) {
+          const identifier = node.identifier;
+          const relations = node.relations?.nodes || [];
+          const blocks: string[] = [];
+          const blockedBy: string[] = [];
+          for (const rel of relations) {
+            const relType = rel.type?.toLowerCase();
+            if (relType === 'duplicate') {
+              // Issue has an outgoing duplicate relation ("this issue is a duplicate of relatedIssue")
+              ignoredIdentifiers.add(identifier);
+              continue;
+            }
+            if (
+              ignoredIdentifiers.has(rel.relatedIssue.identifier) ||
+              isIgnoredIssueState(rel.relatedIssue.state, rel.relatedIssue.canceledAt)
+            ) {
+              ignoredIdentifiers.add(rel.relatedIssue.identifier);
+              continue;
+            }
+            if (relType === 'blocks') blocks.push(rel.relatedIssue.identifier);
+            else if (relType === 'blocked_by') blockedBy.push(rel.relatedIssue.identifier);
+          }
+          relationsMap[identifier] = { blocks, blockedBy };
+
+          const children = (node.children?.nodes || []).filter((c) => !isIgnoredIssueState(c.state, c.canceledAt));
+          childrenMap[identifier] = {
+            total: children.length,
+            completed: children.filter((c) => c.completedAt !== null).length,
+          };
+        }
       }
 
       // Remove references to any issues discovered to be duplicates in Query 2
@@ -400,6 +403,8 @@ export async function fetchIssues(
 
   const activeIssueNodes =
     ignoredIdentifiers.size > 0 ? issueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)) : issueNodes;
+  const activeDoneIssueNodes =
+    ignoredIdentifiers.size > 0 ? doneIssueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)) : doneIssueNodes;
 
   function mapNode(n: IssueNode, due: string, isDueImplicit: boolean): Task {
     const rel = relationsMap[n.identifier] || { blocks: [], blockedBy: [] };
@@ -431,10 +436,14 @@ export async function fetchIssues(
     };
   }
 
-  // Active issues: split into scheduled (have a due date or fallback) and unscheduled (no date at all).
+  // Unify active scheduled issues and completed scheduled issues into a single tasks list
+  // so completed work appears inline in context with remaining work.
   const tasks: Task[] = [];
   const unscheduledTasks: Task[] = [];
+  const seenUuids = new Set<string>();
+
   for (const n of activeIssueNodes) {
+    seenUuids.add(n.id);
     const eff = effectiveDue(n);
     if (eff) {
       tasks.push(mapNode(n, eff.date, eff.isImplicit));
@@ -446,20 +455,18 @@ export async function fetchIssues(
       unscheduledTasks.push(mapNode(n, todayStr, true));
     }
   }
-  tasks.sort((a, b) => a.priorityVal - b.priorityVal || new Date(a.due).getTime() - new Date(b.due).getTime());
-  unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
-  const doneTasks: Task[] = doneIssueNodes
-    .filter((n) => n.dueDate || projectTargetDate)
-    .map((n) => {
-      const eff = effectiveDue(n)!;
-      return mapNode(n, eff.date, eff.isImplicit);
-    })
-    .sort((a, b) => {
-      const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-      const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-      return bTime - aTime; // newest completed first
-    });
+  for (const n of activeDoneIssueNodes) {
+    if (seenUuids.has(n.id)) continue;
+    const eff = effectiveDue(n);
+    if (eff) {
+      seenUuids.add(n.id);
+      tasks.push(mapNode(n, eff.date, eff.isImplicit));
+    }
+  }
+
+  const sortedTasks = sortTasks(tasks);
+  unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
   const milestones: Milestone[] = (project.projectMilestones?.nodes || [])
     .map((m) => ({
@@ -479,7 +486,7 @@ export async function fetchIssues(
       return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
     });
 
-  return { projectName: project.name, tasks, doneTasks, unscheduledTasks, milestones };
+  return { projectName: project.name, tasks: sortedTasks, unscheduledTasks, milestones };
 }
 
 // ---- Mutations (with debouncing for drag operations) ----

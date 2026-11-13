@@ -728,4 +728,232 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('renders completed tasks inline with active tasks in one unified section', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Unified Roadmap' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Unified Roadmap',
+                startDate: isoOffsetDays(-14),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-active-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-active-2',
+                      identifier: 'ENG-102',
+                      title: 'Pressure test rig',
+                      description: `${startTagOffsetDays(1)}\nTest details`,
+                      dueDate: isoOffsetDays(9),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: {
+                  nodes: [
+                    {
+                      id: 'uuid-done-1',
+                      identifier: 'ENG-100',
+                      title: 'Finalize CAD model',
+                      description: `${startTagOffsetDays(-10)}\nCAD completed early`,
+                      dueDate: isoOffsetDays(-3),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-100',
+                      priority: 1,
+                      state: { name: 'Done', type: 'completed' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: '2026-01-05T12:00:00Z',
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-done-1',
+                    identifier: 'ENG-100',
+                    relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'ENG-101' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-active-1',
+                    identifier: 'ENG-101',
+                    relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-100' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-active-2',
+                    identifier: 'ENG-102',
+                    relations: { nodes: [] },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                  { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    // All 3 tasks (1 completed + 2 active) render in a single unified table with no separate Completed section
+    const exportTarget = page.locator('#gantt-export-target');
+    await expect(exportTarget.locator('table')).toHaveCount(1);
+    const rows = exportTarget.locator('tbody tr[data-task-id]');
+    await expect(rows).toHaveCount(3);
+    await expect(rows.nth(0)).toHaveAttribute('data-task-id', 'ENG-100');
+    await expect(rows.nth(1)).toHaveAttribute('data-task-id', 'ENG-101');
+    await expect(rows.nth(2)).toHaveAttribute('data-task-id', 'ENG-102');
+
+    // Completed task row and bar remain visually distinguishable inline
+    const doneRow = page.locator('tr[data-task-id="ENG-100"]');
+    await expect(doneRow).toHaveAttribute('data-task-done', 'true');
+    const doneBar = page.locator('[data-task-bar="ENG-100"]');
+    await expect(doneBar).toBeVisible();
+    await expect(doneBar).toHaveClass(/\bbar-done\b/);
+    await expect(doneBar).toContainText('✓ Done');
+
+    // StatsRow and FilterBar reflect unified counts (3/3 total, 1 completed)
+    await expect(page.getByText('3/3')).toBeVisible();
+    const completedStat = page
+      .locator('div')
+      .filter({ hasText: /^1Completed$/ })
+      .first();
+    await expect(completedStat).toBeVisible();
+
+    // Dependency arrow renders between completed blocker ENG-100 and active ENG-101
+    await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
+
+    // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
+    const countBox = await page.getByText('3/3').boundingBox();
+    expect(countBox).not.toBeNull();
+    expect(countBox!.x + countBox!.width).toBeLessThanOrEqual(1280);
+
+    // DetailPanel shows Completed (not overdue) for past-due completed tasks
+    await doneBar.click();
+    await expect(page.getByText('CAD completed early')).toBeVisible();
+    await expect(page.getByText('(Completed)')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    // Grouping by status places completed task in its own status group inside the same table
+    await page.getByRole('button', { name: 'No grouping' }).click();
+    await page.getByRole('option', { name: 'Group by status' }).click();
+    await expect(exportTarget.locator('table')).toHaveCount(1);
+    await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
+    await expect(exportTarget.getByText('Done').first()).toBeVisible();
+
+    // Reset grouping to none
+    await page.getByRole('button', { name: 'Group by status' }).click();
+    await page.getByRole('option', { name: 'No grouping' }).click();
+
+    // Completed filter toggle hides and restores completed tasks without a separate section
+    const completedToggle = page.getByRole('button', { name: 'Completed', exact: true });
+    await expect(completedToggle).toHaveAttribute('aria-pressed', 'true');
+    await completedToggle.click();
+    await expect(completedToggle).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('[data-task-bar="ENG-100"]')).toHaveCount(0);
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(page.getByText('2/3')).toBeVisible();
+    await expect(page.getByText('Completed hidden')).toBeVisible();
+
+    await completedToggle.click();
+    await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
+    await expect(page.getByText('3/3')).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
 });
