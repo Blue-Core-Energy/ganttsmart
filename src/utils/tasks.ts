@@ -100,11 +100,11 @@ export function computeDepViolations(tasks: Task[], today: Date): Map<string, st
   };
 
   for (const task of tasks) {
-    if (isTaskDone(task)) continue;
+    if (isTaskDone(task) || task.isUnscheduledExternal) continue;
 
     for (const blockerId of task.blockedBy) {
       const blocker = taskMap.get(blockerId);
-      if (!blocker || isTaskDone(blocker)) continue;
+      if (!blocker || isTaskDone(blocker) || blocker.isUnscheduledExternal) continue;
       const taskStart = task.startDate ? new Date(task.startDate + 'T00:00:00') : today;
       const blockerDue = new Date(blocker.due + 'T00:00:00');
       if (taskStart <= blockerDue) addViolation(task.id, blockerId);
@@ -112,7 +112,7 @@ export function computeDepViolations(tasks: Task[], today: Date): Map<string, st
 
     for (const blockedId of task.blocks) {
       const blocked = taskMap.get(blockedId);
-      if (!blocked || isTaskDone(blocked)) continue;
+      if (!blocked || isTaskDone(blocked) || blocked.isUnscheduledExternal) continue;
       const blockedStart = blocked.startDate ? new Date(blocked.startDate + 'T00:00:00') : today;
       const blockerDue = new Date(task.due + 'T00:00:00');
       if (blockedStart <= blockerDue) addViolation(blockedId, task.id);

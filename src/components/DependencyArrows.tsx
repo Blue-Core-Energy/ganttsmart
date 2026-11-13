@@ -15,13 +15,14 @@ interface Arrow {
   sourceId: string;
   targetId: string;
   violated: boolean;
+  crossProject: boolean;
 }
 
 function ArrowPath({ arrow: a }: { arrow: Arrow }) {
   const dx = a.toX - a.fromX;
   const dy = a.toY - a.fromY;
-  const color = a.violated ? '#f97316' : '#ef4444'; // amber for violated, red for normal
-  const markerId = a.violated ? 'dep-arrow-warn' : 'dep-arrow';
+  const color = a.violated ? '#f97316' : a.crossProject ? '#8b5cf6' : '#ef4444';
+  const markerId = a.violated ? 'dep-arrow-warn' : a.crossProject ? 'dep-arrow-cross' : 'dep-arrow';
 
   let path: string;
   if (Math.abs(dy) < 5 && dx > 0) {
@@ -44,9 +45,12 @@ function ArrowPath({ arrow: a }: { arrow: Arrow }) {
       fill="none"
       stroke={color}
       strokeWidth={a.violated ? 2 : 1.5}
-      strokeDasharray={a.violated ? '8 4' : '6 3'}
-      opacity={a.violated ? 0.8 : 0.6}
+      strokeDasharray={a.violated ? '8 4' : a.crossProject ? '4 3' : '6 3'}
+      opacity={a.violated ? 0.85 : 0.65}
       markerEnd={`url(#${markerId})`}
+      data-arrow-source={a.sourceId}
+      data-arrow-target={a.targetId}
+      data-cross-project={a.crossProject ? 'true' : undefined}
     />
   );
 }
@@ -60,6 +64,8 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
     if (!container) return;
 
     const containerRect = container.getBoundingClientRect();
+    const taskById = new Map(tasks.map((t) => [t.id, t]));
+    const seenEdges = new Set<string>();
     const newArrows: Arrow[] = [];
 
     for (const task of tasks) {
@@ -70,12 +76,18 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
       const fromRect = fromBar.getBoundingClientRect();
 
       for (const blockedId of task.blocks) {
+        const edgeKey = `${task.id}->${blockedId}`;
+        if (seenEdges.has(edgeKey)) continue;
+        seenEdges.add(edgeKey);
+
         const toBar = container.querySelector(`[data-task-bar="${blockedId}"]`) as HTMLElement | null;
         if (!toBar) continue;
         const toRect = toBar.getBoundingClientRect();
 
         // Check if this specific dependency is violated (blocked task starts before blocker is due)
         const violated = depViolations?.get(blockedId)?.includes(task.id) ?? false;
+        const targetTask = taskById.get(blockedId);
+        const crossProject = Boolean(task.isExternal || targetTask?.isExternal);
 
         newArrows.push({
           fromX: fromRect.right - containerRect.left,
@@ -85,6 +97,7 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
           sourceId: task.id,
           targetId: blockedId,
           violated,
+          crossProject,
         });
       }
     }
@@ -126,6 +139,9 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
         </marker>
         <marker id="dep-arrow-warn" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
           <polygon points="0 0, 8 3, 0 6" fill="#f97316" opacity="0.9" />
+        </marker>
+        <marker id="dep-arrow-cross" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#8b5cf6" opacity="0.85" />
         </marker>
       </defs>
       {arrows.map((a) => (

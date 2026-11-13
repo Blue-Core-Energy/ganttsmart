@@ -189,6 +189,8 @@ export async function fetchIssues(
   projectName: string;
   tasks: Task[];
   unscheduledTasks: Task[];
+  externalTasks: Task[];
+  externalUnscheduledTasks: Task[];
   milestones: Milestone[];
 }> {
   const data = await gql(
@@ -318,19 +320,52 @@ export async function fetchIssues(
 
   // Query 2: fetch relations and children for all scheduled/unscheduled issues (active + completed).
   // We want relation/child counts on every issue so dependencies and progress work across all tasks.
+  // Also collect full metadata for cross-project related issues in the same query (zero extra requests).
   const issueIds = [...new Set([...issueNodes, ...doneIssueNodes].map((n) => n.id))];
+  const localIssueUuids = new Set(issueIds);
 
   const relationsMap: Record<string, { blocks: string[]; blockedBy: string[] }> = {};
   const childrenMap: Record<string, { total: number; completed: number }> = {};
+
+  interface ExternalCandidate {
+    node: {
+      id: string;
+      identifier: string;
+      title: string;
+      description?: string | null;
+      dueDate?: string | null;
+      url?: string;
+      priority?: number;
+      completedAt?: string | null;
+      canceledAt?: string | null;
+      state?: { name?: string | null; type?: string | null } | null;
+      assignee?: { name: string } | null;
+      team?: { id: string } | null;
+      project?: { id: string; name: string; targetDate?: string | null } | null;
+    };
+    blocksLocalIds: Set<string>;
+    blockedByLocalIds: Set<string>;
+  }
+  const externalCandidates = new Map<string, ExternalCandidate>();
 
   if (issueIds.length > 0) {
     try {
       interface RelNode {
         type: string;
         relatedIssue: {
+          id?: string;
           identifier: string;
+          title?: string;
+          description?: string | null;
+          dueDate?: string | null;
+          url?: string;
+          priority?: number;
+          completedAt?: string | null;
           canceledAt?: string | null;
           state?: IssueStateLike | null;
+          assignee?: { name: string } | null;
+          team?: { id: string } | null;
+          project?: { id: string; name: string; targetDate?: string | null } | null;
         };
       }
       interface ChildNode {
@@ -353,9 +388,23 @@ export async function fetchIssues(
                   nodes {
                     type
                     relatedIssue {
+                      id
                       identifier
+                      title
+                      description
+                      dueDate
+                      url
+                      priority
+                      completedAt
                       canceledAt
                       state { name type }
+                      assignee { name }
+                      team { id }
+                      project {
+                        id
+                        name
+                        targetDate
+                      }
                     }
                   }
                 }
@@ -403,6 +452,45 @@ export async function fetchIssues(
             }
             if (relType === 'blocks') blocks.push(rel.relatedIssue.identifier);
             else if (relType === 'blocked_by') blockedBy.push(rel.relatedIssue.identifier);
+
+            if (
+              (relType === 'blocks' || relType === 'blocked_by') &&
+              rel.relatedIssue.id &&
+              typeof rel.relatedIssue.title === 'string' &&
+              !localIssueUuids.has(rel.relatedIssue.id) &&
+              rel.relatedIssue.project?.id !== projectId
+            ) {
+              let entry = externalCandidates.get(rel.relatedIssue.id);
+              if (!entry) {
+                entry = {
+                  node: {
+                    id: rel.relatedIssue.id,
+                    identifier: rel.relatedIssue.identifier,
+                    title: rel.relatedIssue.title,
+                    description: rel.relatedIssue.description,
+                    dueDate: rel.relatedIssue.dueDate,
+                    url: rel.relatedIssue.url,
+                    priority: rel.relatedIssue.priority,
+                    completedAt: rel.relatedIssue.completedAt,
+                    canceledAt: rel.relatedIssue.canceledAt,
+                    state: rel.relatedIssue.state,
+                    assignee: rel.relatedIssue.assignee,
+                    team: rel.relatedIssue.team,
+                    project: rel.relatedIssue.project,
+                  },
+                  blocksLocalIds: new Set<string>(),
+                  blockedByLocalIds: new Set<string>(),
+                };
+                externalCandidates.set(rel.relatedIssue.id, entry);
+              }
+              if (relType === 'blocked_by') {
+                // Local issue is blocked by this external issue -> external blocks local
+                entry.blocksLocalIds.add(identifier);
+              } else {
+                // Local issue blocks this external issue -> external is blocked by local
+                entry.blockedByLocalIds.add(identifier);
+              }
+            }
           }
           relationsMap[identifier] = { blocks, blockedBy };
 
@@ -419,6 +507,19 @@ export async function fetchIssues(
         for (const rel of Object.values(relationsMap)) {
           rel.blocks = rel.blocks.filter((id) => !ignoredIdentifiers.has(id));
           rel.blockedBy = rel.blockedBy.filter((id) => !ignoredIdentifiers.has(id));
+        }
+        for (const [extUuid, entry] of externalCandidates.entries()) {
+          if (ignoredIdentifiers.has(entry.node.identifier)) {
+            externalCandidates.delete(extUuid);
+            continue;
+          }
+          for (const ignoredId of ignoredIdentifiers) {
+            entry.blocksLocalIds.delete(ignoredId);
+            entry.blockedByLocalIds.delete(ignoredId);
+          }
+          if (entry.blocksLocalIds.size === 0 && entry.blockedByLocalIds.size === 0) {
+            externalCandidates.delete(extUuid);
+          }
         }
       }
     } catch {
@@ -493,6 +594,59 @@ export async function fetchIssues(
   const sortedTasks = sortTasks(tasks);
   unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const externalTasks: Task[] = [];
+  const externalUnscheduledTasks: Task[] = [];
+
+  for (const entry of externalCandidates.values()) {
+    const ext = entry.node;
+    if (seenUuids.has(ext.id) || ignoredIdentifiers.has(ext.identifier)) continue;
+
+    const extTargetDate = ext.project?.targetDate || null;
+    const due = ext.dueDate || extTargetDate || todayStr;
+    const isDueImplicit = !ext.dueDate;
+    const isUnscheduledExternal = !ext.dueDate && !extTargetDate;
+    const priorityVal = typeof ext.priority === 'number' ? ext.priority : 0;
+
+    const extTask: Task = {
+      id: ext.identifier,
+      uuid: ext.id,
+      title: ext.title,
+      description: ext.description || '',
+      due,
+      startDate: parseStartDate(ext.description || ''),
+      url: ext.url || '',
+      priorityVal,
+      priority: PRIORITY_MAP[priorityVal] || 'None',
+      status: ext.state?.name || '',
+      statusType: ext.state?.type || '',
+      assignee: ext.assignee?.name || 'Unassigned',
+      teamId: ext.team?.id || '',
+      blocks: [...entry.blocksLocalIds],
+      blockedBy: [...entry.blockedByLocalIds],
+      progress: 0,
+      totalChildren: 0,
+      completedChildren: 0,
+      completedAt: ext.completedAt || undefined,
+      isDueImplicit: isDueImplicit || undefined,
+      milestoneId: null,
+      projectId: ext.project?.id ?? null,
+      projectName: ext.project?.name || 'No Project',
+      isExternal: true,
+      isUnscheduledExternal: isUnscheduledExternal || undefined,
+    };
+
+    if (isUnscheduledExternal) {
+      externalUnscheduledTasks.push(extTask);
+    } else {
+      externalTasks.push(extTask);
+    }
+  }
+
+  const sortedExternalTasks = sortTasks(externalTasks);
+  externalUnscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
+
   const milestones: Milestone[] = (project.projectMilestones?.nodes || [])
     .map((m) => ({
       id: m.id,
@@ -511,7 +665,14 @@ export async function fetchIssues(
       return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
     });
 
-  return { projectName: project.name, tasks: sortedTasks, unscheduledTasks, milestones };
+  return {
+    projectName: project.name,
+    tasks: sortedTasks,
+    unscheduledTasks,
+    externalTasks: sortedExternalTasks,
+    externalUnscheduledTasks,
+    milestones,
+  };
 }
 
 // ---- Mutations (with debouncing for drag operations) ----

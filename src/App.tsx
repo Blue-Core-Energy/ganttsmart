@@ -11,7 +11,13 @@ import SessionExpired from '@/components/SessionExpired';
 import ToastContainer from '@/components/Toast';
 import { toastError } from '@/components/toastStore';
 import DetailPanel from '@/components/DetailPanel';
-import { setBaselinesForPanel, setRemoveRelationHandler } from '@/components/detailPanelStore';
+import {
+  setBaselinesForPanel,
+  setDetailPanelExternalEditState,
+  setDetailPanelProjectSelectHandler,
+  setDetailPanelTaskMap,
+  setRemoveRelationHandler,
+} from '@/components/detailPanelStore';
 import MilestonePanel from '@/components/MilestonePanel';
 import { setMilestoneDateHandler } from '@/components/milestonePanelStore';
 import { backend } from '@/backend';
@@ -61,7 +67,14 @@ function GanttView({
     addProjectLinkToLinear,
     tasks,
     unscheduledTasks,
+    externalTasks,
     filteredTasks,
+    displayTasks,
+    allKnownTasks,
+    showExternal,
+    setShowExternal,
+    allowExternalEdits,
+    setAllowExternalEdits,
     milestones,
     assignees,
     statuses,
@@ -155,10 +168,24 @@ function GanttView({
     return () => setMilestoneDateHandler(null);
   }, [updateMilestoneDate]);
 
-  // Keep DetailPanel's baselines in sync
+  // Keep DetailPanel's baselines, task lookup, project jump, and external edit toggle in sync
   useEffect(() => {
     setBaselinesForPanel(baselines);
   }, [baselines]);
+
+  useEffect(() => {
+    setDetailPanelTaskMap(allKnownTasks);
+  }, [allKnownTasks]);
+
+  useEffect(() => {
+    setDetailPanelProjectSelectHandler(selectProject);
+    return () => setDetailPanelProjectSelectHandler(null);
+  }, [selectProject]);
+
+  useEffect(() => {
+    setDetailPanelExternalEditState(allowExternalEdits, setAllowExternalEdits);
+    return () => setDetailPanelExternalEditState(false, null);
+  }, [allowExternalEdits, setAllowExternalEdits]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -228,13 +255,18 @@ function GanttView({
         onGroupByChange={setGroupBy}
         showBaselines={showBaselines}
         onShowBaselinesChange={handleShowBaselinesChange}
+        externalCount={externalTasks.length}
+        showExternal={showExternal}
+        onShowExternalChange={setShowExternal}
+        allowExternalEdits={allowExternalEdits}
+        onAllowExternalEditsChange={setAllowExternalEdits}
       />
 
       <StatsRow tasks={filteredTasks} />
 
       <div className="flex-1 min-h-0 overflow-hidden print:overflow-visible">
         <GanttChart
-          tasks={filteredTasks}
+          tasks={displayTasks}
           unscheduledTasks={unscheduledTasks}
           milestones={milestones}
           loading={loading}
@@ -251,6 +283,9 @@ function GanttView({
           baselines={showBaselines ? baselines : undefined}
           dateFrom={filters.dateFrom}
           dateTo={filters.dateTo}
+          externalTasksForViolations={externalTasks}
+          allowExternalEdits={allowExternalEdits}
+          onSelectProject={selectProject}
         />
       </div>
 
