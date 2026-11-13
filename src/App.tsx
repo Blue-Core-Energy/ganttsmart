@@ -134,6 +134,7 @@ function GanttView({
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'SELECT') {
         if (e.key === 'Escape') {

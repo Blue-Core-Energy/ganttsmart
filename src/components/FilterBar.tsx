@@ -259,6 +259,10 @@ export default function FilterBar({
             placeholderIcon={<FolderIcon />}
             onChange={(v) => onSelectProject(v)}
             required
+            searchable
+            searchPlaceholder="Search projects…"
+            emptyMessage="No projects found"
+            ariaLabel="Projects"
           />
         )}
 
