@@ -5,8 +5,7 @@ import { useGcpAuth } from './useGcpAuth';
 
 export const backend: Backend = {
   kind: 'gcp',
-  // signOut: IAP's sign-out parameter could not be confirmed, so "Sign out" is hidden.
-  capabilities: { sharing: false, passwordLogin: false, marketingPages: false, signOut: false },
+  capabilities: { sharing: false, passwordLogin: false, marketingPages: false, signOut: true },
   useAuth: useGcpAuth,
   // The server holds the Linear token and relays the request; the token argument is unused.
   linearRequest(_token, body) {

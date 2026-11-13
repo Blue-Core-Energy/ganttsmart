@@ -318,7 +318,7 @@ export default memo(function Header({
             </svg>
           </button>
           {showAccountMenu && (
-            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[180px] py-1">
+            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] py-1">
               <button
                 onClick={() => {
                   setShowAccountMenu(false);
@@ -340,6 +340,11 @@ export default memo(function Header({
                   >
                     Sign out
                   </button>
+                  {backend.kind === 'gcp' && (
+                    <p className="px-3 pb-2 text-[11px] text-text-muted leading-snug">
+                      Signs out of GanttSmart only, not Google.
+                    </p>
+                  )}
                 </>
               )}
             </div>

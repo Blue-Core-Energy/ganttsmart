@@ -40,12 +40,17 @@ export default function LinearConnect({ userEmail, error, onConnect, onSignOut }
         </button>
 
         {backend.capabilities.signOut !== false && (
-          <button
-            onClick={onSignOut}
-            className="text-xs text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
-          >
-            Sign out
-          </button>
+          <div className="flex flex-col items-center gap-1">
+            <button
+              onClick={onSignOut}
+              className="text-xs text-text-muted hover:text-text-secondary cursor-pointer transition-colors"
+            >
+              Sign out
+            </button>
+            {backend.kind === 'gcp' && (
+              <p className="text-[11px] text-text-muted">Signs out of GanttSmart only, not Google.</p>
+            )}
+          </div>
         )}
       </div>
     </div>
