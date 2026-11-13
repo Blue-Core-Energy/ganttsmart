@@ -33,3 +33,37 @@ jobs:
       - run: VITE_BACKEND=gcp npm run build
       - run: npm run build:server
       - run: npm test
+
+  browser:
+    name: browser (${{ matrix.browser }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Playwright browser
+        run: |
+          if [ "${{ matrix.browser }}" = "chrome" ] && [ -x /opt/google/chrome/chrome ]; then
+            npx playwright install-deps chrome
+          else
+            npx playwright install --with-deps "${{ matrix.browser }}"
+          fi
+      - run: VITE_BACKEND=gcp npm run build
+      - run: npm run build:server
+      - run: npx playwright test --project="${{ matrix.browser }}"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: playwright-report/
+          retention-days: 7

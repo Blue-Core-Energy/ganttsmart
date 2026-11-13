@@ -2,6 +2,10 @@
 node_modules
 dist
 server-dist
+test-results
+playwright-report
+blob-report
+playwright/.cache
 .env
 .env.local
 .env.production

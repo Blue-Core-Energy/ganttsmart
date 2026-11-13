@@ -36,6 +36,14 @@
           {
             "context": "checks",
             "integration_id": 15368
+          },
+          {
+            "context": "browser (chrome)",
+            "integration_id": 15368
+          },
+          {
+            "context": "browser (firefox)",
+            "integration_id": 15368
           }
         ]
       }
