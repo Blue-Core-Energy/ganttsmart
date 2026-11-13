@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
 import type { Filters, GroupBy, Milestone, Task, TimeScale } from '@/types';
+import { filterActiveTasks, isIgnoredTask } from '@/utils/issues';
 
 const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 
@@ -74,11 +75,18 @@ export function useSharedData(shareToken: string) {
           return;
         }
 
+        const rawTasks: Task[] = data.cachedData?.tasks || [];
+        const rawDone: Task[] = data.cachedData?.doneTasks || [];
+        const rawUnscheduled: Task[] = data.cachedData?.unscheduledTasks || [];
+        const ignoredIds = new Set<string>(
+          [...rawTasks, ...rawDone, ...rawUnscheduled].filter(isIgnoredTask).map((t) => t.id),
+        );
+
         setNeedsPassword(false);
         setProjectName(data.projectName);
-        setTasks(data.cachedData?.tasks || []);
-        setDoneTasks(data.cachedData?.doneTasks || []);
-        setUnscheduledTasks(data.cachedData?.unscheduledTasks || []);
+        setTasks(filterActiveTasks(rawTasks, ignoredIds));
+        setDoneTasks(filterActiveTasks(rawDone, ignoredIds));
+        setUnscheduledTasks(filterActiveTasks(rawUnscheduled, ignoredIds));
         setMilestones(data.cachedData?.milestones || []);
         setCachedAt(data.cachedAt);
       } catch (e) {

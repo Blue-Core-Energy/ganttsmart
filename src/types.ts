@@ -42,7 +42,7 @@ export interface Milestone {
 export interface WorkflowState {
   id: string;
   name: string;
-  type: string; // 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled'
+  type: string; // 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled' | 'duplicate'
   position: number;
 }
 

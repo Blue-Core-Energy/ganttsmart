@@ -455,4 +455,277 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('ignores duplicate and canceled issues across schedule, unscheduled list, stats, filters, and dependencies', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: null,
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Pressure test rig',
+                      description: `${startTagOffsetDays(1)}\nTest details`,
+                      dueDate: isoOffsetDays(9),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-3',
+                      identifier: 'ENG-103',
+                      title: 'Duplicate valve manifold',
+                      description: 'Should be hidden',
+                      dueDate: isoOffsetDays(6),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-103',
+                      priority: 2,
+                      state: { name: 'Duplicate', type: 'duplicate' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: '2026-01-02T00:00:00Z',
+                      assignee: { name: 'Ghost User' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-4',
+                      identifier: 'ENG-104',
+                      title: 'Canceled rig build',
+                      description: 'Should also be hidden',
+                      dueDate: isoOffsetDays(7),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-104',
+                      priority: 3,
+                      state: { name: 'Rejected', type: 'canceled' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: '2026-01-03T00:00:00Z',
+                      assignee: { name: 'Ghost User' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-5',
+                      identifier: 'ENG-105',
+                      title: 'Unscheduled duplicate task',
+                      description: '',
+                      dueDate: null,
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-105',
+                      priority: 4,
+                      state: { name: 'Duplicate', type: 'backlog' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-6',
+                      identifier: 'ENG-106',
+                      title: 'Unscheduled active task',
+                      description: '',
+                      dueDate: null,
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-106',
+                      priority: 4,
+                      state: { name: 'Backlog', type: 'backlog' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      canceledAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-1',
+                    identifier: 'ENG-101',
+                    relations: {
+                      nodes: [
+                        { type: 'blocks', relatedIssue: { identifier: 'ENG-102' } },
+                        {
+                          type: 'blocks',
+                          relatedIssue: {
+                            identifier: 'ENG-103',
+                            canceledAt: '2026-01-02T00:00:00Z',
+                            state: { name: 'Duplicate', type: 'duplicate' },
+                          },
+                        },
+                      ],
+                    },
+                    children: {
+                      nodes: [
+                        {
+                          id: 'c1',
+                          completedAt: '2026-01-03T00:00:00Z',
+                          canceledAt: null,
+                          state: { name: 'Done', type: 'completed' },
+                        },
+                        { id: 'c2', completedAt: null, canceledAt: null, state: { name: 'Todo', type: 'unstarted' } },
+                        {
+                          id: 'c3',
+                          completedAt: null,
+                          canceledAt: '2026-01-02T00:00:00Z',
+                          state: { name: 'Duplicate', type: 'duplicate' },
+                        },
+                      ],
+                    },
+                  },
+                  {
+                    id: 'uuid-2',
+                    identifier: 'ENG-102',
+                    relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-101' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-6',
+                    identifier: 'ENG-106',
+                    relations: { nodes: [] },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                  { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+                  { id: 'st-4', name: 'Duplicate', type: 'duplicate', position: 3 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    // Only active scheduled tasks render on the chart
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-103"]')).toHaveCount(0);
+    await expect(page.locator('[data-task-bar="ENG-104"]')).toHaveCount(0);
+    await expect(page.getByText('Duplicate valve manifold')).toHaveCount(0);
+    await expect(page.getByText('Canceled rig build')).toHaveCount(0);
+
+    // Unscheduled section only includes the active unscheduled issue, not the duplicate one
+    await expect(page.getByText('Unscheduled active task')).toBeVisible();
+    await expect(page.getByText('Unscheduled duplicate task')).toHaveCount(0);
+
+    // FilterBar count pill reflects only the 2 active scheduled tasks
+    await expect(page.getByText('2/2', { exact: true })).toBeVisible();
+
+    // Status filter excludes Duplicate / Rejected
+    await page.getByRole('button', { name: 'Status', exact: true }).click();
+    await expect(page.getByRole('option', { name: 'In Progress', exact: true })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'Todo', exact: true })).toBeVisible();
+    await expect(page.getByRole('option', { name: 'Duplicate', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('option', { name: 'Rejected', exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Status', exact: true }).first().click();
+
+    // DetailPanel excludes dependencies to ignored duplicate issues and excludes duplicate sub-issues
+    await page.locator('[data-task-bar="ENG-101"]').click();
+    await expect(page.getByText('Blocks ENG-102')).toBeVisible();
+    await expect(page.getByText('Blocks ENG-103')).toHaveCount(0);
+    await expect(page.getByText('1/2 (50%)')).toBeVisible();
+    await page.keyboard.press('Escape');
+
+    expect(errors).toEqual([]);
+  });
 });
