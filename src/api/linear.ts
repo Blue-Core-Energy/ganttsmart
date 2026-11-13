@@ -26,7 +26,12 @@ function releaseSlot() {
 }
 
 // ---- Core GraphQL with retry + rate limit awareness ----
-async function gql(apiKey: string, query: string, variables?: Record<string, unknown>, retries = 2): Promise<Record<string, unknown>> {
+async function gql(
+  apiKey: string,
+  query: string,
+  variables?: Record<string, unknown>,
+  retries = 2,
+): Promise<Record<string, unknown>> {
   await waitForSlot();
   try {
     const res = await backend.linearRequest(apiKey, { query, variables });
@@ -385,12 +390,8 @@ export async function fetchIssues(
       unscheduledTasks.push(mapNode(n, todayStr, true));
     }
   }
-  tasks.sort(
-    (a, b) => a.priorityVal - b.priorityVal || new Date(a.due).getTime() - new Date(b.due).getTime(),
-  );
-  unscheduledTasks.sort(
-    (a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id),
-  );
+  tasks.sort((a, b) => a.priorityVal - b.priorityVal || new Date(a.due).getTime() - new Date(b.due).getTime());
+  unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
   const doneTasks: Task[] = doneIssueNodes
     .filter((n) => n.dueDate || projectTargetDate)
@@ -505,11 +506,7 @@ export async function updateIssueState(apiKey: string, issueId: string, stateId:
   );
 }
 
-export async function createIssueRelation(
-  apiKey: string,
-  issueId: string,
-  relatedIssueId: string,
-): Promise<void> {
+export async function createIssueRelation(apiKey: string, issueId: string, relatedIssueId: string): Promise<void> {
   await gql(
     apiKey,
     `mutation($issueId: String!, $relatedIssueId: String!) {
@@ -538,10 +535,10 @@ export async function removeIssueRelation(apiKey: string, issueId: string, relat
     }`,
     { id: issueId },
   );
-  const issue = data.issue as { relations: { nodes: Array<{ id: string; type: string; relatedIssue: { id: string } }> } };
-  const relation = issue.relations.nodes.find(
-    (r) => r.type === 'blocks' && r.relatedIssue.id === relatedIssueId,
-  );
+  const issue = data.issue as {
+    relations: { nodes: Array<{ id: string; type: string; relatedIssue: { id: string } }> };
+  };
+  const relation = issue.relations.nodes.find((r) => r.type === 'blocks' && r.relatedIssue.id === relatedIssueId);
   if (!relation) return;
 
   await gql(

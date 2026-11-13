@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
-import { toastError } from '@/components/Toast';
+import { toastError } from '@/components/toastStore';
 import type { AuthState } from '../types';
 import { connectLinear } from './LinearConnectSupabase';
 
@@ -51,69 +51,6 @@ export function useSupabaseAuth(): AuthState {
       }
     }, expiresInMs);
   }, []);
-
-  // Load session and Linear token
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadLinearToken(session.user.id);
-        scheduleRefresh(session);
-      } else {
-        setLoading(false);
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        loadLinearToken(session.user.id);
-        scheduleRefresh(session);
-      } else {
-        linearGenerationRef.current += 1;
-        setLinearToken(null);
-        setLoading(false);
-        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-        if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-      if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
-    };
-  }, [scheduleRefresh]);
-
-  // Handle visibility change — refresh if returning from background
-  useEffect(() => {
-    const handleVisibility = async () => {
-      if (document.visibilityState !== 'visible') return;
-      if (!session?.expires_at) return;
-
-      const expiresInMs = session.expires_at * 1000 - Date.now();
-      if (expiresInMs < REFRESH_BUFFER_MS) {
-        try {
-          const { data, error } = await supabase.auth.refreshSession();
-          if (error) throw error;
-          if (data.session) {
-            setSession(data.session);
-            setUser(data.session.user);
-            scheduleRefresh(data.session);
-          }
-        } catch {
-          toastError('Session expired. Please sign in again.');
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [session, scheduleRefresh]);
 
   // Linear access tokens expire after 24h. The refresh token is held server-side
   // (service-role-only table) and exchanged by the linear-token-refresh function;
@@ -191,35 +128,101 @@ export function useSupabaseAuth(): AuthState {
     };
   }, [refreshLinearToken]);
 
-  const loadLinearToken = async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_settings')
-        .select('linear_access_token, linear_token_expires_at')
-        .eq('id', userId)
-        .single();
+  const loadLinearToken = useCallback(
+    async (userId: string) => {
+      try {
+        const { data, error } = await supabase
+          .from('user_settings')
+          .select('linear_access_token, linear_token_expires_at')
+          .eq('id', userId)
+          .single();
 
-      if (error) throw error;
-      const token = data?.linear_access_token ?? null;
-      const expiresAt = data?.linear_token_expires_at ?? null;
-      if (token && expiresAt && new Date(expiresAt).getTime() - Date.now() < REFRESH_BUFFER_MS) {
-        try {
-          await refreshLinearToken();
-        } catch {
-          // Transient failure: keep the stored token; a retry is already scheduled
+        if (error) throw error;
+        const token = data?.linear_access_token ?? null;
+        const expiresAt = data?.linear_token_expires_at ?? null;
+        if (token && expiresAt && new Date(expiresAt).getTime() - Date.now() < REFRESH_BUFFER_MS) {
+          try {
+            await refreshLinearToken();
+          } catch {
+            // Transient failure: keep the stored token; a retry is already scheduled
+            setLinearToken(token);
+          }
+        } else {
           setLinearToken(token);
+          if (token) scheduleLinearRefresh(expiresAt);
+          else clearLinearTimer();
         }
-      } else {
-        setLinearToken(token);
-        if (token) scheduleLinearRefresh(expiresAt);
-        else clearLinearTimer();
+      } catch {
+        setLinearToken(null);
+      } finally {
+        setLoading(false);
       }
-    } catch {
-      setLinearToken(null);
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [clearLinearTimer, refreshLinearToken, scheduleLinearRefresh],
+  );
+
+  // Load session and Linear token
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadLinearToken(session.user.id);
+        scheduleRefresh(session);
+      } else {
+        setLoading(false);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (session?.user) {
+        loadLinearToken(session.user.id);
+        scheduleRefresh(session);
+      } else {
+        linearGenerationRef.current += 1;
+        setLinearToken(null);
+        setLoading(false);
+        if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+        if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      if (linearRefreshTimerRef.current) clearTimeout(linearRefreshTimerRef.current);
+    };
+  }, [loadLinearToken, scheduleRefresh]);
+
+  // Handle visibility change — refresh if returning from background
+  useEffect(() => {
+    const handleVisibility = async () => {
+      if (document.visibilityState !== 'visible') return;
+      if (!session?.expires_at) return;
+
+      const expiresInMs = session.expires_at * 1000 - Date.now();
+      if (expiresInMs < REFRESH_BUFFER_MS) {
+        try {
+          const { data, error } = await supabase.auth.refreshSession();
+          if (error) throw error;
+          if (data.session) {
+            setSession(data.session);
+            setUser(data.session.user);
+            scheduleRefresh(data.session);
+          }
+        } catch {
+          toastError('Session expired. Please sign in again.');
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [session, scheduleRefresh]);
 
   const signUp = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signUp({ email, password });

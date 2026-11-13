@@ -11,7 +11,7 @@ import {
   updateIssueState,
   updateMilestoneTargetDate,
 } from '@/api/linear';
-import { toast, toastError, toastSuccess } from '@/components/Toast';
+import { toast, toastError, toastSuccess } from '@/components/toastStore';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
 import type { Filters, GroupBy, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
 
@@ -160,7 +160,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
       toastError(`Failed to load projects: ${msg}`);
       throw e;
     }
-  }, [linearToken]);
+  }, [linearToken, onAuthError]);
 
   // Silent refresh for polling (no loading spinner, no error clearing)
   // Skips if there are pending mutations to avoid overwriting optimistic state
@@ -183,7 +183,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
         }
       }
     },
-    [linearToken],
+    [linearToken, onAuthError],
   );
 
   const loadIssues = useCallback(
@@ -225,14 +225,21 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
         setLoading(false);
       }
     },
-    [linearToken],
+    [linearToken, onAuthError],
   );
 
   const selectProject = useCallback(
     (id: string) => {
       setSelectedProjectId(id);
       localStorage.setItem('linear_selected_project', id);
-      setFilters({ assignee: '', status: '', priorities: new Set(DEFAULT_PRIORITIES), search: '', dateFrom: '', dateTo: '' });
+      setFilters({
+        assignee: '',
+        status: '',
+        priorities: new Set(DEFAULT_PRIORITIES),
+        search: '',
+        dateFrom: '',
+        dateTo: '',
+      });
       undoStackRef.current = []; // Clear undo on project switch
       loadIssues(id);
     },
@@ -353,9 +360,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
       const milestone = milestones.find((m) => m.id === milestoneId);
       if (!milestone) return;
 
-      setMilestones((prev) =>
-        prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: newTargetDate } : m)),
-      );
+      setMilestones((prev) => prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: newTargetDate } : m)));
 
       pendingMutations.current++;
       try {

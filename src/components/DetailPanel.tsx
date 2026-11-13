@@ -1,31 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@/types';
-import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import { priorityColors, statusDotColors } from '@/utils/colors';
 import { formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
-
-// Global state management
-let globalOpenPanel: ((task: Task) => void) | null = null;
-let globalClosePanel: (() => void) | null = null;
-let globalRemoveRelation: ((sourceId: string, targetId: string) => Promise<void>) | null = null;
-let globalBaselines: Map<string, TaskBaseline> = new Map();
-
-export function setBaselinesForPanel(baselines: Map<string, TaskBaseline>) {
-  globalBaselines = baselines;
-}
-
-export function openDetailPanel(task: Task) {
-  globalOpenPanel?.(task);
-}
-export function closeDetailPanel() {
-  globalClosePanel?.();
-}
-export function setRemoveRelationHandler(handler: ((sourceId: string, targetId: string) => Promise<void>) | null) {
-  globalRemoveRelation = handler;
-}
+import {
+  closeDetailPanel,
+  getDetailPanelBaselines,
+  getRemoveRelationHandler,
+  registerDetailPanelHandlers,
+} from './detailPanelStore';
 
 export default function DetailPanel() {
   const [task, setTask] = useState<Task | null>(null);
@@ -33,18 +18,19 @@ export default function DetailPanel() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    globalOpenPanel = (t: Task) => {
-      setTask(t);
-      // Trigger animation on next frame
-      requestAnimationFrame(() => setVisible(true));
-    };
-    globalClosePanel = () => {
-      setVisible(false);
-      setTimeout(() => setTask(null), 250); // Wait for slide-out animation
-    };
+    registerDetailPanelHandlers(
+      (t: Task) => {
+        setTask(t);
+        // Trigger animation on next frame
+        requestAnimationFrame(() => setVisible(true));
+      },
+      () => {
+        setVisible(false);
+        setTimeout(() => setTask(null), 250); // Wait for slide-out animation
+      },
+    );
     return () => {
-      globalOpenPanel = null;
-      globalClosePanel = null;
+      registerDetailPanelHandlers(null, null);
     };
   }, []);
 
@@ -228,16 +214,17 @@ export default function DetailPanel() {
 
             {/* Baseline drift */}
             {(() => {
-              const bl = globalBaselines.get(task.id);
+              const bl = getDetailPanelBaselines().get(task.id);
               if (!bl) return null;
               const actualDue = new Date(task.due + 'T00:00:00');
               const plannedDue = new Date(bl.planned_due + 'T00:00:00');
               const dueDrift = Math.round((actualDue.getTime() - plannedDue.getTime()) / 86400000);
               const actualStart = task.startDate ? new Date(task.startDate + 'T00:00:00') : null;
               const plannedStart = bl.planned_start ? new Date(bl.planned_start + 'T00:00:00') : null;
-              const startDrift = actualStart && plannedStart
-                ? Math.round((actualStart.getTime() - plannedStart.getTime()) / 86400000)
-                : null;
+              const startDrift =
+                actualStart && plannedStart
+                  ? Math.round((actualStart.getTime() - plannedStart.getTime()) / 86400000)
+                  : null;
               if (dueDrift === 0 && (startDrift === null || startDrift === 0)) return null;
               return (
                 <div className="mt-3 p-2.5 rounded-lg bg-bg-primary border border-border-primary">
@@ -247,7 +234,10 @@ export default function DetailPanel() {
                       <span className="text-text-muted">Start</span>
                       <span style={{ color: startDrift > 0 ? 'var(--color-high)' : 'var(--color-accent)' }}>
                         {formatDateShort(bl.planned_start!)} → {formatDateShort(task.startDate!)}
-                        <span className="ml-1 font-semibold">({startDrift > 0 ? '+' : ''}{startDrift}d)</span>
+                        <span className="ml-1 font-semibold">
+                          ({startDrift > 0 ? '+' : ''}
+                          {startDrift}d)
+                        </span>
                       </span>
                     </div>
                   )}
@@ -256,7 +246,10 @@ export default function DetailPanel() {
                       <span className="text-text-muted">Due</span>
                       <span style={{ color: dueDrift > 0 ? 'var(--color-high)' : 'var(--color-accent)' }}>
                         {formatDateShort(bl.planned_due)} → {formatDateShort(task.due)}
-                        <span className="ml-1 font-semibold">({dueDrift > 0 ? '+' : ''}{dueDrift}d)</span>
+                        <span className="ml-1 font-semibold">
+                          ({dueDrift > 0 ? '+' : ''}
+                          {dueDrift}d)
+                        </span>
                       </span>
                     </div>
                   )}
@@ -299,16 +292,24 @@ export default function DetailPanel() {
                     className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-urgent/10 text-urgent border border-urgent/20 font-medium"
                   >
                     Blocked by {blockerId}
-                    {globalRemoveRelation && (
+                    {getRemoveRelationHandler() && (
                       <button
                         className="ml-0.5 p-0.5 rounded hover:bg-urgent/20 transition-colors cursor-pointer"
                         title={`Remove dependency: ${blockerId} → ${task.id}`}
                         onClick={() => {
-                          globalRemoveRelation?.(blockerId, task.id);
+                          getRemoveRelationHandler()?.(blockerId, task.id);
                           closeDetailPanel();
                         }}
                       >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                        >
                           <line x1="18" y1="6" x2="6" y2="18" />
                           <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>
@@ -322,16 +323,24 @@ export default function DetailPanel() {
                     className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-md bg-high/10 text-high border border-high/20 font-medium"
                   >
                     Blocks {blockedId}
-                    {globalRemoveRelation && (
+                    {getRemoveRelationHandler() && (
                       <button
                         className="ml-0.5 p-0.5 rounded hover:bg-high/20 transition-colors cursor-pointer"
                         title={`Remove dependency: ${task.id} → ${blockedId}`}
                         onClick={() => {
-                          globalRemoveRelation?.(task.id, blockedId);
+                          getRemoveRelationHandler()?.(task.id, blockedId);
                           closeDetailPanel();
                         }}
                       >
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                        <svg
+                          width="10"
+                          height="10"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                        >
                           <line x1="18" y1="6" x2="6" y2="18" />
                           <line x1="6" y1="6" x2="18" y2="18" />
                         </svg>

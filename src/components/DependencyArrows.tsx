@@ -109,7 +109,7 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
       observer.disconnect();
       window.removeEventListener('resize', computeArrows);
     };
-  }, [computeArrows]);
+  }, [computeArrows, containerRef]);
 
   if (arrows.length === 0) return null;
 

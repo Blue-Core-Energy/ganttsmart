@@ -23,7 +23,7 @@ function hashString(str: string): number {
   return Math.abs(hash);
 }
 
-export function getAvatarProps(name: string): { initials: string; bgColor: string } {
+function getAvatarProps(name: string): { initials: string; bgColor: string } {
   const trimmed = name.trim();
   if (!trimmed || trimmed === 'Unassigned') {
     return { initials: '?', bgColor: '#6e7781' };

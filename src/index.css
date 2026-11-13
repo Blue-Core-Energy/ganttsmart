@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* ---- Dark theme (default) — Zinc + Purple ---- */
 @theme {
@@ -57,12 +57,18 @@ html.light {
 }
 
 body {
-  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family:
+    'Outfit',
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   min-height: 100vh;
   margin: 0;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
   scrollbar-gutter: stable;
   letter-spacing: -0.005em;
 }
@@ -74,8 +80,16 @@ body {
 }
 
 /* Default transitions on interactive elements */
-button, select, input, a {
-  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+button,
+select,
+input,
+a {
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.1s ease;
 }
 
 /* Mono utility class */
@@ -89,8 +103,13 @@ button, select, input, a {
 }
 
 @keyframes pulse-bar {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.75; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.75;
+  }
 }
 
 .animate-pulse-bar {
@@ -98,10 +117,20 @@ button, select, input, a {
 }
 
 /* Scrollbar — thinner, more refined */
-::-webkit-scrollbar { height: 6px; width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border-secondary); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-secondary);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
 
 /* Gantt bar gradients — subtle shimmer via pseudo-element */
 .gantt-bar {
@@ -115,7 +144,7 @@ button, select, input, a {
   left: 0;
   right: 0;
   height: 50%;
-  background: rgba(255,255,255,0.12);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 6px 6px 0 0;
   pointer-events: none;
 }
@@ -126,28 +155,58 @@ button, select, input, a {
   top: 0;
   bottom: 0;
   width: 4px;
-  background: rgba(0,0,0,0.2);
+  background: rgba(0, 0, 0, 0.2);
   border-radius: 0 6px 6px 0;
   pointer-events: none;
 }
 
 /* Priority-specific bar backgrounds */
-.gantt-bar.bar-urgent { background: #ef4444; }
-.gantt-bar.bar-high { background: #f97316; }
-.gantt-bar.bar-medium { background: #f59e0b; }
-.gantt-bar.bar-low { background: #22c55e; }
-.gantt-bar.bar-none { background: #a1a1aa; }
-.gantt-bar.bar-overdue { background: #ef4444; }
-.gantt-bar.bar-done { background: #22c55e; }
+.gantt-bar.bar-urgent {
+  background: #ef4444;
+}
+.gantt-bar.bar-high {
+  background: #f97316;
+}
+.gantt-bar.bar-medium {
+  background: #f59e0b;
+}
+.gantt-bar.bar-low {
+  background: #22c55e;
+}
+.gantt-bar.bar-none {
+  background: #a1a1aa;
+}
+.gantt-bar.bar-overdue {
+  background: #ef4444;
+}
+.gantt-bar.bar-done {
+  background: #22c55e;
+}
 
-html.light .gantt-bar.bar-urgent { background: #dc2626; }
-html.light .gantt-bar.bar-high { background: #ea580c; }
-html.light .gantt-bar.bar-medium { background: #d97706; }
-html.light .gantt-bar.bar-low { background: #16a34a; }
-html.light .gantt-bar.bar-none { background: #71717a; }
-html.light .gantt-bar.bar-overdue { background: #dc2626; }
-html.light .gantt-bar.bar-done { background: #16a34a; }
-html.light .gantt-bar::before { background: rgba(255,255,255,0.22); }
+html.light .gantt-bar.bar-urgent {
+  background: #dc2626;
+}
+html.light .gantt-bar.bar-high {
+  background: #ea580c;
+}
+html.light .gantt-bar.bar-medium {
+  background: #d97706;
+}
+html.light .gantt-bar.bar-low {
+  background: #16a34a;
+}
+html.light .gantt-bar.bar-none {
+  background: #71717a;
+}
+html.light .gantt-bar.bar-overdue {
+  background: #dc2626;
+}
+html.light .gantt-bar.bar-done {
+  background: #16a34a;
+}
+html.light .gantt-bar::before {
+  background: rgba(255, 255, 255, 0.22);
+}
 
 /* Focus-visible for keyboard accessibility */
 tr:focus-visible {
@@ -158,13 +217,21 @@ tr:focus-visible {
 
 /* Toast slide-in animation */
 @keyframes slide-in {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 /* Reduced motion — disable animations for accessibility */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
@@ -181,13 +248,19 @@ tr:focus-visible {
   }
 
   .auth-overlay,
-  .tooltip { display: none !important; }
+  .tooltip {
+    display: none !important;
+  }
 
   #gantt-export-target {
     overflow: visible !important;
     border: 1px solid #ccc !important;
   }
 
-  table { page-break-inside: auto; }
-  tr { page-break-inside: avoid; }
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+  }
 }

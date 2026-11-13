@@ -1,75 +1,81 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
-import { saveLinearTokens } from "../_shared/linear-token.ts";
+import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { saveLinearTokens } from '../_shared/linear-token.ts';
 
-const LINEAR_CLIENT_ID = Deno.env.get("LINEAR_CLIENT_ID") ?? "";
-const LINEAR_CLIENT_SECRET = Deno.env.get("LINEAR_CLIENT_SECRET") ?? "";
-const LINEAR_REDIRECT_URI = Deno.env.get("LINEAR_REDIRECT_URI") ?? "";
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const LINEAR_CLIENT_ID = Deno.env.get('LINEAR_CLIENT_ID') ?? '';
+const LINEAR_CLIENT_SECRET = Deno.env.get('LINEAR_CLIENT_SECRET') ?? '';
+const LINEAR_REDIRECT_URI = Deno.env.get('LINEAR_REDIRECT_URI') ?? '';
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") {
-    return new Response("ok", { headers: corsHeaders });
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get("Authorization");
+    const authHeader = req.headers.get('Authorization');
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Missing authorization header" }), {
+      return new Response(JSON.stringify({ error: 'Missing authorization header' }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-    const token = authHeader.replace("Bearer ", "");
-    const { data: { user }, error: authError } = await supabaseClient.auth.getUser(token);
+    const token = authHeader.replace('Bearer ', '');
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseClient.auth.getUser(token);
 
     if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Invalid token" }), {
+      return new Response(JSON.stringify({ error: 'Invalid token' }), {
         status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     const { code, state, redirect_uri } = await req.json();
     if (!code) {
-      return new Response(JSON.stringify({ error: "Missing authorization code" }), {
+      return new Response(JSON.stringify({ error: 'Missing authorization code' }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // AUTHZ-VULN-03: Validate state parameter (CSRF protection)
-    if (!state || typeof state !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state)) {
-      return new Response(JSON.stringify({ error: "Invalid or missing state parameter" }), {
+    if (
+      !state ||
+      typeof state !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(state)
+    ) {
+      return new Response(JSON.stringify({ error: 'Invalid or missing state parameter' }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // Validate redirect_uri against allowed origins to prevent open redirect
     const ALLOWED_REDIRECT_URIS = [
       LINEAR_REDIRECT_URI,
-      "http://localhost:5173/callback",
-      "http://localhost:3000/callback",
+      'http://localhost:5173/callback',
+      'http://localhost:3000/callback',
     ].filter(Boolean);
 
-    const effectiveRedirectUri = redirect_uri && ALLOWED_REDIRECT_URIS.includes(redirect_uri)
-      ? redirect_uri
-      : LINEAR_REDIRECT_URI;
+    const effectiveRedirectUri =
+      redirect_uri && ALLOWED_REDIRECT_URIS.includes(redirect_uri) ? redirect_uri : LINEAR_REDIRECT_URI;
 
-    const tokenRes = await fetch("https://api.linear.app/oauth/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    const tokenRes = await fetch('https://api.linear.app/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
-        grant_type: "authorization_code",
+        grant_type: 'authorization_code',
         code,
         client_id: LINEAR_CLIENT_ID,
         client_secret: LINEAR_CLIENT_SECRET,
@@ -81,7 +87,7 @@ Deno.serve(async (req: Request) => {
       const errBody = await tokenRes.text();
       return new Response(JSON.stringify({ error: `Linear token exchange failed: ${errBody}` }), {
         status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
@@ -92,17 +98,17 @@ Deno.serve(async (req: Request) => {
     } catch (dbError) {
       return new Response(JSON.stringify({ error: (dbError as Error).message }), {
         status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     return new Response(JSON.stringify({ success: true }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {
     return new Response(JSON.stringify({ error: (err as Error).message }), {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 });

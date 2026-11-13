@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { toastError } from '@/components/Toast';
+import { toastError } from '@/components/toastStore';
 import type { AuthState } from '../types';
 import { getJson, onSessionExpired, postJson, SessionExpiredError } from './api';
 import { readLinearError } from './linearError';
