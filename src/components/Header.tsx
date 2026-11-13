@@ -4,6 +4,8 @@ import type { Theme } from '@/hooks/useTheme';
 import { TIME_SCALES } from '@/types';
 import type { Task, TimeScale } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
+import type { FeedbackType } from '@/utils/feedback';
+import FeedbackDialog from './FeedbackDialog';
 import { toastError, toastSuccess } from './toastStore';
 
 // Loaded on demand: it pulls in the Supabase client, which only the Supabase backend has
@@ -25,13 +27,14 @@ interface Props {
   onThemeChange: (theme: Theme) => void;
   projectId: string;
   tasks: Task[];
+  linearToken?: string;
 }
 
 const iconBtn =
   'flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer';
 
 const ghostBtn =
-  'flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer';
+  'flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
 
 function formatRangeLabel(tasks: Task[]): string | null {
   const dates: number[] = [];
@@ -87,6 +90,52 @@ function MoonIcon() {
   );
 }
 
+function LightbulbIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 18h6" />
+      <path d="M10 22h4" />
+      <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0018 8 6 6 0 006 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 018.91 14" />
+    </svg>
+  );
+}
+
+function BugIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m8 2 1.88 1.88" />
+      <path d="M14.12 3.88 16 2" />
+      <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" />
+      <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" />
+      <path d="M12 20v-9" />
+      <path d="M6.53 9C4.6 8.8 3 7.1 3 5" />
+      <path d="M6 13H2" />
+      <path d="M3 21c0-2.1 1.7-3.9 3.8-4" />
+      <path d="M20.97 5c0 2.1-1.6 3.8-3.5 4" />
+      <path d="M22 13h-4" />
+      <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
+    </svg>
+  );
+}
+
 export default memo(function Header({
   projectName,
   loading,
@@ -103,19 +152,24 @@ export default memo(function Header({
   onThemeChange,
   projectId,
   tasks,
+  linearToken,
 }: Props) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showFeedbackMenu, setShowFeedbackMenu] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
 
   // Close menus on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
       if (accountRef.current && !accountRef.current.contains(e.target as Node)) setShowAccountMenu(false);
+      if (feedbackRef.current && !feedbackRef.current.contains(e.target as Node)) setShowFeedbackMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -147,7 +201,7 @@ export default memo(function Header({
   };
 
   return (
-    <header className="h-[52px] shrink-0 border-b border-border-primary bg-bg-header flex items-center px-4 gap-3 print:hidden">
+    <header className="h-[52px] shrink-0 border-b border-border-primary bg-bg-header flex items-center px-2.5 sm:px-4 gap-2 sm:gap-3 print:hidden">
       {/* Left: brand + breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
         <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center shrink-0">
@@ -166,22 +220,24 @@ export default memo(function Header({
             <rect x="3" y="18" width="15" height="3" rx="1" />
           </svg>
         </div>
-        <span className="text-sm font-semibold text-text-primary tracking-tight">Ganttsmart</span>
+        <span className="hidden sm:inline text-sm font-semibold text-text-primary tracking-tight whitespace-nowrap">
+          Ganttsmart
+        </span>
         {projectName && (
           <>
-            <span className="text-text-muted text-sm">/</span>
-            <span className="text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
+            <span className="hidden sm:inline text-text-muted text-sm">/</span>
+            <span className="hidden sm:inline text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
               {projectName}
             </span>
-            <span className="text-text-muted text-sm">/</span>
-            <span className="text-sm text-text-primary font-medium">Roadmap</span>
+            <span className="hidden xl:inline text-text-muted text-sm">/</span>
+            <span className="hidden xl:inline text-sm text-text-primary font-medium whitespace-nowrap">Roadmap</span>
           </>
         )}
       </div>
 
       {/* Center: sprint/date range badge */}
       {rangeLabel && (
-        <div className="hidden md:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-bg-hover border border-border-primary text-[11px] font-medium text-text-secondary">
+        <div className="hidden lg:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-bg-hover border border-border-primary text-[11px] font-medium text-text-secondary whitespace-nowrap shrink-0">
           <svg
             width="12"
             height="12"
@@ -205,9 +261,9 @@ export default memo(function Header({
       <div className="flex-1" />
 
       {/* Right: actions */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
         {lastSynced && (
-          <span className="hidden lg:inline text-[11px] text-text-muted mr-1">
+          <span className="hidden xl:inline text-[11px] text-text-muted mr-1 whitespace-nowrap shrink-0">
             Synced <span className="font-mono tabular-nums">{lastSynced}</span>
           </span>
         )}
@@ -236,12 +292,12 @@ export default memo(function Header({
         </button>
 
         {/* Time scale: Day | Week | Month */}
-        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5">
+        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5 shrink-0">
           {TIME_SCALES.map((s) => (
             <button
               key={s}
               onClick={() => onTimeScaleChange(s)}
-              className={`px-2.5 h-[26px] rounded text-[11px] font-medium capitalize transition-colors cursor-pointer ${
+              className={`px-1.5 sm:px-2.5 h-[26px] rounded text-[11px] font-medium capitalize transition-colors cursor-pointer ${
                 timeScale === s
                   ? 'bg-bg-card text-text-primary shadow-sm'
                   : 'text-text-secondary hover:text-text-primary'
@@ -255,7 +311,7 @@ export default memo(function Header({
         </div>
 
         {/* Zoom controls */}
-        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary">
+        <div className="hidden sm:flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary shrink-0">
           <button onClick={onZoomOut} className={iconBtn} title="Zoom out (−)" style={{ width: 28 }}>
             <svg
               width="14"
@@ -371,6 +427,95 @@ export default memo(function Header({
           <Suspense fallback={null}>
             <ShareDialog projectId={projectId} projectName={projectName} onClose={() => setShowShareDialog(false)} />
           </Suspense>
+        )}
+
+        {/* Feedback: dedicated buttons on sm+, compact menu on mobile */}
+        <div className="hidden sm:flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5">
+          <button
+            type="button"
+            onClick={() => setFeedbackType('feature')}
+            className="flex items-center gap-1.5 px-2 h-[26px] rounded text-[11px] font-medium text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+            aria-label="Feature Request"
+            title="Feature Request"
+          >
+            <LightbulbIcon />
+            <span className="hidden xl:inline" aria-hidden="true">
+              Feature
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFeedbackType('bug')}
+            className="flex items-center gap-1.5 px-2 h-[26px] rounded text-[11px] font-medium text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+            aria-label="Bug Report"
+            title="Bug Report"
+          >
+            <BugIcon />
+            <span className="hidden xl:inline" aria-hidden="true">
+              Bug
+            </span>
+          </button>
+        </div>
+
+        <div className="relative sm:hidden" ref={feedbackRef}>
+          <button
+            type="button"
+            onClick={() => setShowFeedbackMenu((v) => !v)}
+            className={iconBtn}
+            aria-label="Send feedback"
+            aria-expanded={showFeedbackMenu}
+            title="Send feedback"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <path d="M12 7v6" />
+              <path d="M9 10h6" />
+            </svg>
+          </button>
+          {showFeedbackMenu && (
+            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[168px] py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFeedbackMenu(false);
+                  setFeedbackType('feature');
+                }}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <LightbulbIcon size={13} />
+                Feature Request
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFeedbackMenu(false);
+                  setFeedbackType('bug');
+                }}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <BugIcon size={13} />
+                Bug Report
+              </button>
+            </div>
+          )}
+        </div>
+
+        {feedbackType && (
+          <FeedbackDialog
+            initialType={feedbackType}
+            linearToken={linearToken ?? ''}
+            projectName={projectName}
+            onClose={() => setFeedbackType(null)}
+          />
         )}
 
         {/* Divider */}

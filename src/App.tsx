@@ -134,11 +134,13 @@ function GanttView({
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === 'INPUT' || tag === 'SELECT') {
-        if (e.key === 'Escape') {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]') || document.querySelector('[role="dialog"]')) return;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) {
+        if (e.key === 'Escape' && tag === 'INPUT') {
           setFilters({ ...filters, search: '' });
-          (e.target as HTMLElement).blur();
+          target?.blur();
         }
         return;
       }
@@ -175,6 +177,7 @@ function GanttView({
         onThemeChange={setTheme}
         projectId={selectedProjectId}
         tasks={filteredTasks}
+        linearToken={linearToken}
       />
 
       <FilterBar
