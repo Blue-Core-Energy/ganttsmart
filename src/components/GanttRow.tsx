@@ -14,6 +14,7 @@ import {
 } from '@/utils/colors';
 import {
   buildTimeCells,
+  computeBarDayRange,
   daysBetween,
   formatDate,
   formatIsoDate,
@@ -103,55 +104,22 @@ export default function GanttRow({
   const [isRowDragging, setIsRowDragging] = useState(false);
   const [dropPosition, setDropPosition] = useState<'above' | 'below' | null>(null);
 
-  // Bar position
-  let barLeft: number;
-  let barWidth: number;
-  if (isDone && hasStartDate && taskStartDate) {
-    // Done: fixed bar from startDate → dueDate
-    const startDay = daysBetween(chartStart, taskStartDate);
-    const endDay = daysBetween(chartStart, dueDate);
-    barLeft = startDay * dayWidth;
-    barWidth = Math.max((endDay - startDay + 1) * dayWidth, dayWidth);
-  } else if (isDone) {
-    // Done without start date: show a small bar at the due date
-    const endDay = daysBetween(chartStart, dueDate);
-    barLeft = Math.max(endDay - 1, 0) * dayWidth;
-    barWidth = Math.max(2 * dayWidth, dayWidth);
-  } else if (hasStartDate && taskStartDate) {
-    const startDay = daysBetween(chartStart, taskStartDate);
-    if (overdue) {
-      // Single unified bar from startDate → today
-      const todayDay = daysBetween(chartStart, today);
-      barLeft = startDay * dayWidth;
-      barWidth = Math.max((todayDay - startDay) * dayWidth, dayWidth);
-    } else {
-      const endDay = daysBetween(chartStart, dueDate);
-      barLeft = startDay * dayWidth;
-      barWidth = Math.max((endDay - startDay + 1) * dayWidth, dayWidth);
-    }
-  } else if (overdue) {
-    const barEndDay = daysBetween(chartStart, dueDate);
-    barLeft = barEndDay * dayWidth;
-    barWidth = Math.max(Math.abs(daysLeft) * dayWidth, dayWidth);
-  } else {
-    const barStartDay = daysBetween(chartStart, today);
-    const barEndDay = daysBetween(chartStart, dueDate);
-    barLeft = barStartDay * dayWidth;
-    barWidth = Math.max((barEndDay - barStartDay + 1) * dayWidth, dayWidth);
-  }
-
-  // Clamp bar to visible chart area (don't overflow left into fixed columns)
-  if (barLeft < 0) {
-    barWidth = Math.max(barWidth + barLeft, dayWidth);
-    barLeft = 0;
-  }
+  // Bar position — always render verbatim from startDate/today to dueDate (never extend overdue bars to today)
+  const { barLeft, barWidth } = computeBarDayRange({
+    chartStart,
+    today,
+    dueDate,
+    startDate: taskStartDate,
+    isDone,
+    dayWidth,
+  });
 
   // Base start date for start-edge drag and whole-bar move
   const barStartBaseDate = useMemo(() => {
     if (taskStartDate) return taskStartDate;
-    if (overdue) return dueDate;
+    if (isDone || overdue) return dueDate;
     return today <= dueDate ? today : dueDate;
-  }, [taskStartDate, overdue, dueDate, today]);
+  }, [taskStartDate, isDone, overdue, dueDate, today]);
 
   const moveDays = Math.round(moveDelta / dayWidth);
   const movedPreview =
@@ -162,8 +130,7 @@ export default function GanttRow({
   let displayBarLeft = barLeft + startDragDelta + moveDelta;
   if (movedPreview) {
     const rawLeft = daysBetween(chartStart, movedPreview.start) * dayWidth;
-    const previewEndDate = isDone || movedPreview.due >= today ? movedPreview.due : today;
-    const rawWidth = Math.max((daysBetween(movedPreview.start, previewEndDate) + 1) * dayWidth, dayWidth);
+    const rawWidth = Math.max((daysBetween(movedPreview.start, movedPreview.due) + 1) * dayWidth, dayWidth);
     if (rawLeft < 0) {
       displayBarLeft = 0;
       displayBarWidth = Math.max(rawWidth + rawLeft, dayWidth);

@@ -102,6 +102,54 @@ export function moveTaskDatesPreservingWorkdays(
   return { start: newStart, due: newDue, workdays };
 }
 
+/**
+ * Compute horizontal Gantt bar pixel range (`barLeft`, `barWidth`) from a task's dates.
+ * Overdue tasks render verbatim ending on `dueDate` rather than extending to `today`.
+ */
+export function computeBarDayRange({
+  chartStart,
+  today,
+  dueDate,
+  startDate,
+  isDone,
+  dayWidth,
+}: {
+  chartStart: Date;
+  today: Date;
+  dueDate: Date;
+  startDate: Date | null;
+  isDone: boolean;
+  dayWidth: number;
+}): { barLeft: number; barWidth: number } {
+  const overdue = daysBetween(today, dueDate) < 0;
+
+  let barLeft: number;
+  let barWidth: number;
+  if (startDate) {
+    const startDay = daysBetween(chartStart, startDate);
+    const endDay = daysBetween(chartStart, dueDate);
+    barLeft = startDay * dayWidth;
+    barWidth = Math.max((endDay - startDay + 1) * dayWidth, dayWidth);
+  } else if (isDone || overdue) {
+    // Completed or overdue without an explicit start date: anchor a compact bar ending on dueDate
+    const endDay = daysBetween(chartStart, dueDate);
+    barLeft = (endDay - 1) * dayWidth;
+    barWidth = Math.max(2 * dayWidth, dayWidth);
+  } else {
+    const barStartDay = daysBetween(chartStart, today);
+    const barEndDay = daysBetween(chartStart, dueDate);
+    barLeft = barStartDay * dayWidth;
+    barWidth = Math.max((barEndDay - barStartDay + 1) * dayWidth, dayWidth);
+  }
+
+  if (barLeft < 0) {
+    barWidth = Math.max(barWidth + barLeft, dayWidth);
+    barLeft = 0;
+  }
+
+  return { barLeft, barWidth };
+}
+
 /** Monday of the week containing the given date (local midnight preserved). */
 export function startOfWeek(date: Date): Date {
   const d = new Date(date);

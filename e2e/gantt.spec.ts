@@ -2281,4 +2281,184 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('renders overdue tasks ending verbatim on their due date without extending to today', async ({ page }) => {
+    const errors = trackErrors(page);
+    const mutations: string[] = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-15),
+                targetDate: isoOffsetDays(10),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-overdue-start',
+                      identifier: 'ENG-201',
+                      title: 'Overdue with start date',
+                      description: `${startTagOffsetDays(-12)}\nStarted 12 days ago`,
+                      dueDate: isoOffsetDays(-6),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-201',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-overdue-nostart',
+                      identifier: 'ENG-202',
+                      title: 'Overdue without start date',
+                      description: 'No start tag',
+                      dueDate: isoOffsetDays(-5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-202',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-future',
+                      identifier: 'ENG-203',
+                      title: 'On-time future task',
+                      description: `${startTagOffsetDays(-2)}\nActive task`,
+                      dueDate: isoOffsetDays(3),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-203',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: 'st-1', name: 'In Progress', type: 'started', position: 0 }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        mutations.push(query);
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    const bar201 = page.locator('[data-task-bar="ENG-201"]');
+    const bar202 = page.locator('[data-task-bar="ENG-202"]');
+    const bar203 = page.locator('[data-task-bar="ENG-203"]');
+    await expect(bar201).toBeVisible();
+    await expect(bar202).toBeVisible();
+    await expect(bar203).toBeVisible();
+
+    // Zero automatic due-date mutations on load
+    expect(mutations).toEqual([]);
+
+    // ENG-201 (-12d -> -6d, 7 days * 28px = 196px) and ENG-202 (due -5d, 2 days * 28px = 56px)
+    // must end strictly on their due dates (5–6 days BEFORE today), not stretched to today.
+    const box201 = await bar201.boundingBox();
+    const box202 = await bar202.boundingBox();
+    const box203 = await bar203.boundingBox();
+    expect(box201).not.toBeNull();
+    expect(box202).not.toBeNull();
+    expect(box203).not.toBeNull();
+
+    // ENG-201 spans 7 days (-12d..-6d -> 196px)
+    expect(Math.round(box201!.width)).toBe(196);
+    // ENG-202 spans 2 days (-6d..-5d -> 56px) and ends 1 day (28px) after ENG-201
+    expect(Math.round(box202!.width)).toBe(56);
+    expect(Math.round(box202!.x + box202!.width - (box201!.x + box201!.width))).toBe(28);
+    // ENG-203 (-2d..+3d) ends 8 days (224px) after ENG-202 (-5d)
+    expect(Math.round(box203!.x + box203!.width - (box202!.x + box202!.width))).toBe(224);
+
+    // Overdue bars keep overdue visual status + verbatim due date in DetailPanel
+    await expect(bar201).toHaveClass(/\bbar-overdue\b/);
+    await bar201.click();
+    await expect(page.getByText('6d overdue')).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
 });

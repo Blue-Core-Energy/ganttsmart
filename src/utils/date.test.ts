@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addDays,
   addWorkdaysInclusive,
+  computeBarDayRange,
   countWorkdaysInclusive,
   daysBetween,
   formatIsoDate,
@@ -91,5 +92,67 @@ describe('workday duration helpers', () => {
     // 2026-11-01 is US fall-back DST day (25 hours long)
     expect(daysBetween(d('2026-10-31'), d('2026-11-02'))).toBe(2);
     expect(formatIsoDate(addDays(d('2026-10-31'), 2))).toBe('2026-11-02');
+  });
+
+  it('computeBarDayRange ends overdue bars verbatim on dueDate instead of extending to today', () => {
+    const chartStart = d('2026-10-01');
+    const today = d('2026-11-13');
+    const dayWidth = 28;
+
+    // Overdue task with startDate (Oct 5 -> Oct 13): must end on Oct 13, NOT Nov 13
+    const withStart = computeBarDayRange({
+      chartStart,
+      today,
+      startDate: d('2026-10-05'),
+      dueDate: d('2026-10-13'),
+      isDone: false,
+      dayWidth,
+    });
+    expect(withStart).toEqual({
+      barLeft: 4 * dayWidth,
+      barWidth: 9 * dayWidth, // Oct 5..Oct 13 inclusive
+    });
+
+    // Overdue task without startDate (due Oct 13): compact 2-day bar ending on Oct 13, NOT stretched to Nov 13
+    const withoutStart = computeBarDayRange({
+      chartStart,
+      today,
+      startDate: null,
+      dueDate: d('2026-10-13'),
+      isDone: false,
+      dayWidth,
+    });
+    expect(withoutStart).toEqual({
+      barLeft: 11 * dayWidth, // Oct 12
+      barWidth: 2 * dayWidth, // Oct 12..Oct 13 (ends on Oct 13)
+    });
+
+    // Future active task without startDate (due Nov 16): runs today (Nov 13) -> Nov 16
+    const futureWithoutStart = computeBarDayRange({
+      chartStart,
+      today,
+      startDate: null,
+      dueDate: d('2026-11-16'),
+      isDone: false,
+      dayWidth,
+    });
+    expect(futureWithoutStart).toEqual({
+      barLeft: 43 * dayWidth, // Nov 13
+      barWidth: 4 * dayWidth, // Nov 13..Nov 16
+    });
+
+    // Overdue without startDate on chartStart (day 0): clamped cleanly so right edge stays on dueDate
+    const onChartStart = computeBarDayRange({
+      chartStart,
+      today,
+      startDate: null,
+      dueDate: d('2026-10-01'),
+      isDone: false,
+      dayWidth,
+    });
+    expect(onChartStart).toEqual({
+      barLeft: 0,
+      barWidth: dayWidth,
+    });
   });
 });
