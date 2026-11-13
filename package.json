@@ -21,7 +21,7 @@
     "@hono/node-server": "^2.1.5",
     "@supabase/supabase-js": "^2.99.3",
     "date-fns": "^4.1.0",
-    "hono": "^4.13.14",
+    "hono": "^4.13.18",
     "html-to-image": "^1.11.13",
     "jose": "^6.2.14",
     "jspdf": "^4.2.1",
