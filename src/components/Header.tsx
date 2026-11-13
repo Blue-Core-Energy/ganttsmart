@@ -34,7 +34,7 @@ const iconBtn =
   'flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer';
 
 const ghostBtn =
-  'flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer';
+  'flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
 
 function formatRangeLabel(tasks: Task[]): string | null {
   const dates: number[] = [];
@@ -201,7 +201,7 @@ export default memo(function Header({
   };
 
   return (
-    <header className="h-[52px] shrink-0 border-b border-border-primary bg-bg-header flex items-center px-4 gap-3 print:hidden">
+    <header className="h-[52px] shrink-0 border-b border-border-primary bg-bg-header flex items-center px-2.5 sm:px-4 gap-2 sm:gap-3 print:hidden">
       {/* Left: brand + breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
         <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center shrink-0">
@@ -220,22 +220,24 @@ export default memo(function Header({
             <rect x="3" y="18" width="15" height="3" rx="1" />
           </svg>
         </div>
-        <span className="text-sm font-semibold text-text-primary tracking-tight">Ganttsmart</span>
+        <span className="hidden sm:inline text-sm font-semibold text-text-primary tracking-tight whitespace-nowrap">
+          Ganttsmart
+        </span>
         {projectName && (
           <>
-            <span className="text-text-muted text-sm">/</span>
-            <span className="text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
+            <span className="hidden sm:inline text-text-muted text-sm">/</span>
+            <span className="hidden sm:inline text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
               {projectName}
             </span>
-            <span className="text-text-muted text-sm">/</span>
-            <span className="text-sm text-text-primary font-medium">Roadmap</span>
+            <span className="hidden xl:inline text-text-muted text-sm">/</span>
+            <span className="hidden xl:inline text-sm text-text-primary font-medium whitespace-nowrap">Roadmap</span>
           </>
         )}
       </div>
 
       {/* Center: sprint/date range badge */}
       {rangeLabel && (
-        <div className="hidden md:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-bg-hover border border-border-primary text-[11px] font-medium text-text-secondary">
+        <div className="hidden lg:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-bg-hover border border-border-primary text-[11px] font-medium text-text-secondary whitespace-nowrap shrink-0">
           <svg
             width="12"
             height="12"
@@ -259,9 +261,9 @@ export default memo(function Header({
       <div className="flex-1" />
 
       {/* Right: actions */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
         {lastSynced && (
-          <span className="hidden lg:inline text-[11px] text-text-muted mr-1">
+          <span className="hidden xl:inline text-[11px] text-text-muted mr-1 whitespace-nowrap shrink-0">
             Synced <span className="font-mono tabular-nums">{lastSynced}</span>
           </span>
         )}
@@ -290,12 +292,12 @@ export default memo(function Header({
         </button>
 
         {/* Time scale: Day | Week | Month */}
-        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5">
+        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5 shrink-0">
           {TIME_SCALES.map((s) => (
             <button
               key={s}
               onClick={() => onTimeScaleChange(s)}
-              className={`px-2.5 h-[26px] rounded text-[11px] font-medium capitalize transition-colors cursor-pointer ${
+              className={`px-1.5 sm:px-2.5 h-[26px] rounded text-[11px] font-medium capitalize transition-colors cursor-pointer ${
                 timeScale === s
                   ? 'bg-bg-card text-text-primary shadow-sm'
                   : 'text-text-secondary hover:text-text-primary'
@@ -309,7 +311,7 @@ export default memo(function Header({
         </div>
 
         {/* Zoom controls */}
-        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary">
+        <div className="hidden sm:flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary shrink-0">
           <button onClick={onZoomOut} className={iconBtn} title="Zoom out (−)" style={{ width: 28 }}>
             <svg
               width="14"

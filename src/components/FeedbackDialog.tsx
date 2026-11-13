@@ -457,7 +457,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
               </div>
             )}
 
-            <div className="flex items-center justify-between gap-2 pt-2 border-t border-border-primary">
+            <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-2 pt-2 border-t border-border-primary">
               <a
                 href={config.projectUrl}
                 target="_blank"
@@ -466,7 +466,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
               >
                 Open {config.projectName} in Linear ↗
               </a>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={onClose}

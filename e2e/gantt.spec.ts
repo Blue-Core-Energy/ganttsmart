@@ -1204,11 +1204,24 @@ test.describe('GanttSmart GCP app', () => {
 
     await dialog.getByRole('button', { name: 'Done' }).click();
 
-    // 3. Mobile viewport: header stays single-line and compact Feedback menu opens Bug Report
+    // 3. Clicking non-focusable dialog heading and pressing global shortcut keys must not trigger background zoom/refresh
+    const zoomLabel = page.locator('header span.font-mono', { hasText: /^\d+$/ }).first();
+    const zoomBefore = await zoomLabel.textContent();
+    await page.getByRole('button', { name: 'Bug Report' }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('heading', { name: 'Send Feedback' }).click();
+    await page.keyboard.press('+');
+    await expect(zoomLabel).toHaveText(zoomBefore!);
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    // 4. Mobile viewport: header stays single-line without horizontal overflow and compact Feedback menu opens Bug Report
     await page.setViewportSize({ width: 375, height: 812 });
     const mobileHeaderBox = await page.locator('header').boundingBox();
     expect(mobileHeaderBox).not.toBeNull();
     expect(mobileHeaderBox!.height).toBeLessThanOrEqual(54);
+    const mobileOverflow = await page.locator('header').evaluate((el) => el.scrollWidth > el.clientWidth);
+    expect(mobileOverflow).toBe(false);
 
     await page.getByRole('button', { name: 'Send feedback' }).click();
     await page.getByRole('button', { name: 'Bug Report' }).click();

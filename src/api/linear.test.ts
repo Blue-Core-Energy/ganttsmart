@@ -535,15 +535,18 @@ describe('resolveFeedbackTarget', () => {
               name: 'Custom Tracker',
               url: 'https://linear.app/acme/project/custom-tracker-abc999',
               slugId: 'abc999',
-              leadTeam: {
-                id: 'team-ops',
-                key: 'OPS',
-                name: 'Operations',
-                labels: {
-                  nodes: [{ id: 'lbl-bug-ops', name: 'Bug' }],
-                },
+              teams: {
+                nodes: [
+                  {
+                    id: 'team-ops',
+                    key: 'OPS',
+                    name: 'Operations',
+                    labels: {
+                      nodes: [{ id: 'lbl-bug-ops', name: 'Bug' }],
+                    },
+                  },
+                ],
               },
-              teams: { nodes: [] },
             },
           ],
         },

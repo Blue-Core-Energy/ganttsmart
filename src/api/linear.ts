@@ -638,6 +638,7 @@ export async function fetchWorkflowStates(apiKey: string, teamId: string): Promi
 interface FeedbackLabelNode {
   id: string;
   name: string;
+  isGroup?: boolean;
   team?: { id: string } | null;
 }
 
@@ -653,7 +654,6 @@ interface FeedbackProjectNode {
   name: string;
   url?: string | null;
   slugId?: string | null;
-  leadTeam?: FeedbackTeamNode | null;
   teams?: { nodes: FeedbackTeamNode[] } | null;
 }
 
@@ -702,6 +702,7 @@ const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
             nodes {
               id
               name
+              isGroup
             }
           }
         }
@@ -717,6 +718,7 @@ const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
         nodes {
           id
           name
+          isGroup
         }
       }
     }
@@ -725,6 +727,7 @@ const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
     nodes {
       id
       name
+      isGroup
       team {
         id
       }
@@ -769,29 +772,25 @@ export async function resolveFeedbackTarget(apiKey: string, env?: FeedbackEnv): 
     );
   }
 
-  const projectTeams: FeedbackTeamNode[] = [
-    ...(project.leadTeam ? [project.leadTeam] : []),
-    ...(project.teams?.nodes ?? []),
-  ];
+  const projectTeams: FeedbackTeamNode[] = project.teams?.nodes ?? [];
   const targetTeamKey = config.teamKey.trim().toUpperCase();
 
   const team =
     projectTeams.find((t) => t.key.trim().toUpperCase() === targetTeamKey) ??
     allTeams.find((t) => t.key.trim().toUpperCase() === targetTeamKey) ??
-    project.leadTeam ??
     project.teams?.nodes?.[0];
 
   if (!team) {
     throw new FeedbackTargetNotFoundError(`Could not find team "${config.teamKey}" for project "${project.name}".`);
   }
 
-  // Merge labels from the top-level team list if the project-nested team omitted them
+  // Merge labels from the top-level team list if the project-nested team omitted them, excluding label groups
   const fullTeam = allTeams.find((t) => t.id === team.id);
   const teamLabels = [
     ...(team.labels?.nodes ?? []),
     ...(fullTeam?.labels?.nodes ?? []),
     ...issueLabels.filter((l) => !l.team || l.team.id === team.id),
-  ];
+  ].filter((l) => !l.isGroup);
 
   const findLabelId = (name: string): string | undefined =>
     teamLabels.find((l) => l.name.trim().toLowerCase() === name)?.id;

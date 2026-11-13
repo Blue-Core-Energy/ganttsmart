@@ -135,7 +135,7 @@ function GanttView({
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
-      if (target?.closest('[role="dialog"]')) return;
+      if (target?.closest('[role="dialog"]') || document.querySelector('[role="dialog"]')) return;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) {
         if (e.key === 'Escape' && tag === 'INPUT') {
