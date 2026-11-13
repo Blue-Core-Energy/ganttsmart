@@ -256,6 +256,14 @@ describe('GET /api/linear/authorize', () => {
     const b = stateFrom(await app.request('/api/linear/authorize', { headers: authed() }));
     expect(a).not.toBe(b);
   });
+
+  it('stores ?project= in a cookie for the callback redirect', async () => {
+    const { app } = setup();
+    const res = await app.request('/api/linear/authorize?project=proj-2', { headers: authed() });
+    expect(res.status).toBe(302);
+    const cookie = res.headers.get('set-cookie') ?? '';
+    expect(cookie).toContain('linear_oauth_project=proj-2');
+  });
 });
 
 describe('GET /api/linear/callback', () => {
@@ -285,6 +293,23 @@ describe('GET /api/linear/callback', () => {
       expiresAt: null,
     });
     expectCookieCleared(res);
+  });
+
+  it('preserves linear_oauth_project across callback success and error redirects and clears the cookie', async () => {
+    const { app } = setup();
+    const okRes = await app.request(`/api/linear/callback?code=the-code&state=${STATE}`, {
+      headers: authed({ cookie: `linear_oauth_state=${STATE}; linear_oauth_project=proj-2` }),
+    });
+    expect(okRes.status).toBe(302);
+    expect(okRes.headers.get('location')).toBe('/app?project=proj-2');
+    const okCookie = okRes.headers.get('set-cookie') ?? '';
+    expect(okCookie).toContain('linear_oauth_project=;');
+
+    const errRes = await app.request(`/api/linear/callback?error=access_denied&state=${STATE}`, {
+      headers: authed({ cookie: `linear_oauth_state=${STATE}; linear_oauth_project=proj-2` }),
+    });
+    expect(errRes.status).toBe(302);
+    expect(errRes.headers.get('location')).toBe('/app?linear_error=access_denied&project=proj-2');
   });
 
   it('redirects with invalid_state and saves nothing when the state does not match', async () => {

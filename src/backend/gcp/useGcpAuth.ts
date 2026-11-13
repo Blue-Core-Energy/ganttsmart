@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toastError } from '@/components/toastStore';
+import { buildGcpLinearAuthorizeUrl } from '@/utils/projectDeepLink';
 import type { AuthState } from '../types';
 import { getJson, onSessionExpired, postJson, SessionExpiredError } from './api';
 import { readLinearError } from './linearError';
@@ -70,7 +71,7 @@ export function useGcpAuth(): AuthState {
 
   const connectLinear = useCallback(() => {
     setLinearError(null);
-    window.location.href = '/api/linear/authorize';
+    window.location.href = buildGcpLinearAuthorizeUrl(window.location.search);
   }, []);
 
   /** The server refreshes Linear tokens itself; this only re-reads whether Linear is still connected. */

@@ -5,6 +5,7 @@ import { TIME_SCALES } from '@/types';
 import type { Task, TimeScale } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import type { FeedbackType } from '@/utils/feedback';
+import { isSafeUrl } from '@/utils/url';
 import FeedbackDialog from './FeedbackDialog';
 import { toastError, toastSuccess } from './toastStore';
 
@@ -28,13 +29,17 @@ interface Props {
   projectId: string;
   tasks: Task[];
   linearToken?: string;
+  linearProjectUrl?: string | null;
+  isLinkedInLinear?: boolean;
+  linkingToLinear?: boolean;
+  onAddToLinear?: () => void;
 }
 
 const iconBtn =
   'flex items-center justify-center w-8 h-8 rounded-md text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer';
 
 const ghostBtn =
-  'flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
+  'flex items-center gap-1.5 px-2 md:px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
 
 function formatRangeLabel(tasks: Task[]): string | null {
   const dates: number[] = [];
@@ -136,6 +141,62 @@ function BugIcon({ size = 14 }: { size?: number }) {
   );
 }
 
+function LinkPlusIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
+function ExternalLinkIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      className="hidden lg:inline shrink-0"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      <polyline points="15 3 21 3 21 9" />
+      <line x1="10" y1="14" x2="21" y2="3" />
+    </svg>
+  );
+}
+
+function CheckCircleIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <polyline points="22 4 12 14.01 9 11.01" />
+    </svg>
+  );
+}
+
 export default memo(function Header({
   projectName,
   loading,
@@ -153,6 +214,10 @@ export default memo(function Header({
   projectId,
   tasks,
   linearToken,
+  linearProjectUrl,
+  isLinkedInLinear,
+  linkingToLinear,
+  onAddToLinear,
 }: Props) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
@@ -267,6 +332,50 @@ export default memo(function Header({
             Synced <span className="font-mono tabular-nums">{lastSynced}</span>
           </span>
         )}
+
+        {/* Linear project resource link */}
+        {projectId &&
+          onAddToLinear &&
+          (isLinkedInLinear ? (
+            isSafeUrl(linearProjectUrl) ? (
+              <a
+                href={linearProjectUrl!}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-2 lg:px-2.5 h-8 rounded-md text-xs font-medium text-low bg-low/10 border border-low/30 hover:bg-low/15 transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                aria-label="Open in Linear"
+                title="Linked in Linear — open project in Linear"
+              >
+                <CheckCircleIcon />
+                <span className="hidden lg:inline">Open in Linear</span>
+                <ExternalLinkIcon />
+              </a>
+            ) : (
+              <span
+                className="flex items-center gap-1.5 px-2 lg:px-2.5 h-8 rounded-md text-xs font-medium text-low bg-low/10 border border-low/30 whitespace-nowrap shrink-0"
+                aria-label="Linked in Linear"
+                title="Open in GanttSmart link is on this project's Linear page"
+              >
+                <CheckCircleIcon />
+                <span className="hidden lg:inline">Linked in Linear</span>
+              </span>
+            )
+          ) : (
+            <button
+              onClick={onAddToLinear}
+              disabled={linkingToLinear || loading}
+              className={`${ghostBtn} disabled:opacity-50 disabled:cursor-not-allowed`}
+              aria-label={linkingToLinear ? 'Linking to Linear' : 'Add to Linear'}
+              title="Add an 'Open in GanttSmart' link to this project's Linear page"
+            >
+              {linkingToLinear ? (
+                <span className="inline-block w-3.5 h-3.5 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
+              ) : (
+                <LinkPlusIcon />
+              )}
+              <span className="hidden lg:inline">{linkingToLinear ? 'Linking…' : 'Add to Linear'}</span>
+            </button>
+          ))}
 
         {/* Refresh */}
         <button onClick={onRefresh} className={ghostBtn} title="Refresh (R)">
@@ -519,7 +628,7 @@ export default memo(function Header({
         )}
 
         {/* Divider */}
-        <div className="w-px h-5 bg-border-primary mx-1" />
+        <div className="w-px h-5 bg-border-primary mx-0.5 sm:mx-1" />
 
         {/* Theme toggle */}
         <button

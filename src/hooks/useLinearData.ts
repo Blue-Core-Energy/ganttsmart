@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   DebounceCancelled,
+  type ProjectExternalLink,
   createIssueRelation,
-  removeIssueRelation,
+  createProjectExternalLink,
   fetchIssues,
+  fetchProjectExternalLinks,
   fetchProjects,
   fetchWorkflowStates,
+  findActiveExternalLink,
+  removeIssueRelation,
   updateIssueDueDate,
   updateIssueStartDate,
   updateIssueState,
@@ -14,6 +18,7 @@ import {
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
 import type { Filters, GroupBy, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
+import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
 
 const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
@@ -32,12 +37,13 @@ export function loadCustomOrder(projectId: string): string[] {
   }
 }
 
-export function useLinearData(linearToken: string, onAuthError?: () => void) {
+export function useLinearData(linearToken: string, onAuthError?: () => void, requestedProjectId?: string | null) {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(
-    () => localStorage.getItem('linear_selected_project') || '',
-  );
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [projectName, setProjectName] = useState('');
+  const [linearProjectUrl, setLinearProjectUrl] = useState<string | null>(null);
+  const [projectExternalLinks, setProjectExternalLinks] = useState<ProjectExternalLink[]>([]);
+  const [linkingToLinear, setLinkingToLinear] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [unscheduledTasks, setUnscheduledTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -64,6 +70,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
   const initialLoadDone = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingMutations = useRef(0); // guards polling from overwriting optimistic state
+  const activeProjectIdRef = useRef('');
 
   // Undo stack: stores previous task snapshots
   const undoStackRef = useRef<Array<{ tasks: Task[]; label: string }>>([]);
@@ -75,9 +82,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
   );
 
   // Custom display order (uuids), persisted per project. Empty = default sort from the API.
-  const [customOrder, setCustomOrder] = useState<string[]>(() =>
-    loadCustomOrder(localStorage.getItem('linear_selected_project') || ''),
-  );
+  const [customOrder, setCustomOrder] = useState<string[]>(() => loadCustomOrder(selectedProjectId));
 
   useEffect(() => {
     setCustomOrder(loadCustomOrder(selectedProjectId));
@@ -207,9 +212,30 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
     [linearToken, onAuthError],
   );
 
+  const loadProjectLinks = useCallback(
+    async (projectId: string) => {
+      if (!linearToken || !projectId) return;
+      try {
+        const meta = await fetchProjectExternalLinks(linearToken, projectId);
+        if (activeProjectIdRef.current !== projectId) return;
+        setLinearProjectUrl(meta.url);
+        setProjectExternalLinks(meta.externalLinks);
+      } catch (e) {
+        if (activeProjectIdRef.current !== projectId) return;
+        console.warn('Failed to fetch Linear project external links:', (e as Error).message);
+        setLinearProjectUrl(null);
+        setProjectExternalLinks([]);
+      }
+    },
+    [linearToken],
+  );
+
   const selectProject = useCallback(
     (id: string) => {
+      activeProjectIdRef.current = id;
       setSelectedProjectId(id);
+      setLinearProjectUrl(null);
+      setProjectExternalLinks([]);
       localStorage.setItem('linear_selected_project', id);
       setFilters({
         assignee: '',
@@ -221,14 +247,18 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
         showCompleted: true,
       });
       undoStackRef.current = []; // Clear undo on project switch
+      void loadProjectLinks(id);
       loadIssues(id);
     },
-    [loadIssues],
+    [loadIssues, loadProjectLinks],
   );
 
   const refresh = useCallback(() => {
-    if (selectedProjectId) loadIssues(selectedProjectId);
-  }, [selectedProjectId, loadIssues]);
+    if (selectedProjectId) {
+      void loadProjectLinks(selectedProjectId);
+      loadIssues(selectedProjectId);
+    }
+  }, [selectedProjectId, loadIssues, loadProjectLinks]);
 
   const zoomIn = useCallback(() => {
     setDayWidth((w) => Math.min(w + 7, MAX_DAY_WIDTH));
@@ -498,15 +528,55 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
       try {
         const p = await loadProjects();
         if (!p?.length) return;
-        const target = selectedProjectId && p.find((x) => x.id === selectedProjectId) ? selectedProjectId : p[0].id;
+        const saved = localStorage.getItem('linear_selected_project');
+        const target = resolveProjectId(p, requestedProjectId, saved);
+        activeProjectIdRef.current = target;
         setSelectedProjectId(target);
         localStorage.setItem('linear_selected_project', target);
+        void loadProjectLinks(target);
         await loadIssues(target);
       } catch (e) {
         setError((e as Error).message);
       }
     })();
-  }, [linearToken, selectedProjectId, loadProjects, loadIssues]);
+  }, [linearToken, requestedProjectId, loadProjects, loadIssues, loadProjectLinks]);
+
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+
+  const isLinkedInLinear = useMemo(() => {
+    if (!selectedProjectId || !currentOrigin) return false;
+    const targetUrl = buildProjectDeepLink(currentOrigin, selectedProjectId);
+    return Boolean(findActiveExternalLink(projectExternalLinks, targetUrl));
+  }, [selectedProjectId, currentOrigin, projectExternalLinks]);
+
+  const addProjectLinkToLinear = useCallback(async () => {
+    if (!linearToken || !selectedProjectId || !currentOrigin) return;
+    const projectId = selectedProjectId;
+    setLinkingToLinear(true);
+    try {
+      const result = await createProjectExternalLink(linearToken, projectId, currentOrigin);
+      if (activeProjectIdRef.current !== projectId) return;
+      setProjectExternalLinks((prev) =>
+        findActiveExternalLink(prev, result.link.url) ? prev : [...prev, result.link],
+      );
+      if (result.projectUrl) setLinearProjectUrl(result.projectUrl);
+      if (result.created) {
+        toastSuccess('Added "Open in GanttSmart" link to Linear project');
+      } else {
+        toast('Project is already linked in Linear', 'info');
+      }
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (msg.includes('authentication expired')) {
+        toastError('Linear session expired. Reconnecting...');
+        onAuthError?.();
+        return;
+      }
+      toastError(`Failed to add link to Linear: ${msg}`);
+    } finally {
+      setLinkingToLinear(false);
+    }
+  }, [linearToken, selectedProjectId, currentOrigin, onAuthError]);
 
   // Polling: auto-refresh every 30s (only when tab is visible)
   useEffect(() => {
@@ -556,6 +626,10 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
     projects,
     selectedProjectId,
     projectName,
+    linearProjectUrl,
+    isLinkedInLinear,
+    linkingToLinear,
+    addProjectLinkToLinear,
     tasks,
     unscheduledTasks,
     filteredTasks,

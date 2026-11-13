@@ -1346,4 +1346,256 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('deep-links to ?project=proj-2 overriding localStorage, syncs URL on switch, and links project in Linear', async ({
+    page,
+    baseURL,
+  }) => {
+    const errors = trackErrors(page);
+
+    const projectsList = [
+      { id: 'proj-1', name: 'Alpha Platform' },
+      { id: 'proj-2', name: 'Beta Mobile' },
+    ];
+
+    const projectData: Record<string, { name: string; linearUrl: string; taskId: string; title: string }> = {
+      'proj-1': {
+        name: 'Alpha Platform',
+        linearUrl: 'https://linear.app/bluecoreenergy/project/alpha-platform-proj-1',
+        taskId: 'ALP-401',
+        title: 'Upgrade auth gateway',
+      },
+      'proj-2': {
+        name: 'Beta Mobile',
+        linearUrl: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+        taskId: 'MOB-301',
+        title: 'Ship offline cache',
+      },
+    };
+
+    const externalLinksByProject: Record<
+      string,
+      Array<{ id: string; label: string; url: string; archivedAt: string | null }>
+    > = {
+      'proj-1': [],
+      'proj-2': [],
+    };
+    const createdLinks: Array<{ projectId: string; url: string; label: string }> = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      // Intentionally set proj-1 in localStorage to verify ?project=proj-2 overrides it
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page
+      .context()
+      .route('https://linear.app/**', (route) =>
+        route.fulfill({ status: 200, contentType: 'text/html', body: '<html><body>Linear</body></html>' }),
+      );
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string; input?: { projectId: string; url: string; label: string } };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: projectsList } } }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        const projectId = payload?.variables?.id ?? 'proj-2';
+        const proj = projectData[projectId] ?? projectData['proj-2'];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                url: proj.linearUrl,
+                externalLinks: { nodes: externalLinksByProject[projectId] ?? [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('entityExternalLinkCreate')) {
+        const input = payload?.variables?.input;
+        if (!input) {
+          await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Missing input' }] }) });
+          return;
+        }
+        createdLinks.push(input);
+        const created = {
+          id: `link-${createdLinks.length}`,
+          label: input.label,
+          url: input.url,
+          archivedAt: null,
+        };
+        externalLinksByProject[input.projectId] = [...(externalLinksByProject[input.projectId] ?? []), created];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              entityExternalLinkCreate: {
+                success: true,
+                entityExternalLink: { id: created.id, label: created.label, url: created.url },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        const projectId = payload?.variables?.id ?? 'proj-2';
+        const proj = projectData[projectId] ?? projectData['proj-2'];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: proj.name,
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(15),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: `uuid-${proj.taskId}`,
+                      identifier: proj.taskId,
+                      title: proj.title,
+                      description: startTagOffsetDays(-1),
+                      dueDate: isoOffsetDays(5),
+                      url: `https://linear.app/bluecoreenergy/issue/${proj.taskId}`,
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    // 1. Navigating to /app?project=proj-2 overrides localStorage (proj-1) and loads proj-2
+    await page.goto('/app?project=proj-2');
+    await expect(page).toHaveURL(/\/app\?project=proj-2$/);
+    await expect(page.getByRole('button', { name: 'Beta Mobile' })).toBeVisible();
+    await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ALP-401"]')).toHaveCount(0);
+
+    // 2. Switching projects keeps ?project= synchronized in the URL
+    await page.getByRole('button', { name: 'Beta Mobile' }).click();
+    await page.getByRole('option', { name: 'Alpha Platform' }).click();
+    await expect(page).toHaveURL(/\/app\?project=proj-1$/);
+    await expect(page.locator('[data-task-bar="ALP-401"]')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Alpha Platform' }).click();
+    await page.getByRole('option', { name: 'Beta Mobile' }).click();
+    await expect(page).toHaveURL(/\/app\?project=proj-2$/);
+    await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
+
+    // 3. Clicking "Add to Linear" creates the EntityExternalLink and updates button state to "Open in Linear"
+    const addBtn = page.getByRole('button', { name: 'Add to Linear' });
+    await expect(addBtn).toBeVisible();
+    await expect(addBtn).toHaveAttribute('title', "Add an 'Open in GanttSmart' link to this project's Linear page");
+    await addBtn.click();
+
+    await expect(page.getByText('Added "Open in GanttSmart" link to Linear project')).toBeVisible();
+    expect(createdLinks).toEqual([
+      {
+        projectId: 'proj-2',
+        url: `${baseURL}/app?project=proj-2`,
+        label: 'Open in GanttSmart',
+      },
+    ]);
+    await expect(page.getByRole('button', { name: 'Add to Linear' })).toHaveCount(0);
+
+    const openLink = page.getByRole('link', { name: 'Open in Linear' });
+    await expect(openLink).toBeVisible();
+
+    // Verify header fits cleanly without wrapping or horizontal overflow across tablet, laptop, and mobile widths
+    for (const vp of [
+      { width: 1024, height: 768 },
+      { width: 768, height: 900 },
+      { width: 375, height: 812 },
+    ]) {
+      await page.setViewportSize(vp);
+      const metrics = await page.locator('header').evaluate((el) => ({
+        overflow: el.scrollWidth > el.clientWidth,
+        height: el.getBoundingClientRect().height,
+      }));
+      expect(metrics.overflow).toBe(false);
+      expect(metrics.height).toBeLessThanOrEqual(54);
+      const linkBox = await openLink.boundingBox();
+      expect(linkBox).not.toBeNull();
+      expect(linkBox!.height).toBeLessThanOrEqual(34);
+    }
+
+    await page.setViewportSize({ width: 1280, height: 720 });
+    const [popup] = await Promise.all([page.waitForEvent('popup'), openLink.click()]);
+    await expect(popup).toHaveURL('https://linear.app/bluecoreenergy/project/beta-mobile-proj-2');
+    await popup.close();
+
+    expect(errors).toEqual([]);
+  });
 });

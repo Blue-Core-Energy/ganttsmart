@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import AuthPage from '@/components/AuthPage';
 import FilterBar from '@/components/FilterBar';
 import GanttChart from '@/components/GanttChart';
@@ -18,6 +19,12 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
 import { usePlanningHistory } from '@/hooks/usePlanningHistory';
 import { useTheme } from '@/hooks/useTheme';
+import {
+  clearPendingOAuthProject,
+  peekPendingOAuthProject,
+  readProjectParam,
+  syncProjectQueryParam,
+} from '@/utils/projectDeepLink';
 
 function GanttView({
   linearToken,
@@ -31,6 +38,15 @@ function GanttView({
   onSignOut: () => void;
 }) {
   const { theme, setTheme } = useTheme();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [initialRequestedProject] = useState<string | null>(
+    () => readProjectParam(searchParams.toString()) ?? peekPendingOAuthProject(),
+  );
+
+  useEffect(() => {
+    clearPendingOAuthProject();
+  }, []);
+
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem('gantt_onboarding_done');
   });
@@ -39,6 +55,10 @@ function GanttView({
     projects,
     selectedProjectId,
     projectName,
+    linearProjectUrl,
+    isLinkedInLinear,
+    linkingToLinear,
+    addProjectLinkToLinear,
     tasks,
     unscheduledTasks,
     filteredTasks,
@@ -66,7 +86,17 @@ function GanttView({
     createRelation,
     removeRelation,
     reorderTask,
-  } = useLinearData(linearToken, onLinearAuthError);
+  } = useLinearData(linearToken, onLinearAuthError, initialRequestedProject);
+
+  // Keep ?project=<selectedProjectId> synchronized in the URL for bookmarkable/shareable deep links
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    const next = syncProjectQueryParam(selectedProjectId, searchParamsRef.current);
+    if (next) setSearchParams(next, { replace: true });
+  }, [selectedProjectId, setSearchParams]);
 
   // Planning history: track baselines and log changes
   const { baselines, syncBaselines, logChange, logStatusTransition } = usePlanningHistory(selectedProjectId);
@@ -178,6 +208,10 @@ function GanttView({
         projectId={selectedProjectId}
         tasks={filteredTasks}
         linearToken={linearToken}
+        linearProjectUrl={linearProjectUrl}
+        isLinkedInLinear={isLinkedInLinear}
+        linkingToLinear={linkingToLinear}
+        onAddToLinear={addProjectLinkToLinear}
       />
 
       <FilterBar

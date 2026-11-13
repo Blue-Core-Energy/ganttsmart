@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
+import { resolvePostOAuthRedirectPath } from '@/utils/projectDeepLink';
 
 export default function Callback() {
   const [searchParams] = useSearchParams();
@@ -40,7 +41,7 @@ export default function Callback() {
         }
 
         setStatus('Connected! Redirecting...');
-        setTimeout(() => navigate('/app', { replace: true }), 500);
+        setTimeout(() => navigate(resolvePostOAuthRedirectPath(window.location.search), { replace: true }), 500);
       } catch (err) {
         setError((err as Error).message);
       }
@@ -79,7 +80,7 @@ export default function Callback() {
             <h2 className="text-xl font-bold text-white mb-3">Connection Failed</h2>
             <p className="text-sm text-urgent mb-6">{error}</p>
             <button
-              onClick={() => navigate('/app', { replace: true })}
+              onClick={() => navigate(resolvePostOAuthRedirectPath(window.location.search), { replace: true })}
               className="px-6 py-2.5 bg-bg-hover border border-border-secondary rounded-lg text-text-primary text-sm font-medium cursor-pointer hover:bg-border-secondary transition-colors"
             >
               Back to App

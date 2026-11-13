@@ -10,7 +10,16 @@ vi.mock('@/backend', () => ({
   },
 }));
 
-import { createFeedbackIssue, FeedbackTargetNotFoundError, fetchIssues, resolveFeedbackTarget } from './linear';
+import {
+  GANTT_LINK_LABEL,
+  createFeedbackIssue,
+  createProjectExternalLink,
+  FeedbackTargetNotFoundError,
+  fetchIssues,
+  fetchProjectExternalLinks,
+  findActiveExternalLink,
+  resolveFeedbackTarget,
+} from './linear';
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify({ data }), {
@@ -763,5 +772,190 @@ describe('createFeedbackIssue', () => {
         description: 'Details',
       }),
     ).rejects.toThrow('Linear did not confirm issue creation.');
+  });
+});
+
+describe('Linear project external links', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  it('fetchProjectExternalLinks returns project url and filters out archived links', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        project: {
+          url: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+          externalLinks: {
+            nodes: [
+              {
+                id: 'link-1',
+                label: GANTT_LINK_LABEL,
+                url: 'https://gantt.example.com/app?project=proj-2',
+                archivedAt: null,
+              },
+              {
+                id: 'link-2',
+                label: 'Old link',
+                url: 'https://gantt.example.com/app?project=proj-2',
+                archivedAt: '2026-01-01T00:00:00Z',
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const result = await fetchProjectExternalLinks('tok', 'proj-2');
+    expect(result).toEqual({
+      url: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+      externalLinks: [
+        {
+          id: 'link-1',
+          label: GANTT_LINK_LABEL,
+          url: 'https://gantt.example.com/app?project=proj-2',
+          archivedAt: null,
+        },
+      ],
+    });
+  });
+
+  it('createProjectExternalLink creates a new link when none exists for the target URL', async () => {
+    const calls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
+    linearRequestMock.mockImplementation(
+      async (_token: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        calls.push(body);
+        if (body.query.includes('externalLinks')) {
+          return jsonResponse({
+            project: {
+              url: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+              externalLinks: {
+                nodes: [
+                  // Archived link with same URL should not block creating an active link
+                  {
+                    id: 'archived-1',
+                    label: GANTT_LINK_LABEL,
+                    url: 'https://gantt.example.com/app?project=proj-2',
+                    archivedAt: '2026-01-01T00:00:00Z',
+                  },
+                  // Active link for a different origin should not block creating one for this origin
+                  {
+                    id: 'other-origin',
+                    label: GANTT_LINK_LABEL,
+                    url: 'http://localhost:5173/app?project=proj-2',
+                    archivedAt: null,
+                  },
+                ],
+              },
+            },
+          });
+        }
+        if (body.query.includes('entityExternalLinkCreate')) {
+          return jsonResponse({
+            entityExternalLinkCreate: {
+              success: true,
+              entityExternalLink: {
+                id: 'new-link-1',
+                label: GANTT_LINK_LABEL,
+                url: 'https://gantt.example.com/app?project=proj-2',
+              },
+            },
+          });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      },
+    );
+
+    const res = await createProjectExternalLink('tok', 'proj-2', 'https://gantt.example.com');
+    expect(res).toEqual({
+      created: true,
+      projectUrl: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+      link: {
+        id: 'new-link-1',
+        label: GANTT_LINK_LABEL,
+        url: 'https://gantt.example.com/app?project=proj-2',
+        archivedAt: null,
+      },
+    });
+    expect(calls).toHaveLength(2);
+    expect(calls[1].variables).toEqual({
+      input: {
+        projectId: 'proj-2',
+        url: 'https://gantt.example.com/app?project=proj-2',
+        label: GANTT_LINK_LABEL,
+      },
+    });
+  });
+
+  it('createProjectExternalLink avoids duplicate creation when an active link with the same URL exists', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        project: {
+          url: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+          externalLinks: {
+            nodes: [
+              {
+                id: 'existing-1',
+                label: 'Existing GanttSmart Link',
+                url: 'https://gantt.example.com/app?project=proj-2',
+                archivedAt: null,
+              },
+            ],
+          },
+        },
+      }),
+    );
+
+    const res = await createProjectExternalLink('tok', 'proj-2', 'https://gantt.example.com');
+    expect(res).toEqual({
+      created: false,
+      projectUrl: 'https://linear.app/bluecoreenergy/project/beta-mobile-proj-2',
+      link: {
+        id: 'existing-1',
+        label: 'Existing GanttSmart Link',
+        url: 'https://gantt.example.com/app?project=proj-2',
+        archivedAt: null,
+      },
+    });
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('createProjectExternalLink throws when entityExternalLinkCreate returns success: false', async () => {
+    linearRequestMock
+      .mockResolvedValueOnce(
+        jsonResponse({
+          project: { url: null, externalLinks: { nodes: [] } },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          entityExternalLinkCreate: { success: false, entityExternalLink: null },
+        }),
+      );
+
+    await expect(createProjectExternalLink('tok', 'proj-2', 'https://gantt.example.com')).rejects.toThrow(
+      'Could not create external link on Linear project',
+    );
+  });
+
+  it('findActiveExternalLink ignores archived links and matches normalized URLs', () => {
+    expect(
+      findActiveExternalLink(
+        [
+          {
+            id: '1',
+            label: 'Archived',
+            url: 'https://gantt.example.com/app?project=proj-2',
+            archivedAt: '2026-01-01T00:00:00Z',
+          },
+          {
+            id: '2',
+            label: 'Active',
+            url: 'https://gantt.example.com/app?project=proj-2',
+            archivedAt: null,
+          },
+        ],
+        'https://gantt.example.com/app?project=proj-2',
+      )?.id,
+    ).toBe('2');
   });
 });
