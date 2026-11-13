@@ -560,7 +560,7 @@ export async function updateMilestoneTargetDate(
 }
 
 export async function updateIssueState(apiKey: string, issueId: string, stateId: string): Promise<void> {
-  await gql(
+  const data = await gql(
     apiKey,
     `mutation($id: String!, $stateId: String!) {
       issueUpdate(id: $id, input: { stateId: $stateId }) {
@@ -569,6 +569,10 @@ export async function updateIssueState(apiKey: string, issueId: string, stateId:
     }`,
     { id: issueId, stateId },
   );
+  const res = data.issueUpdate as { success?: boolean } | undefined;
+  if (res && res.success === false) {
+    throw new Error('Linear did not confirm issue status update.');
+  }
 }
 
 export async function createIssueRelation(apiKey: string, issueId: string, relatedIssueId: string): Promise<void> {
@@ -618,8 +622,8 @@ export async function removeIssueRelation(apiKey: string, issueId: string, relat
 export async function fetchWorkflowStates(apiKey: string, teamId: string): Promise<WorkflowState[]> {
   const data = await gql(
     apiKey,
-    `query($teamId: String!) {
-      workflowStates(filter: { team: { id: { eq: $teamId } } }) {
+    `query($teamId: ID!) {
+      workflowStates(first: 100, filter: { team: { id: { eq: $teamId } } }) {
         nodes {
           id
           name
@@ -630,8 +634,8 @@ export async function fetchWorkflowStates(apiKey: string, teamId: string): Promi
     }`,
     { teamId },
   );
-  const states = data.workflowStates as { nodes: WorkflowState[] };
-  return states.nodes.sort((a, b) => a.position - b.position);
+  const states = (data.workflowStates as { nodes?: WorkflowState[] } | undefined)?.nodes ?? [];
+  return [...states].sort((a, b) => a.position - b.position);
 }
 
 // ---- Feedback issue creation ----
