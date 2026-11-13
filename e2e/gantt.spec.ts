@@ -255,4 +255,204 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('searches and selects a project in the project dropdown', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    const projectsList = [
+      { id: 'proj-1', name: 'Alpha Platform' },
+      { id: 'proj-2', name: 'Beta Mobile' },
+      { id: 'proj-3', name: 'Demo Project' },
+      { id: 'proj-4', name: 'Telemetry Pipeline' },
+      { id: 'proj-5', name: 'Valve Actuator' },
+    ];
+
+    const tasksByProject: Record<string, { name: string; id: string; title: string }> = {
+      'proj-1': { name: 'Alpha Platform', id: 'ALP-401', title: 'Upgrade auth gateway' },
+      'proj-3': { name: 'Demo Project', id: 'ENG-101', title: 'Design valve manifold' },
+      'proj-4': { name: 'Telemetry Pipeline', id: 'TEL-201', title: 'Stream sensor metrics' },
+      'proj-2': { name: 'Beta Mobile', id: 'MOB-301', title: 'Ship offline cache' },
+      'proj-5': { name: 'Valve Actuator', id: 'VLV-501', title: 'Calibrate solenoid' },
+    };
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-3');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: projectsList } } }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        const projectId = payload?.variables?.id ?? 'proj-3';
+        const proj = tasksByProject[projectId] ?? tasksByProject['proj-3'];
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: proj.name,
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(15),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: `uuid-${proj.id}`,
+                      identifier: proj.id,
+                      title: proj.title,
+                      description: startTagOffsetDays(-1),
+                      dueDate: isoOffsetDays(5),
+                      url: `https://linear.app/bluecoreenergy/issue/${proj.id}`,
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    // Set a task search filter to verify Escape in project search doesn't clear task search
+    const taskSearch = page.getByPlaceholder('Search tasks…');
+    await taskSearch.fill('manifold');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    // Open project dropdown — search input receives focus automatically
+    const projectTrigger = page.getByRole('button', { name: 'Demo Project' });
+    await projectTrigger.click();
+
+    const projectSearch = page.getByPlaceholder('Search projects…');
+    await expect(projectSearch).toBeVisible();
+    await expect(projectSearch).toBeFocused();
+    await expect(page.getByRole('option')).toHaveCount(5);
+
+    // Non-matching query displays empty state
+    await projectSearch.fill('zzz-unknown');
+    await expect(page.getByText('No projects found')).toBeVisible();
+    await expect(page.getByRole('option')).toHaveCount(0);
+
+    // Clear button restores all options
+    await page.getByRole('button', { name: 'Clear search' }).click();
+    await expect(projectSearch).toHaveValue('');
+    await expect(page.getByRole('option')).toHaveCount(5);
+
+    // Typing filters case-insensitively
+    await projectSearch.fill('valve');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await expect(page.getByRole('option', { name: 'Valve Actuator' })).toBeVisible();
+
+    // Escape closes the dropdown, returns focus to trigger, and preserves task search
+    await page.keyboard.press('Escape');
+    await expect(projectSearch).toHaveCount(0);
+    await expect(projectTrigger).toBeFocused();
+    await expect(taskSearch).toHaveValue('manifold');
+
+    // Clear task search before switching projects
+    await taskSearch.fill('');
+
+    // Re-open, search, and select via Enter key
+    await projectTrigger.click();
+    await expect(projectSearch).toHaveValue('');
+    await projectSearch.fill('telemetry');
+    await expect(page.getByRole('option')).toHaveCount(1);
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('button', { name: 'Telemetry Pipeline' })).toBeVisible();
+    await expect(page.locator('[data-task-bar="TEL-201"]')).toBeVisible();
+
+    // Re-open, filter, and select by clicking an option
+    await page.getByRole('button', { name: 'Telemetry Pipeline' }).click();
+    await expect(projectSearch).toHaveValue('');
+    await projectSearch.fill('beta');
+    await page.getByRole('option', { name: 'Beta Mobile' }).click();
+
+    await expect(page.getByRole('button', { name: 'Beta Mobile' })).toBeVisible();
+    await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
+
+    // Navigate filtered results with ArrowDown + Enter
+    await page.getByRole('button', { name: 'Beta Mobile' }).click();
+    await projectSearch.fill('a');
+    // Matches: Alpha Platform, Beta Mobile, Valve Actuator -> initial highlight is Beta Mobile (selected);
+    // ArrowDown moves to Valve Actuator
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('button', { name: 'Valve Actuator' })).toBeVisible();
+    await expect(page.locator('[data-task-bar="VLV-501"]')).toBeVisible();
+
+    // Tab from the search input closes the dropdown and moves focus to the next control (Assignee)
+    await page.getByRole('button', { name: 'Valve Actuator' }).click();
+    await expect(projectSearch).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(projectSearch).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Assignee' })).toBeFocused();
+
+    expect(errors).toEqual([]);
+  });
 });
