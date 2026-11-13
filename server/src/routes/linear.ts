@@ -11,8 +11,17 @@ const GRAPHQL_TIMEOUT_MS = 30_000;
 const MAX_BODY_BYTES = 1024 * 1024;
 
 const STATE_COOKIE = 'linear_oauth_state';
+const PROJECT_COOKIE = 'linear_oauth_project';
 const STATE_COOKIE_PATH = '/api/linear';
 const STATE_MAX_AGE_S = 600;
+const MAX_PROJECT_PARAM_LEN = 200;
+
+function sanitizeProjectParam(value: string | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > MAX_PROJECT_PARAM_LEN || /[\r\n\0]/.test(trimmed)) return null;
+  return trimmed;
+}
 
 const RECONNECT = { error: 'Linear authentication expired. Please reconnect.', reconnect: true } as const;
 
@@ -99,6 +108,18 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       path: STATE_COOKIE_PATH,
       maxAge: STATE_MAX_AGE_S,
     });
+    const project = sanitizeProjectParam(c.req.query('project'));
+    if (project) {
+      setCookie(c, PROJECT_COOKIE, project, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+        path: STATE_COOKIE_PATH,
+        maxAge: STATE_MAX_AGE_S,
+      });
+    } else if (getCookie(c, PROJECT_COOKIE) !== undefined) {
+      deleteCookie(c, PROJECT_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
+    }
     return c.redirect(oauth.authorizeUrl(state), 302);
   });
 
@@ -106,7 +127,19 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
     const expected = getCookie(c, STATE_COOKIE);
     // The state is single use: clear it whatever happens next.
     deleteCookie(c, STATE_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
-    const fail = (code: string) => c.redirect(`/app?linear_error=${code}`, 302);
+    const rawProject = getCookie(c, PROJECT_COOKIE);
+    if (rawProject !== undefined) {
+      deleteCookie(c, PROJECT_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
+    }
+    const project = sanitizeProjectParam(rawProject);
+
+    const appUrl = (extra?: Record<string, string>) => {
+      const params = new URLSearchParams(extra);
+      if (project) params.set('project', project);
+      const qs = params.toString();
+      return qs ? `/app?${qs}` : '/app';
+    };
+    const fail = (code: string) => c.redirect(appUrl({ linear_error: code }), 302);
 
     const error = c.req.query('error');
     if (error !== undefined) return fail(oauthErrorCode(error));
@@ -125,7 +158,7 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       console.error('Linear code exchange failed', reason(err));
       return fail('exchange_failed');
     }
-    return c.redirect('/app', 302);
+    return c.redirect(appUrl(), 302);
   });
 
   routes.post('/disconnect', async (c) => {

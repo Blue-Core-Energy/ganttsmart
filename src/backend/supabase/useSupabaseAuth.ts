@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { toastError } from '@/components/toastStore';
+import { buildAppPathWithProject, readProjectParam, savePendingOAuthProject } from '@/utils/projectDeepLink';
 import type { AuthState } from '../types';
 import { connectLinear } from './LinearConnectSupabase';
 
@@ -235,9 +236,11 @@ export function useSupabaseAuth(): AuthState {
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
+    const project = readProjectParam(window.location.search);
+    if (project) savePendingOAuthProject(project);
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: `${window.location.origin}/app` },
+      options: { redirectTo: `${window.location.origin}${buildAppPathWithProject(project)}` },
     });
     if (error) throw error;
   }, []);

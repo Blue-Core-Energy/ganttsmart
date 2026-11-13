@@ -2,6 +2,7 @@ import { backend } from '@/backend';
 import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
 import { getFeedbackConfig, type FeedbackEnv, type FeedbackType } from '@/utils/feedback';
 import { isIgnoredIssueState, type IssueStateLike } from '@/utils/issues';
+import { buildProjectDeepLink } from '@/utils/projectDeepLink';
 import { sortTasks } from '@/utils/tasks';
 
 // ---- Rate limiter: debounce + queue ----
@@ -878,4 +879,140 @@ export async function createFeedbackIssue({
   }
 
   return payload.issue;
+}
+
+// ---- Linear project external resource links ----
+
+export const GANTT_LINK_LABEL = 'Open in GanttSmart';
+
+export interface ProjectExternalLink {
+  id: string;
+  label: string;
+  url: string;
+  archivedAt: string | null;
+}
+
+export interface ProjectLinearMetadata {
+  url: string | null;
+  externalLinks: ProjectExternalLink[];
+}
+
+function normalizeLinkUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  try {
+    return new URL(trimmed).toString();
+  } catch {
+    return trimmed;
+  }
+}
+
+/** Find an active (non-archived) external link pointing to the same URL. */
+export function findActiveExternalLink(
+  links: ProjectExternalLink[],
+  targetUrl: string,
+): ProjectExternalLink | undefined {
+  const normalizedTarget = normalizeLinkUrl(targetUrl);
+  return links.find((link) => link.archivedAt == null && normalizeLinkUrl(link.url) === normalizedTarget);
+}
+
+/** Fetch a Linear project's URL and active external resource links. */
+export async function fetchProjectExternalLinks(apiKey: string, projectId: string): Promise<ProjectLinearMetadata> {
+  const data = await gql(
+    apiKey,
+    `query ProjectExternalLinks($id: String!) {
+      project(id: $id) {
+        url
+        externalLinks {
+          nodes {
+            id
+            label
+            url
+            archivedAt
+          }
+        }
+      }
+    }`,
+    { id: projectId },
+  );
+
+  const project = data?.project as {
+    url?: string | null;
+    externalLinks?: { nodes?: ProjectExternalLink[] } | null;
+  } | null;
+
+  const nodes = project?.externalLinks?.nodes ?? [];
+  return {
+    url: typeof project?.url === 'string' && project.url ? project.url : null,
+    externalLinks: nodes.filter((link): link is ProjectExternalLink => Boolean(link) && link.archivedAt == null),
+  };
+}
+
+/**
+ * Create an "Open in GanttSmart" external link on a Linear project pointing to
+ * `${origin}/app?project=${projectId}`. Avoids creating a duplicate if an active
+ * link with the same URL already exists.
+ */
+export async function createProjectExternalLink(
+  apiKey: string,
+  projectId: string,
+  origin: string,
+  options?: { label?: string; existingLinks?: ProjectExternalLink[]; projectUrl?: string | null },
+): Promise<{ link: ProjectExternalLink; created: boolean; projectUrl: string | null }> {
+  const label = options?.label ?? GANTT_LINK_LABEL;
+  const targetUrl = buildProjectDeepLink(origin, projectId);
+
+  let projectUrl: string | null = options?.projectUrl ?? null;
+  let linksToCheck = options?.existingLinks;
+
+  if (!linksToCheck) {
+    const meta = await fetchProjectExternalLinks(apiKey, projectId);
+    projectUrl = meta.url;
+    linksToCheck = meta.externalLinks;
+  }
+
+  const existing = findActiveExternalLink(linksToCheck, targetUrl);
+  if (existing) {
+    return { link: existing, created: false, projectUrl };
+  }
+
+  const data = await gql(
+    apiKey,
+    `mutation($input: EntityExternalLinkCreateInput!) {
+      entityExternalLinkCreate(input: $input) {
+        success
+        entityExternalLink {
+          id
+          label
+          url
+        }
+      }
+    }`,
+    {
+      input: {
+        projectId,
+        url: targetUrl,
+        label,
+      },
+    },
+  );
+
+  const res = data?.entityExternalLinkCreate as {
+    success?: boolean;
+    entityExternalLink?: { id: string; label: string; url: string } | null;
+  } | null;
+
+  if (!res?.success || !res.entityExternalLink) {
+    throw new Error('Could not create external link on Linear project');
+  }
+
+  return {
+    link: {
+      id: res.entityExternalLink.id,
+      label: res.entityExternalLink.label,
+      url: res.entityExternalLink.url,
+      archivedAt: null,
+    },
+    created: true,
+    projectUrl,
+  };
 }
