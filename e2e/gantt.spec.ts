@@ -446,6 +446,13 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('button', { name: 'Valve Actuator' })).toBeVisible();
     await expect(page.locator('[data-task-bar="VLV-501"]')).toBeVisible();
 
+    // Tab from the search input closes the dropdown and moves focus to the next control (Assignee)
+    await page.getByRole('button', { name: 'Valve Actuator' }).click();
+    await expect(projectSearch).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(projectSearch).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Assignee' })).toBeFocused();
+
     expect(errors).toEqual([]);
   });
 });

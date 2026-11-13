@@ -130,7 +130,8 @@ export default function CustomDropdown({
     }
 
     if (e.key === 'Tab') {
-      closeDropdown();
+      // Defer closing until after the browser completes native Tab focus traversal
+      setTimeout(() => closeDropdown(), 0);
       return;
     }
 
@@ -170,6 +171,7 @@ export default function CustomDropdown({
         onClick={() => (open ? closeDropdown() : openDropdown())}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
         className="flex items-center gap-2 py-[7px] pl-2.5 pr-7 bg-bg-card border border-border-secondary rounded-md text-text-primary text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted focus:border-accent max-w-[200px] bg-no-repeat bg-[right_10px_center] bg-[length:10px_6px] w-full"
         style={{ backgroundImage: selectBgImage }}
       >
@@ -266,6 +268,7 @@ export default function CustomDropdown({
                 id={`${listboxId}-opt-0`}
                 type="button"
                 role="option"
+                tabIndex={-1}
                 aria-selected={!value}
                 onMouseEnter={() => setHighlightedIndex(0)}
                 onClick={() => selectValue('')}
@@ -300,6 +303,7 @@ export default function CustomDropdown({
                     id={`${listboxId}-opt-${itemIndex}`}
                     type="button"
                     role="option"
+                    tabIndex={-1}
                     aria-selected={isSelected}
                     title={opt.label}
                     onMouseEnter={() => setHighlightedIndex(itemIndex)}
