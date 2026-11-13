@@ -3,12 +3,12 @@ import { supabase } from '@/lib/supabase';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
 import type { Filters, GroupBy, Milestone, Task, TimeScale } from '@/types';
 import { filterActiveTasks, isIgnoredTask } from '@/utils/issues';
+import { filterTasks, isTaskDone, mergeUnifiedTasks } from '@/utils/tasks';
 
 const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 
 export function useSharedData(shareToken: string) {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [doneTasks, setDoneTasks] = useState<Task[]>([]);
   const [unscheduledTasks, setUnscheduledTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [projectName, setProjectName] = useState('');
@@ -27,23 +27,16 @@ export function useSharedData(shareToken: string) {
     search: '',
     dateFrom: '',
     dateTo: '',
+    showCompleted: true,
   });
 
   const assignees = useMemo(() => [...new Set(tasks.map((t) => t.assignee))].sort(), [tasks]);
-  const statuses = useMemo(() => [...new Set(tasks.map((t) => t.status))].sort(), [tasks]);
+  const statuses = useMemo(
+    () => [...new Set(tasks.filter((t) => filters.showCompleted || !isTaskDone(t)).map((t) => t.status))].sort(),
+    [tasks, filters.showCompleted],
+  );
 
-  const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      if (!filters.priorities.has(t.priorityVal)) return false;
-      if (filters.assignee && t.assignee !== filters.assignee) return false;
-      if (filters.status && t.status !== filters.status) return false;
-      if (filters.search) {
-        const hay = `${t.id} ${t.title} ${t.assignee} ${t.status}`.toLowerCase();
-        if (!hay.includes(filters.search.toLowerCase())) return false;
-      }
-      return true;
-    });
-  }, [tasks, filters]);
+  const filteredTasks = useMemo(() => filterTasks(tasks, filters), [tasks, filters]);
 
   const fetchSharedData = useCallback(
     async (password?: string) => {
@@ -84,8 +77,7 @@ export function useSharedData(shareToken: string) {
 
         setNeedsPassword(false);
         setProjectName(data.projectName);
-        setTasks(filterActiveTasks(rawTasks, ignoredIds));
-        setDoneTasks(filterActiveTasks(rawDone, ignoredIds));
+        setTasks(mergeUnifiedTasks(filterActiveTasks(rawTasks, ignoredIds), filterActiveTasks(rawDone, ignoredIds)));
         setUnscheduledTasks(filterActiveTasks(rawUnscheduled, ignoredIds));
         setMilestones(data.cachedData?.milestones || []);
         setCachedAt(data.cachedAt);
@@ -122,7 +114,6 @@ export function useSharedData(shareToken: string) {
 
   return {
     tasks,
-    doneTasks,
     unscheduledTasks,
     filteredTasks,
     milestones,

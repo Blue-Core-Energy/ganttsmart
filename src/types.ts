@@ -78,4 +78,5 @@ export interface Filters {
   search: string;
   dateFrom: string;
   dateTo: string;
+  showCompleted: boolean;
 }

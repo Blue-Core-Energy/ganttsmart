@@ -147,6 +147,24 @@ function BaselineIcon() {
   );
 }
 
+function CheckIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
 function XIcon() {
   return (
     <svg
@@ -192,7 +210,9 @@ export default function FilterBar({
   const hasStatus = !!filters.status;
   const hasDateRange = !!filters.dateFrom || !!filters.dateTo;
   const prioritiesFiltered = filters.priorities.size > 0 && filters.priorities.size < 5;
-  const anyActiveChip = hasSearch || hasAssignee || hasStatus || hasDateRange || prioritiesFiltered;
+  const hasHiddenCompleted = !filters.showCompleted;
+  const anyActiveChip =
+    hasSearch || hasAssignee || hasStatus || hasDateRange || prioritiesFiltered || hasHiddenCompleted;
 
   const clearAll = () => {
     onFiltersChange({
@@ -203,6 +223,7 @@ export default function FilterBar({
       dateFrom: '',
       dateTo: '',
       priorities: new Set([0, 1, 2, 3, 4]),
+      showCompleted: true,
     });
   };
 
@@ -234,8 +255,8 @@ export default function FilterBar({
 
   return (
     <div className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20">
-      {/* Main filter row — 48px */}
-      <div className="h-12 flex items-center gap-2 px-4">
+      {/* Main filter row */}
+      <div className="min-h-12 py-1.5 flex flex-wrap items-center gap-2 px-4">
         {/* Search */}
         <div className="relative flex items-center shrink-0">
           <SearchIcon />
@@ -244,7 +265,7 @@ export default function FilterBar({
             value={filters.search}
             onChange={(e) => onFiltersChange({ ...filters, search: e.target.value })}
             placeholder="Search tasks…"
-            className="h-8 pl-8 pr-3 bg-bg-card border border-border-primary rounded-md text-text-primary text-xs outline-none transition-colors w-[200px] hover:border-border-secondary focus:border-accent placeholder:text-text-muted"
+            className="h-8 pl-8 pr-3 bg-bg-card border border-border-primary rounded-md text-text-primary text-xs outline-none transition-colors w-[155px] xl:w-[200px] hover:border-border-secondary focus:border-accent placeholder:text-text-muted"
           />
         </div>
 
@@ -325,6 +346,21 @@ export default function FilterBar({
           onChange={(dateFrom, dateTo) => onFiltersChange({ ...filters, dateFrom, dateTo })}
         />
 
+        {/* Completed tasks visibility toggle — shown inline by default */}
+        <button
+          onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
+          aria-pressed={filters.showCompleted}
+          title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
+          className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+            filters.showCompleted
+              ? 'border-low/60 text-low bg-low/10'
+              : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
+          }`}
+        >
+          <CheckIcon />
+          Completed
+        </button>
+
         {/* Plan vs Actual — toggles the dashed baseline ghost bars */}
         {onShowBaselinesChange && (
           <>
@@ -347,10 +383,8 @@ export default function FilterBar({
           </>
         )}
 
-        <div className="flex-1" />
-
         {/* Count pill */}
-        <span className="shrink-0 bg-bg-hover text-text-secondary text-[11px] font-medium font-mono tabular-nums px-2.5 h-7 rounded-full flex items-center">
+        <span className="ml-auto shrink-0 bg-bg-hover text-text-secondary text-[11px] font-medium font-mono tabular-nums px-2.5 h-7 rounded-full flex items-center">
           {filteredCount}/{totalCount}
         </span>
       </div>
@@ -379,6 +413,9 @@ export default function FilterBar({
               label={`${filters.dateFrom || '…'} → ${filters.dateTo || '…'}`}
               onClear={() => onFiltersChange({ ...filters, dateFrom: '', dateTo: '' })}
             />
+          )}
+          {hasHiddenCompleted && (
+            <ActiveChip label="Completed hidden" onClear={() => onFiltersChange({ ...filters, showCompleted: true })} />
           )}
           <button
             onClick={clearAll}

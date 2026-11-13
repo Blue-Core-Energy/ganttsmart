@@ -3,6 +3,7 @@ import type { Milestone, Task } from '@/types';
 import { formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { priorityColors } from '@/utils/colors';
+import { isTaskDone } from '@/utils/tasks';
 import { openDetailPanel } from './detailPanelStore';
 import { closeMilestonePanel, getMilestoneDateHandler, registerMilestonePanelHandlers } from './milestonePanelStore';
 
@@ -64,7 +65,7 @@ export default function MilestonePanel() {
   const overdue = daysLeft !== null && daysLeft < 0;
   const desc = milestone.description ? stripMarkdown(milestone.description) : '';
 
-  const completed = issues.filter((t) => t.statusType === 'completed' || t.completedAt).length;
+  const completed = issues.filter((t) => isTaskDone(t)).length;
   const progress = issues.length > 0 ? Math.round((completed / issues.length) * 100) : 0;
 
   const handleDateChange = async (value: string) => {
@@ -225,7 +226,7 @@ export default function MilestonePanel() {
                 <div className="space-y-1.5">
                   {issues.map((t) => {
                     const color = priorityColors[t.priority] || '#52525b';
-                    const done = t.statusType === 'completed' || !!t.completedAt;
+                    const done = isTaskDone(t);
                     return (
                       <button
                         key={t.id}

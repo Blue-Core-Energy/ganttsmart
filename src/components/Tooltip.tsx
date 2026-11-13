@@ -3,6 +3,7 @@ import { Avatar } from '@/utils/avatar';
 import { priorityColors, statusDotColors } from '@/utils/colors';
 import { formatDate } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
+import { isTaskDone } from '@/utils/tasks';
 import { registerTooltipSetter, type TooltipState } from './tooltipStore';
 
 export default function Tooltip() {
@@ -33,7 +34,8 @@ export default function Tooltip() {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const daysLeft = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
-  const overdue = daysLeft < 0;
+  const isDone = isTaskDone(task);
+  const overdue = !isDone && daysLeft < 0;
   const desc = task.description ? stripMarkdown(task.description) : '';
   const statusDotColor = statusDotColors[task.statusType] || '#52525b';
   const priorityColor = priorityColors[task.priority] || '#52525b';
@@ -108,9 +110,17 @@ export default function Tooltip() {
             {formatDate(task.due)}
             <span
               className="ml-1"
-              style={{ color: overdue ? 'var(--color-urgent)' : daysLeft <= 14 ? 'var(--color-high)' : undefined }}
+              style={{
+                color: isDone
+                  ? 'var(--color-success)'
+                  : overdue
+                    ? 'var(--color-urgent)'
+                    : daysLeft <= 14
+                      ? 'var(--color-high)'
+                      : undefined,
+              }}
             >
-              ({overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
+              ({isDone ? 'Completed' : overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
             </span>
           </div>
         </div>

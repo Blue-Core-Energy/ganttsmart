@@ -14,6 +14,7 @@ import {
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
 import type { Filters, GroupBy, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
+import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
 
 const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
@@ -38,7 +39,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
   );
   const [projectName, setProjectName] = useState('');
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [doneTasks, setDoneTasks] = useState<Task[]>([]);
   const [unscheduledTasks, setUnscheduledTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [workflowStates, setWorkflowStates] = useState<WorkflowState[]>([]);
@@ -58,6 +58,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
     search: '',
     dateFrom: '',
     dateTo: '',
+    showCompleted: true,
   });
 
   const initialLoadDone = useRef(false);
@@ -68,7 +69,10 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
   const undoStackRef = useRef<Array<{ tasks: Task[]; label: string }>>([]);
 
   const assignees = useMemo(() => [...new Set(tasks.map((t) => t.assignee))].sort(), [tasks]);
-  const statuses = useMemo(() => [...new Set(tasks.map((t) => t.status))].sort(), [tasks]);
+  const statuses = useMemo(
+    () => [...new Set(tasks.filter((t) => filters.showCompleted || !isTaskDone(t)).map((t) => t.status))].sort(),
+    [tasks, filters.showCompleted],
+  );
 
   // Custom display order (uuids), persisted per project. Empty = default sort from the API.
   const [customOrder, setCustomOrder] = useState<string[]>(() =>
@@ -81,31 +85,9 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
 
   // Tasks in display order: saved positions first, unknown (new) tasks keep their
   // default priority/due order after them. Sort is stable, so ties preserve fetch order.
-  const orderedTasks = useMemo(() => {
-    if (customOrder.length === 0) return tasks;
-    const pos = new Map(customOrder.map((uuid, i) => [uuid, i]));
-    return [...tasks].sort((a, b) => {
-      const ai = pos.get(a.uuid);
-      const bi = pos.get(b.uuid);
-      if (ai === undefined && bi === undefined) return 0;
-      if (ai === undefined) return 1;
-      if (bi === undefined) return -1;
-      return ai - bi;
-    });
-  }, [tasks, customOrder]);
+  const orderedTasks = useMemo(() => applyCustomOrder(tasks, customOrder), [tasks, customOrder]);
 
-  const filteredTasks = useMemo(() => {
-    return orderedTasks.filter((t) => {
-      if (!filters.priorities.has(t.priorityVal)) return false;
-      if (filters.assignee && t.assignee !== filters.assignee) return false;
-      if (filters.status && t.status !== filters.status) return false;
-      if (filters.search) {
-        const hay = `${t.id} ${t.title} ${t.assignee} ${t.status}`.toLowerCase();
-        if (!hay.includes(filters.search.toLowerCase())) return false;
-      }
-      return true;
-    });
-  }, [orderedTasks, filters]);
+  const filteredTasks = useMemo(() => filterTasks(orderedTasks, filters), [orderedTasks, filters]);
 
   // Move a task next to another in the display order and persist it.
   const reorderTask = useCallback(
@@ -171,7 +153,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
       try {
         const result = await fetchIssues(linearToken, projectId);
         setTasks(result.tasks);
-        setDoneTasks(result.doneTasks);
         setUnscheduledTasks(result.unscheduledTasks);
         setProjectName(result.projectName);
         setMilestones(result.milestones);
@@ -194,7 +175,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
       try {
         const result = await fetchIssues(linearToken, projectId);
         setTasks(result.tasks);
-        setDoneTasks(result.doneTasks);
         setUnscheduledTasks(result.unscheduledTasks);
         setProjectName(result.projectName);
         setMilestones(result.milestones);
@@ -212,7 +192,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
         const msg = (e as Error).message;
         setError(msg);
         setTasks([]);
-        setDoneTasks([]);
         setUnscheduledTasks([]);
         setMilestones([]);
         if (msg.includes('authentication expired')) {
@@ -239,6 +218,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
         search: '',
         dateFrom: '',
         dateTo: '',
+        showCompleted: true,
       });
       undoStackRef.current = []; // Clear undo on project switch
       loadIssues(id);
@@ -577,7 +557,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void) {
     selectedProjectId,
     projectName,
     tasks,
-    doneTasks,
     unscheduledTasks,
     filteredTasks,
     milestones,

@@ -278,11 +278,13 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
     };
   }
 
-  // Split active issues into scheduled (date or fallback) vs unscheduled (no date anywhere).
+  // Unify active scheduled issues and completed scheduled issues into a single tasks list.
   const tasks: MappedTask[] = [];
   const unscheduledTasks: MappedTask[] = [];
+  const seenIds = new Set<string>();
   for (const n of project.issues.nodes as LinearIssueNode[]) {
     if (isIgnoredIssueState(n.state, n.canceledAt)) continue;
+    seenIds.add(n.id);
     const eff = effectiveDue(n);
     if (eff) {
       tasks.push(mapNode(n, eff.date, eff.isImplicit));
@@ -293,23 +295,23 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       unscheduledTasks.push(mapNode(n, todayStr, true));
     }
   }
-  tasks.sort((a, b) => a.priorityVal - b.priorityVal || new Date(a.due).getTime() - new Date(b.due).getTime());
+  for (const n of (project.doneIssues?.nodes || []) as LinearIssueNode[]) {
+    if (isIgnoredIssueState(n.state, n.canceledAt) || seenIds.has(n.id)) continue;
+    const eff = effectiveDue(n);
+    if (eff) {
+      seenIds.add(n.id);
+      tasks.push(mapNode(n, eff.date, eff.isImplicit));
+    }
+  }
+  tasks.sort(
+    (a, b) =>
+      a.priorityVal - b.priorityVal ||
+      new Date(a.due).getTime() - new Date(b.due).getTime() ||
+      a.id.localeCompare(b.id),
+  );
   unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
-  const doneTasks = ((project.doneIssues?.nodes || []) as LinearIssueNode[])
-    .filter((n) => !isIgnoredIssueState(n.state, n.canceledAt))
-    .map((n) => {
-      const eff = effectiveDue(n);
-      return eff ? mapNode(n, eff.date, eff.isImplicit) : null;
-    })
-    .filter((t): t is MappedTask => t !== null)
-    .sort((a, b) => {
-      const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
-      const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
-      return bTime - aTime;
-    });
-
-  return { tasks, doneTasks, unscheduledTasks, milestones: [], projectName: project.name };
+  return { tasks, doneTasks: [], unscheduledTasks, milestones: [], projectName: project.name };
 }
 
 // --- Custom display order (mirrors the sort in src/hooks/useLinearData.ts) ---

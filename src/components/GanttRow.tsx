@@ -13,6 +13,7 @@ import {
   statusDotColors,
 } from '@/utils/colors';
 import { buildTimeCells, daysBetween, formatDate, isWeekend } from '@/utils/date';
+import { isTaskDone } from '@/utils/tasks';
 import { openDetailPanel } from './detailPanelStore';
 
 interface Props {
@@ -30,7 +31,6 @@ interface Props {
   isConnecting?: boolean;
   depViolation?: string[]; // list of blocker IDs whose schedule is violated
   baseline?: TaskBaseline;
-  isDone?: boolean;
   onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
 }
 
@@ -51,9 +51,9 @@ export default function GanttRow({
   isConnecting,
   depViolation,
   baseline,
-  isDone,
   onReorder,
 }: Props) {
+  const isDone = isTaskDone(task);
   const pCls = priorityClass(task.priorityVal);
   const dueDate = useMemo(() => new Date(task.due + 'T00:00:00'), [task.due]);
   const daysLeft = daysBetween(today, dueDate);
@@ -374,7 +374,8 @@ export default function GanttRow({
     <tr
       data-task-id={task.id}
       data-task-uuid={task.uuid}
-      className={`group transition-colors duration-150 hover:bg-accent/[0.03] border-l-2 border-l-transparent hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : ''} ${dropIndicatorCls}`}
+      data-task-done={isDone ? 'true' : undefined}
+      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 border-l-transparent hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
       tabIndex={0}
       role="row"
       aria-label={`${task.id}: ${task.title}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
@@ -519,21 +520,29 @@ export default function GanttRow({
                   {task.completedChildren}/{task.totalChildren}
                 </span>
               )}
-              {/* Status dot — clickable to cycle */}
-              {onCycleStatus && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCycleStatus(task.uuid);
-                  }}
-                  className="w-2 h-2 rounded-full shrink-0 hover:scale-125 transition-transform cursor-pointer ml-auto"
+              {/* Status dot — clickable to cycle for active tasks, static indicator when completed */}
+              {isDone ? (
+                <span
+                  className="w-2 h-2 rounded-full shrink-0 ml-auto"
                   style={{ backgroundColor: statusDotColor }}
-                  title={`${task.status} — click to cycle`}
+                  title={task.status}
                 />
+              ) : (
+                onCycleStatus && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCycleStatus(task.uuid);
+                    }}
+                    className="w-2 h-2 rounded-full shrink-0 hover:scale-125 transition-transform cursor-pointer ml-auto"
+                    style={{ backgroundColor: statusDotColor }}
+                    title={`${task.status} — click to cycle`}
+                  />
+                )
               )}
             </div>
             <div
-              className={`text-[13px] font-medium text-text-primary leading-snug truncate ${isDone ? 'line-through opacity-70' : ''}`}
+              className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
               style={{ maxWidth: colWidths.task - 60 }}
               title={task.title}
             >
@@ -710,7 +719,7 @@ export default function GanttRow({
               className="absolute top-1/2 -translate-y-1/2 z-[3] text-[10px] font-semibold whitespace-nowrap pointer-events-none"
               style={{
                 left: displayBarLeft + displayBarWidth + 6,
-                color: overdue ? 'var(--color-urgent)' : 'var(--color-text-muted)',
+                color: isDone ? 'var(--color-success)' : overdue ? 'var(--color-urgent)' : 'var(--color-text-muted)',
               }}
             >
               {barLabel}

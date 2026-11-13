@@ -1,10 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const linearRequestMock = vi.fn();
+const { linearRequestMock } = vi.hoisted(() => ({
+  linearRequestMock: vi.fn(),
+}));
 
 vi.mock('@/backend', () => ({
   backend: {
-    linearRequest: (...args: unknown[]) => linearRequestMock(...args),
+    linearRequest: linearRequestMock,
   },
 }));
 
@@ -42,7 +44,7 @@ describe('fetchIssues', () => {
     linearRequestMock.mockReset();
   });
 
-  it('requests canceledAt: { null: true } in GraphQL filters and ignores duplicate and canceled issues', async () => {
+  it('requests canceledAt: { null: true } in GraphQL filters, ignores duplicate/canceled issues, and unifies completed issues', async () => {
     const capturedQueries: Array<{ query: string; variables?: Record<string, unknown> }> = [];
 
     linearRequestMock.mockImplementation(
@@ -168,6 +170,12 @@ describe('fetchIssues', () => {
                   },
                   children: { nodes: [] },
                 },
+                {
+                  id: 'uuid-6',
+                  identifier: 'ENG-6',
+                  relations: { nodes: [] },
+                  children: { nodes: [] },
+                },
               ],
             },
           });
@@ -180,12 +188,11 @@ describe('fetchIssues', () => {
     const result = await fetchIssues('token', 'proj-1');
 
     expect(capturedQueries[0].query).toContain('canceledAt: { null: true }');
-    // Only non-ignored issue IDs should be fetched in Query 2
-    expect(capturedQueries[1].variables).toEqual({ ids: ['uuid-1', 'uuid-5'] });
+    // Only non-ignored issue IDs (active + completed) should be fetched in Query 2
+    expect(capturedQueries[1].variables).toEqual({ ids: ['uuid-1', 'uuid-5', 'uuid-6'] });
 
-    expect(result.tasks.map((t) => t.id)).toEqual(['ENG-1']);
+    expect(result.tasks.map((t) => t.id)).toEqual(['ENG-1', 'ENG-6']);
     expect(result.unscheduledTasks.map((t) => t.id)).toEqual(['ENG-5']);
-    expect(result.doneTasks.map((t) => t.id)).toEqual(['ENG-6']);
 
     // Relations to ignored duplicate/canceled issues are stripped
     expect(result.tasks[0].blocks).toEqual(['ENG-5']);
@@ -285,6 +292,143 @@ describe('fetchIssues', () => {
     expect(linearRequestMock).toHaveBeenCalledTimes(1);
     expect(result.tasks).toEqual([]);
     expect(result.unscheduledTasks).toEqual([]);
-    expect(result.doneTasks).toEqual([]);
+  });
+
+  it('unifies scheduled completed tasks into tasks and fetches relations/children for them', async () => {
+    linearRequestMock.mockImplementation(
+      async (_token: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        if (body.query.includes('project(id:')) {
+          return jsonResponse({
+            project: {
+              name: 'Unified Project',
+              startDate: '2026-05-01',
+              targetDate: '2026-05-30',
+              projectMilestones: { nodes: [] },
+              issues: {
+                nodes: [
+                  makeIssueNode({
+                    id: 'uuid-active',
+                    identifier: 'ENG-2',
+                    title: 'Active work',
+                    description: 'start: 05-05-26',
+                    dueDate: '2026-05-12',
+                    url: 'https://linear.app/test/ENG-2',
+                    priority: 2,
+                    state: { name: 'In Progress', type: 'started' },
+                    createdAt: '2026-05-01T00:00:00Z',
+                  }),
+                ],
+              },
+              doneIssues: {
+                nodes: [
+                  makeIssueNode({
+                    id: 'uuid-done',
+                    identifier: 'ENG-1',
+                    title: 'Done work',
+                    description: 'start: 01-05-26',
+                    dueDate: '2026-05-04',
+                    url: 'https://linear.app/test/ENG-1',
+                    priority: 1,
+                    state: { name: 'Done', type: 'completed' },
+                    createdAt: '2026-04-28T00:00:00Z',
+                    completedAt: '2026-05-04T12:00:00Z',
+                    assignee: { name: 'Bob' },
+                  }),
+                ],
+              },
+            },
+          });
+        }
+
+        if (body.query.includes('relations')) {
+          expect(body.variables?.ids).toEqual(['uuid-active', 'uuid-done']);
+          return jsonResponse({
+            issues: {
+              nodes: [
+                {
+                  id: 'uuid-done',
+                  identifier: 'ENG-1',
+                  relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'ENG-2' } }] },
+                  children: {
+                    nodes: [
+                      {
+                        id: 'c1',
+                        completedAt: '2026-05-03T00:00:00Z',
+                        canceledAt: null,
+                        state: { name: 'Done', type: 'completed' },
+                      },
+                    ],
+                  },
+                },
+                {
+                  id: 'uuid-active',
+                  identifier: 'ENG-2',
+                  relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-1' } }] },
+                  children: { nodes: [] },
+                },
+              ],
+            },
+          });
+        }
+
+        throw new Error(`Unexpected query: ${body.query}`);
+      },
+    );
+
+    const result = await fetchIssues('tok', 'proj-1');
+    expect(result.projectName).toBe('Unified Project');
+    expect(result.unscheduledTasks).toEqual([]);
+    expect(result.tasks.map((t) => t.id)).toEqual(['ENG-1', 'ENG-2']);
+    expect(result.tasks[0]).toMatchObject({
+      id: 'ENG-1',
+      statusType: 'completed',
+      blocks: ['ENG-2'],
+      totalChildren: 1,
+      completedChildren: 1,
+      progress: 100,
+    });
+    expect(result.tasks[1]).toMatchObject({
+      id: 'ENG-2',
+      statusType: 'started',
+      blockedBy: ['ENG-1'],
+    });
+  });
+
+  it('omits completed tasks that have neither dueDate nor project targetDate', async () => {
+    linearRequestMock.mockImplementation(async (_token: string, body: { query: string }) => {
+      if (body.query.includes('project(id:')) {
+        return jsonResponse({
+          project: {
+            name: 'No Target Project',
+            startDate: null,
+            targetDate: null,
+            projectMilestones: { nodes: [] },
+            issues: { nodes: [] },
+            doneIssues: {
+              nodes: [
+                makeIssueNode({
+                  id: 'uuid-done-undated',
+                  identifier: 'ENG-9',
+                  title: 'Undated done',
+                  description: null,
+                  dueDate: null,
+                  url: 'https://linear.app/test/ENG-9',
+                  priority: 2,
+                  state: { name: 'Done', type: 'completed' },
+                  createdAt: '2026-05-01T00:00:00Z',
+                  completedAt: '2026-05-02T00:00:00Z',
+                  assignee: null,
+                }),
+              ],
+            },
+          },
+        });
+      }
+      return jsonResponse({ issues: { nodes: [] } });
+    });
+
+    const result = await fetchIssues('tok', 'proj-2');
+    expect(result.tasks).toEqual([]);
+    expect(result.unscheduledTasks).toEqual([]);
   });
 });
