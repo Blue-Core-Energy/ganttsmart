@@ -561,7 +561,10 @@ export default function Landing() {
             <Link to="/privacy-policy" className="text-xs text-text-muted hover:text-text-secondary transition-colors">
               Privacy
             </Link>
-            <Link to="/terms-of-service" className="text-xs text-text-muted hover:text-text-secondary transition-colors">
+            <Link
+              to="/terms-of-service"
+              className="text-xs text-text-muted hover:text-text-secondary transition-colors"
+            >
               Terms
             </Link>
           </div>

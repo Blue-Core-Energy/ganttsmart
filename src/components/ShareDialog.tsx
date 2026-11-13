@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { loadCustomOrder } from '@/hooks/useLinearData';
 import { supabase } from '@/lib/supabase';
-import { toast, toastError, toastSuccess } from './Toast';
+import { toast, toastError, toastSuccess } from './toastStore';
 
 async function invokeShareFn(action: string, body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('share-roadmap', {

@@ -1,48 +1,51 @@
-import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { createClient } from "jsr:@supabase/supabase-js@2";
-import { getValidLinearToken } from "../_shared/linear-token.ts";
+import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
+import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { getValidLinearToken } from '../_shared/linear-token.ts';
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const LINEAR_API = "https://api.linear.app/graphql";
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+const LINEAR_API = 'https://api.linear.app/graphql';
 const MAX_EXPIRY_DAYS = 90;
 const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_PASSWORD_ATTEMPTS = 5;
 // Auto-refresh cached share data when older than this. Acts as a built-in throttle:
 // at most one Linear API call per share per window, regardless of viewer volume.
 const STALE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const PRIORITY_MAP: Record<number, string> = { 0: "None", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low" };
+const PRIORITY_MAP: Record<number, string> = { 0: 'None', 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low' };
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
 
 // --- PBKDF2 password hashing (AUTH-VULN-02 fix) ---
 
 function toHex(buf: Uint8Array): string {
-  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(buf)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function fromHex(hex: string): Uint8Array {
-  return new Uint8Array(hex.match(/.{2}/g)!.map(b => parseInt(b, 16)));
+  return new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
 }
 
 async function hashPasswordPBKDF2(pw: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"],
-  );
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, [
+    'deriveBits',
+  ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-    keyMaterial, 256,
+    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+    keyMaterial,
+    256,
   );
   return `pbkdf2:${toHex(salt)}:${toHex(new Uint8Array(bits))}`;
 }
@@ -57,35 +60,39 @@ function constantTimeEqual(a: string, b: string): boolean {
 }
 
 async function verifyPassword(pw: string, stored: string): Promise<boolean> {
-  if (stored.startsWith("pbkdf2:")) {
-    const [, saltHex, expectedHash] = stored.split(":");
+  if (stored.startsWith('pbkdf2:')) {
+    const [, saltHex, expectedHash] = stored.split(':');
     const salt = fromHex(saltHex);
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveBits"],
-    );
+    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, [
+      'deriveBits',
+    ]);
     const bits = await crypto.subtle.deriveBits(
-      { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
-      keyMaterial, 256,
+      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
+      keyMaterial,
+      256,
     );
     return constantTimeEqual(toHex(new Uint8Array(bits)), expectedHash);
   } else {
     // Legacy SHA-256 format — verify then caller re-hashes
-    const data = new TextEncoder().encode(pw + "ganttsmart-salt-2024");
-    const buf = await crypto.subtle.digest("SHA-256", data);
+    const data = new TextEncoder().encode(pw + 'ganttsmart-salt-2024');
+    const buf = await crypto.subtle.digest('SHA-256', data);
     return constantTimeEqual(toHex(new Uint8Array(buf)), stored);
   }
 }
 
 // --- Rate limiting (AUTH-VULN-03 fix) ---
 
-async function checkRateLimit(supabase: ReturnType<typeof createClient>, shareToken: string): Promise<{ blocked: boolean; retryAfterSeconds?: number }> {
+async function checkRateLimit(
+  supabase: ReturnType<typeof createClient>,
+  shareToken: string,
+): Promise<{ blocked: boolean; retryAfterSeconds?: number }> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
   const { data } = await supabase
-    .from("share_access_attempts")
-    .select("*")
-    .eq("share_token", shareToken)
-    .gte("first_attempt_at", windowStart)
-    .order("first_attempt_at", { ascending: false })
+    .from('share_access_attempts')
+    .select('*')
+    .eq('share_token', shareToken)
+    .gte('first_attempt_at', windowStart)
+    .order('first_attempt_at', { ascending: false })
     .limit(1)
     .single();
 
@@ -100,21 +107,21 @@ async function checkRateLimit(supabase: ReturnType<typeof createClient>, shareTo
 async function recordFailedAttempt(supabase: ReturnType<typeof createClient>, shareToken: string): Promise<void> {
   const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
   const { data } = await supabase
-    .from("share_access_attempts")
-    .select("id, attempt_count")
-    .eq("share_token", shareToken)
-    .gte("first_attempt_at", windowStart)
-    .order("first_attempt_at", { ascending: false })
+    .from('share_access_attempts')
+    .select('id, attempt_count')
+    .eq('share_token', shareToken)
+    .gte('first_attempt_at', windowStart)
+    .order('first_attempt_at', { ascending: false })
     .limit(1)
     .single();
 
   if (data) {
-    await supabase.from("share_access_attempts")
+    await supabase
+      .from('share_access_attempts')
       .update({ attempt_count: data.attempt_count + 1, last_attempt_at: new Date().toISOString() })
-      .eq("id", data.id);
+      .eq('id', data.id);
   } else {
-    await supabase.from("share_access_attempts")
-      .insert({ share_token: shareToken });
+    await supabase.from('share_access_attempts').insert({ share_token: shareToken });
   }
 }
 
@@ -134,7 +141,63 @@ function parseStartDate(description: string | null | undefined): string | null {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-async function fetchLinearData(apiKey: string, projectId: string) {
+interface LinearIssueNode {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  dueDate: string | null;
+  priority: number;
+  url: string | null;
+  completedAt: string | null;
+  state: { name: string; type: string } | null;
+  assignee: { name: string } | null;
+}
+
+interface MappedTask {
+  id: string;
+  uuid: string;
+  title: string;
+  description: string;
+  due: string;
+  startDate: string | null;
+  priorityVal: number;
+  priority: string;
+  status: string;
+  statusType: string;
+  assignee: string;
+  url: string;
+  teamId: string;
+  blocks: string[];
+  blockedBy: string[];
+  progress: number;
+  totalChildren: number;
+  completedChildren: number;
+  completedAt: string | undefined;
+  isDueImplicit: boolean | undefined;
+}
+
+interface CachedRoadmapData {
+  tasks: MappedTask[];
+  doneTasks: MappedTask[];
+  unscheduledTasks: MappedTask[];
+  milestones: unknown[];
+  projectName: string;
+  customOrder?: string[];
+}
+
+interface SharedRoadmapListRow {
+  id: string;
+  share_token: string;
+  project_id: string;
+  project_name: string;
+  expires_at: string;
+  cached_at: string | null;
+  password_hash: string | null;
+  created_at: string;
+}
+
+async function fetchLinearData(apiKey: string, projectId: string): Promise<CachedRoadmapData> {
   const query = `query($id: String!) {
     project(id: $id) {
       name
@@ -157,8 +220,8 @@ async function fetchLinearData(apiKey: string, projectId: string) {
   }`;
 
   const res = await fetch(LINEAR_API, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: apiKey },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: apiKey },
     body: JSON.stringify({ query, variables: { id: projectId } }),
   });
 
@@ -167,31 +230,31 @@ async function fetchLinearData(apiKey: string, projectId: string) {
   if (result.errors) throw new Error(result.errors[0].message);
 
   const project = result.data?.project;
-  if (!project) throw new Error("Project not found");
+  if (!project) throw new Error('Project not found');
 
   // Effective due: explicit dueDate, falling back to project target date (parity with main app).
   const projectTargetDate: string | null = project.targetDate || null;
-  function effectiveDue(n: any): { date: string; isImplicit: boolean } | null {
+  function effectiveDue(n: LinearIssueNode): { date: string; isImplicit: boolean } | null {
     if (n.dueDate) return { date: n.dueDate, isImplicit: false };
     if (projectTargetDate) return { date: projectTargetDate, isImplicit: true };
     return null;
   }
 
-  function mapNode(n: any, due: string, isDueImplicit: boolean) {
+  function mapNode(n: LinearIssueNode, due: string, isDueImplicit: boolean): MappedTask {
     return {
       id: n.identifier,
       uuid: n.id,
       title: n.title,
-      description: n.description || "",
+      description: n.description || '',
       due,
       startDate: parseStartDate(n.description),
       priorityVal: n.priority,
-      priority: PRIORITY_MAP[n.priority] || "None",
-      status: n.state?.name || "",
-      statusType: n.state?.type || "",
-      assignee: n.assignee?.name || "Unassigned",
-      url: n.url || "",
-      teamId: "",
+      priority: PRIORITY_MAP[n.priority] || 'None',
+      status: n.state?.name || '',
+      statusType: n.state?.type || '',
+      assignee: n.assignee?.name || 'Unassigned',
+      url: n.url || '',
+      teamId: '',
       blocks: [],
       blockedBy: [],
       progress: 0,
@@ -203,9 +266,9 @@ async function fetchLinearData(apiKey: string, projectId: string) {
   }
 
   // Split active issues into scheduled (date or fallback) vs unscheduled (no date anywhere).
-  const tasks: any[] = [];
-  const unscheduledTasks: any[] = [];
-  for (const n of project.issues.nodes) {
+  const tasks: MappedTask[] = [];
+  const unscheduledTasks: MappedTask[] = [];
+  for (const n of project.issues.nodes as LinearIssueNode[]) {
     const eff = effectiveDue(n);
     if (eff) {
       tasks.push(mapNode(n, eff.date, eff.isImplicit));
@@ -219,13 +282,13 @@ async function fetchLinearData(apiKey: string, projectId: string) {
   tasks.sort((a, b) => a.priorityVal - b.priorityVal || new Date(a.due).getTime() - new Date(b.due).getTime());
   unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
-  const doneTasks = (project.doneIssues?.nodes || [])
-    .map((n: any) => {
+  const doneTasks = ((project.doneIssues?.nodes || []) as LinearIssueNode[])
+    .map((n) => {
       const eff = effectiveDue(n);
       return eff ? mapNode(n, eff.date, eff.isImplicit) : null;
     })
-    .filter((t: any) => t !== null)
-    .sort((a: any, b: any) => {
+    .filter((t): t is MappedTask => t !== null)
+    .sort((a, b) => {
       const aTime = a.completedAt ? new Date(a.completedAt).getTime() : 0;
       const bTime = b.completedAt ? new Date(b.completedAt).getTime() : 0;
       return bTime - aTime;
@@ -238,16 +301,16 @@ async function fetchLinearData(apiKey: string, projectId: string) {
 
 function sanitizeCustomOrder(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((v): v is string => typeof v === "string").slice(0, 1000);
+  return value.filter((v): v is string => typeof v === 'string').slice(0, 1000);
 }
 
 // Re-sort scheduled tasks by the owner's saved order (task uuids). Tasks not in the
 // order (new issues) keep their default priority/due order after the ordered ones.
 // The order is embedded in cached_data so every refresh path can re-apply it.
-function withCustomOrder(data: any, customOrder: string[]) {
+function withCustomOrder(data: CachedRoadmapData, customOrder: string[]): CachedRoadmapData {
   if (customOrder.length === 0) return data;
   const pos = new Map(customOrder.map((uuid, i) => [uuid, i]));
-  const tasks = [...data.tasks].sort((a: any, b: any) => {
+  const tasks = [...data.tasks].sort((a, b) => {
     const ai = pos.get(a.uuid);
     const bi = pos.get(b.uuid);
     if (ai === undefined && bi === undefined) return 0;
@@ -259,15 +322,17 @@ function withCustomOrder(data: any, customOrder: string[]) {
 }
 
 async function getUser(req: Request) {
-  const h = req.headers.get("Authorization");
+  const h = req.headers.get('Authorization');
   if (!h) return null;
   const sb = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-  const { data: { user } } = await sb.auth.getUser(h.replace("Bearer ", ""));
+  const {
+    data: { user },
+  } = await sb.auth.getUser(h.replace('Bearer ', ''));
   return user;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -275,54 +340,74 @@ Deno.serve(async (req: Request) => {
     const body = await req.json();
     const action = body.action;
 
-    if (action === "create") {
+    if (action === 'create') {
       const user = await getUser(req);
-      if (!user) return json({ error: "Unauthorized" }, 401);
+      if (!user) return json({ error: 'Unauthorized' }, 401);
 
       const projectId = body.projectId;
-      if (!projectId) return json({ error: "projectId required" }, 400);
+      if (!projectId) return json({ error: 'projectId required' }, 400);
 
       const days = Math.min(Math.max(1, body.expiresInDays || 3), MAX_EXPIRY_DAYS);
       const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
 
       const linearToken = await getValidLinearToken(supabase, user.id);
-      if (!linearToken) return json({ error: "No Linear token. Connect Linear first." }, 400);
+      if (!linearToken) return json({ error: 'No Linear token. Connect Linear first.' }, 400);
 
       let cachedData;
       try {
         cachedData = await fetchLinearData(linearToken, projectId);
       } catch (e) {
-        return json({ error: "Failed to fetch Linear data: " + (e as Error).message }, 500);
+        return json({ error: 'Failed to fetch Linear data: ' + (e as Error).message }, 500);
       }
       cachedData = withCustomOrder(cachedData, sanitizeCustomOrder(body.customOrder));
 
       const shareToken = crypto.randomUUID();
       const passwordHash = body.password ? await hashPasswordPBKDF2(body.password) : null;
 
-      const { data: share, error: err } = await supabase.from("shared_roadmaps").insert({
-        owner_id: user.id, project_id: projectId, project_name: cachedData.projectName,
-        share_token: shareToken, password_hash: passwordHash,
-        expires_at: expiresAt, cached_data: cachedData, cached_at: new Date().toISOString(),
-      }).select("id, share_token, project_name, expires_at, cached_at, password_hash").single();
+      const { data: share, error: err } = await supabase
+        .from('shared_roadmaps')
+        .insert({
+          owner_id: user.id,
+          project_id: projectId,
+          project_name: cachedData.projectName,
+          share_token: shareToken,
+          password_hash: passwordHash,
+          expires_at: expiresAt,
+          cached_data: cachedData,
+          cached_at: new Date().toISOString(),
+        })
+        .select('id, share_token, project_name, expires_at, cached_at, password_hash')
+        .single();
 
-      if (err) return json({ error: "DB insert failed: " + err.message }, 500);
+      if (err) return json({ error: 'DB insert failed: ' + err.message }, 500);
 
-      return json({ id: share.id, shareToken: share.share_token, projectName: share.project_name, expiresAt: share.expires_at, cachedAt: share.cached_at, hasPassword: !!share.password_hash });
+      return json({
+        id: share.id,
+        shareToken: share.share_token,
+        projectName: share.project_name,
+        expiresAt: share.expires_at,
+        cachedAt: share.cached_at,
+        hasPassword: !!share.password_hash,
+      });
     }
 
-    if (action === "get") {
+    if (action === 'get') {
       const { shareToken, password } = body;
-      if (!shareToken) return json({ error: "shareToken required" }, 400);
+      if (!shareToken) return json({ error: 'shareToken required' }, 400);
 
-      const { data: share } = await supabase.from("shared_roadmaps").select("*").eq("share_token", shareToken).single();
-      if (!share) return json({ error: "Share not found" }, 404);
-      if (new Date(share.expires_at) < new Date()) return json({ error: "This shared link has expired", expired: true }, 410);
+      const { data: share } = await supabase.from('shared_roadmaps').select('*').eq('share_token', shareToken).single();
+      if (!share) return json({ error: 'Share not found' }, 404);
+      if (new Date(share.expires_at) < new Date())
+        return json({ error: 'This shared link has expired', expired: true }, 410);
 
       if (share.password_hash) {
         // Rate limit check
         const rateCheck = await checkRateLimit(supabase, shareToken);
         if (rateCheck.blocked) {
-          return json({ error: "Too many attempts. Try again later.", retryAfterSeconds: rateCheck.retryAfterSeconds }, 429);
+          return json(
+            { error: 'Too many attempts. Try again later.', retryAfterSeconds: rateCheck.retryAfterSeconds },
+            429,
+          );
         }
 
         if (!password) return json({ needsPassword: true, projectName: share.project_name });
@@ -330,13 +415,13 @@ Deno.serve(async (req: Request) => {
         const valid = await verifyPassword(password, share.password_hash);
         if (!valid) {
           await recordFailedAttempt(supabase, shareToken);
-          return json({ error: "Incorrect password", needsPassword: true }, 403);
+          return json({ error: 'Incorrect password', needsPassword: true }, 403);
         }
 
         // Migrate legacy SHA-256 hash to PBKDF2 on successful verification
-        if (!share.password_hash.startsWith("pbkdf2:")) {
+        if (!share.password_hash.startsWith('pbkdf2:')) {
           const newHash = await hashPasswordPBKDF2(password);
-          await supabase.from("shared_roadmaps").update({ password_hash: newHash }).eq("id", share.id);
+          await supabase.from('shared_roadmaps').update({ password_hash: newHash }).eq('id', share.id);
         }
       }
 
@@ -355,67 +440,91 @@ Deno.serve(async (req: Request) => {
             fresh = withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder));
             const newCachedAt = new Date().toISOString();
             await supabase
-              .from("shared_roadmaps")
+              .from('shared_roadmaps')
               .update({ cached_data: fresh, cached_at: newCachedAt })
-              .eq("id", share.id);
+              .eq('id', share.id);
             cachedData = fresh;
             cachedAt = newCachedAt;
           }
         } catch (e) {
           // Silently fall back to cached data — never break the viewer experience.
-          console.warn("share-roadmap auto-refresh failed for", share.id, (e as Error).message);
+          console.warn('share-roadmap auto-refresh failed for', share.id, (e as Error).message);
         }
       }
 
       return json({ projectName: share.project_name, cachedData, cachedAt, expiresAt: share.expires_at });
     }
 
-    if (action === "list") {
+    if (action === 'list') {
       const user = await getUser(req);
-      if (!user) return json({ error: "Unauthorized" }, 401);
+      if (!user) return json({ error: 'Unauthorized' }, 401);
 
-      let q = supabase.from("shared_roadmaps").select("id, share_token, project_id, project_name, expires_at, cached_at, password_hash, created_at").eq("owner_id", user.id).order("created_at", { ascending: false });
-      if (body.projectId) q = q.eq("project_id", body.projectId);
+      let q = supabase
+        .from('shared_roadmaps')
+        .select('id, share_token, project_id, project_name, expires_at, cached_at, password_hash, created_at')
+        .eq('owner_id', user.id)
+        .order('created_at', { ascending: false });
+      if (body.projectId) q = q.eq('project_id', body.projectId);
 
       const { data, error: err } = await q;
       if (err) return json({ error: err.message }, 500);
 
-      return json({ shares: (data || []).map((s: any) => ({ id: s.id, shareToken: s.share_token, projectId: s.project_id, projectName: s.project_name, expiresAt: s.expires_at, cachedAt: s.cached_at, hasPassword: !!s.password_hash, createdAt: s.created_at })) });
+      return json({
+        shares: ((data || []) as SharedRoadmapListRow[]).map((s) => ({
+          id: s.id,
+          shareToken: s.share_token,
+          projectId: s.project_id,
+          projectName: s.project_name,
+          expiresAt: s.expires_at,
+          cachedAt: s.cached_at,
+          hasPassword: !!s.password_hash,
+          createdAt: s.created_at,
+        })),
+      });
     }
 
-    if (action === "refresh") {
+    if (action === 'refresh') {
       const user = await getUser(req);
-      if (!user) return json({ error: "Unauthorized" }, 401);
+      if (!user) return json({ error: 'Unauthorized' }, 401);
       const { shareId } = body;
-      if (!shareId) return json({ error: "shareId required" }, 400);
+      if (!shareId) return json({ error: 'shareId required' }, 400);
 
-      const { data: share } = await supabase.from("shared_roadmaps").select("project_id, cached_data").eq("id", shareId).eq("owner_id", user.id).single();
-      if (!share) return json({ error: "Share not found" }, 404);
+      const { data: share } = await supabase
+        .from('shared_roadmaps')
+        .select('project_id, cached_data')
+        .eq('id', shareId)
+        .eq('owner_id', user.id)
+        .single();
+      if (!share) return json({ error: 'Share not found' }, 404);
 
       const linearToken = await getValidLinearToken(supabase, user.id);
-      if (!linearToken) return json({ error: "No Linear token" }, 400);
+      if (!linearToken) return json({ error: 'No Linear token' }, 400);
 
       // Owner may send an updated order; otherwise keep the one stored with the share.
-      const customOrder = body.customOrder !== undefined
-        ? sanitizeCustomOrder(body.customOrder)
-        : sanitizeCustomOrder(share.cached_data?.customOrder);
+      const customOrder =
+        body.customOrder !== undefined
+          ? sanitizeCustomOrder(body.customOrder)
+          : sanitizeCustomOrder(share.cached_data?.customOrder);
 
       let cachedData = await fetchLinearData(linearToken, share.project_id);
       cachedData = withCustomOrder(cachedData, customOrder);
-      await supabase.from("shared_roadmaps").update({ cached_data: cachedData, cached_at: new Date().toISOString() }).eq("id", shareId);
+      await supabase
+        .from('shared_roadmaps')
+        .update({ cached_data: cachedData, cached_at: new Date().toISOString() })
+        .eq('id', shareId);
       return json({ success: true, cachedAt: new Date().toISOString() });
     }
 
-    if (action === "delete") {
+    if (action === 'delete') {
       const user = await getUser(req);
-      if (!user) return json({ error: "Unauthorized" }, 401);
+      if (!user) return json({ error: 'Unauthorized' }, 401);
       const { shareId } = body;
-      if (!shareId) return json({ error: "shareId required" }, 400);
-      await supabase.from("shared_roadmaps").delete().eq("id", shareId).eq("owner_id", user.id);
+      if (!shareId) return json({ error: 'shareId required' }, 400);
+      await supabase.from('shared_roadmaps').delete().eq('id', shareId).eq('owner_id', user.id);
       return json({ success: true });
     }
 
-    return json({ error: "Unknown action" }, 400);
+    return json({ error: 'Unknown action' }, 400);
   } catch (e) {
     return json({ error: (e as Error).message }, 500);
   }

@@ -3,28 +3,8 @@ import type { Milestone, Task } from '@/types';
 import { formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { priorityColors } from '@/utils/colors';
-import { openDetailPanel } from './DetailPanel';
-
-// Global handles — mirrors the DetailPanel pattern so any component can open the
-// drawer without prop-drilling through the chart.
-let globalOpenPanel: ((milestone: Milestone, issues: Task[]) => void) | null = null;
-let globalClosePanel: (() => void) | null = null;
-let globalUpdateDate: ((milestoneId: string, targetDate: string) => Promise<void>) | null = null;
-
-export function openMilestonePanel(milestone: Milestone, issues: Task[] = []) {
-  globalOpenPanel?.(milestone, issues);
-}
-
-export function closeMilestonePanel() {
-  globalClosePanel?.();
-}
-
-/** Register the handler used by the panel's date picker. Pass null for read-only views. */
-export function setMilestoneDateHandler(
-  handler: ((milestoneId: string, targetDate: string) => Promise<void>) | null,
-) {
-  globalUpdateDate = handler;
-}
+import { openDetailPanel } from './detailPanelStore';
+import { closeMilestonePanel, getMilestoneDateHandler, registerMilestonePanelHandlers } from './milestonePanelStore';
 
 export default function MilestonePanel() {
   const [milestone, setMilestone] = useState<Milestone | null>(null);
@@ -34,18 +14,19 @@ export default function MilestonePanel() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    globalOpenPanel = (m: Milestone, list: Task[]) => {
-      setMilestone(m);
-      setIssues(list);
-      requestAnimationFrame(() => setVisible(true));
-    };
-    globalClosePanel = () => {
-      setVisible(false);
-      setTimeout(() => setMilestone(null), 250); // wait for slide-out
-    };
+    registerMilestonePanelHandlers(
+      (m: Milestone, list: Task[]) => {
+        setMilestone(m);
+        setIssues(list);
+        requestAnimationFrame(() => setVisible(true));
+      },
+      () => {
+        setVisible(false);
+        setTimeout(() => setMilestone(null), 250); // wait for slide-out
+      },
+    );
     return () => {
-      globalOpenPanel = null;
-      globalClosePanel = null;
+      registerMilestonePanelHandlers(null, null);
     };
   }, []);
 
@@ -87,10 +68,11 @@ export default function MilestonePanel() {
   const progress = issues.length > 0 ? Math.round((completed / issues.length) * 100) : 0;
 
   const handleDateChange = async (value: string) => {
-    if (!value || !globalUpdateDate) return;
+    const updateDate = getMilestoneDateHandler();
+    if (!value || !updateDate) return;
     setSaving(true);
     try {
-      await globalUpdateDate(milestone.id, value);
+      await updateDate(milestone.id, value);
       setMilestone((prev) => (prev ? { ...prev, targetDate: value } : prev));
     } finally {
       setSaving(false);
@@ -123,7 +105,15 @@ export default function MilestonePanel() {
             onClick={() => closeMilestonePanel()}
             className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -139,7 +129,7 @@ export default function MilestonePanel() {
               {/* Target date — editable when a handler is registered */}
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs text-text-muted shrink-0">Target Date</span>
-                {globalUpdateDate ? (
+                {getMilestoneDateHandler() ? (
                   <input
                     type="date"
                     value={milestone.targetDate ?? ''}
@@ -231,9 +221,7 @@ export default function MilestonePanel() {
             <>
               <div className="mx-5 border-t border-border-primary" />
               <div className="px-5 py-4">
-                <div className="text-[11px] font-medium text-text-muted mb-2.5">
-                  Issues ({issues.length})
-                </div>
+                <div className="text-[11px] font-medium text-text-muted mb-2.5">Issues ({issues.length})</div>
                 <div className="space-y-1.5">
                   {issues.map((t) => {
                     const color = priorityColors[t.priority] || '#52525b';

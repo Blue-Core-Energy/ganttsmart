@@ -1,33 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Task } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import { priorityColors, statusDotColors } from '@/utils/colors';
 import { formatDate } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
-
-interface TooltipState {
-  task: Task | null;
-  x: number;
-  y: number;
-}
-
-let globalTooltipSetter: ((s: TooltipState | ((prev: TooltipState) => TooltipState)) => void) | null = null;
-
-export function showTooltip(task: Task, x: number, y: number) {
-  globalTooltipSetter?.({ task, x, y });
-}
-export function hideTooltip() {
-  globalTooltipSetter?.({ task: null, x: 0, y: 0 });
-}
+import { registerTooltipSetter, type TooltipState } from './tooltipStore';
 
 export default function Tooltip() {
   const [state, setState] = useState<TooltipState>({ task: null, x: 0, y: 0 });
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    globalTooltipSetter = setState;
+    registerTooltipSetter(setState);
     return () => {
-      globalTooltipSetter = null;
+      registerTooltipSetter(null);
     };
   }, []);
 
@@ -121,7 +106,10 @@ export default function Tooltip() {
           <div className="text-[11px] font-medium text-text-secondary tabular-nums">
             {task.startDate && <span className="text-text-muted">{formatDate(task.startDate)} → </span>}
             {formatDate(task.due)}
-            <span className="ml-1" style={{ color: overdue ? 'var(--color-urgent)' : daysLeft <= 14 ? 'var(--color-high)' : undefined }}>
+            <span
+              className="ml-1"
+              style={{ color: overdue ? 'var(--color-urgent)' : daysLeft <= 14 ? 'var(--color-high)' : undefined }}
+            >
               ({overdue ? `${Math.abs(daysLeft)}d overdue` : `${daysLeft}d left`})
             </span>
           </div>

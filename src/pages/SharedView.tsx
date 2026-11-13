@@ -215,7 +215,9 @@ export default function SharedView() {
                 <line x1="8" y1="11" x2="14" y2="11" />
               </svg>
             </button>
-            <span className="text-[11px] text-text-muted w-8 text-center font-mono">{Math.round(effectiveDayWidth)}</span>
+            <span className="text-[11px] text-text-muted w-8 text-center font-mono">
+              {Math.round(effectiveDayWidth)}
+            </span>
             <button
               onClick={zoomIn}
               className="flex items-center gap-1.5 px-3 py-[7px] bg-bg-hover border border-border-secondary rounded-md text-text-secondary text-xs font-medium cursor-pointer transition-all hover:bg-border-secondary hover:text-text-primary"

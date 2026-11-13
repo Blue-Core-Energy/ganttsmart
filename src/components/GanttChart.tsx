@@ -1,11 +1,11 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import type {GroupBy, Milestone, Task, TimeScale} from '@/types';
-import type {TaskBaseline} from '@/hooks/usePlanningHistory';
-import {Avatar} from '@/utils/avatar';
-import {buildTimeCells, daysBetween, isWeekend, startOfWeek} from '@/utils/date';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { GroupBy, Milestone, Task, TimeScale } from '@/types';
+import type { TaskBaseline } from '@/hooks/usePlanningHistory';
+import { Avatar } from '@/utils/avatar';
+import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
-import {openMilestonePanel} from './MilestonePanel';
+import { openMilestonePanel } from './milestonePanelStore';
 
 interface Props {
   tasks: Task[];
@@ -35,11 +35,11 @@ export interface ColumnWidths {
   due: number;
 }
 
-const DEFAULT_WIDTHS: ColumnWidths = {task: 300, priority: 90, due: 78};
-const MIN_WIDTHS: ColumnWidths = {task: 220, priority: 80, due: 70};
+const DEFAULT_WIDTHS: ColumnWidths = { task: 300, priority: 90, due: 78 };
+const MIN_WIDTHS: ColumnWidths = { task: 220, priority: 80, due: 70 };
 
 function groupTasks(tasks: Task[], groupBy: GroupBy): { key: string; label: string; tasks: Task[] }[] {
-  if (groupBy === 'none') return [{key: '__all', label: '', tasks}];
+  if (groupBy === 'none') return [{ key: '__all', label: '', tasks }];
 
   const map = new Map<string, Task[]>();
   for (const t of tasks) {
@@ -53,11 +53,11 @@ function groupTasks(tasks: Task[], groupBy: GroupBy): { key: string; label: stri
 
   return Array.from(map.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, tasks]) => ({key, label: key, tasks}));
+    .map(([key, tasks]) => ({ key, label: key, tasks }));
 }
 
 // Resize handle component
-function ResizeHandle({onResize}: { onResize: (delta: number) => void }) {
+function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -84,31 +84,31 @@ function ResizeHandle({onResize}: { onResize: (delta: number) => void }) {
       className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize z-10 group hover:bg-accent/30 transition-colors"
       onMouseDown={handleMouseDown}
     >
-      <div className="absolute right-0 top-0 bottom-0 w-px bg-border-primary group-hover:bg-accent transition-colors"/>
+      <div className="absolute right-0 top-0 bottom-0 w-px bg-border-primary group-hover:bg-accent transition-colors" />
     </div>
   );
 }
 
 export default function GanttChart({
-                                     tasks,
-                                     doneTasks = [],
-                                     unscheduledTasks = [],
-                                     milestones,
-                                     loading,
-                                     error,
-                                     dayWidth,
-                                     timeScale = 'day',
-                                     groupBy,
-                                     onReschedule,
-                                     onRescheduleStart,
-                                     onCycleStatus,
-                                     onCreateRelation,
-                                     onReorder,
-                                     onUpdateMilestoneDate,
-                                     baselines,
-                                     dateFrom,
-                                     dateTo,
-                                   }: Props) {
+  tasks,
+  doneTasks = [],
+  unscheduledTasks = [],
+  milestones,
+  loading,
+  error,
+  dayWidth,
+  timeScale = 'day',
+  groupBy,
+  onReschedule,
+  onRescheduleStart,
+  onCycleStatus,
+  onCreateRelation,
+  onReorder,
+  onUpdateMilestoneDate,
+  baselines,
+  dateFrom,
+  dateTo,
+}: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [doneVisible, setDoneVisible] = useState(false);
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
@@ -258,7 +258,7 @@ export default function GanttChart({
       let baseSet = false;
       return (delta: number) => {
         if (!baseSet) {
-          baseWidthsRef.current = {...colWidths};
+          baseWidthsRef.current = { ...colWidths };
           baseSet = true;
           // Reset on mouseup
           const resetBase = () => {
@@ -277,11 +277,12 @@ export default function GanttChart({
   );
 
   // All computation must happen before early returns to respect Rules of Hooks
+  const todayKey = new Date().toDateString();
   const today = useMemo(() => {
-    const d = new Date();
+    const d = new Date(todayKey);
     d.setHours(0, 0, 0, 0);
     return d;
-  }, [tasks]); // recompute when tasks change (new day boundary)
+  }, [todayKey]); // recompute on a new calendar day
 
   // Detect dependency violations: blocked task starts before blocker is due
   const depViolations = useMemo(() => {
@@ -316,8 +317,8 @@ export default function GanttChart({
     return violations;
   }, [tasks, today]);
 
-  const {chartStart, totalDays} = useMemo(() => {
-    if (!tasks.length) return {chartStart: today, totalDays: 0};
+  const { chartStart, totalDays } = useMemo(() => {
+    if (!tasks.length) return { chartStart: today, totalDays: 0 };
 
     // If user set explicit date range, use it
     const hasDateRange = dateFrom && dateTo;
@@ -373,12 +374,12 @@ export default function GanttChart({
       totalDays = daysBetween(chartStart, end);
     }
 
-    return {chartStart, totalDays};
+    return { chartStart, totalDays };
   }, [tasks, milestones, today, colWidths, dayWidth, dateFrom, dateTo, timeScale]);
 
   // Calendar header (memoized): a top row of coarse groups (months, or years at month
   // scale) and a bottom row of cells matching the current time scale.
-  const {topCells, bottomCells} = useMemo(() => {
+  const { topCells, bottomCells } = useMemo(() => {
     const cells = buildTimeCells(chartStart, totalDays, timeScale);
 
     const topCells: { label: string; days: number }[] = [];
@@ -386,10 +387,10 @@ export default function GanttChart({
       const label =
         timeScale === 'month'
           ? String(c.start.getFullYear())
-          : c.start.toLocaleDateString('en-US', {month: 'long', year: 'numeric'});
+          : c.start.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
       const last = topCells[topCells.length - 1];
       if (last && last.label === label) last.days += c.days;
-      else topCells.push({label, days: c.days});
+      else topCells.push({ label, days: c.days });
     }
 
     const bottomCells = cells.map((c) => {
@@ -403,13 +404,13 @@ export default function GanttChart({
           timeScale === 'day'
             ? String(c.start.getDate())
             : timeScale === 'week'
-              ? c.start.toLocaleDateString('en-US', {month: 'short', day: 'numeric'})
-              : c.start.toLocaleDateString('en-US', {month: 'short'}),
+              ? c.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : c.start.toLocaleDateString('en-US', { month: 'short' }),
         sub: timeScale === 'day' ? ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'][c.start.getDay()] : undefined,
       };
     });
 
-    return {topCells, bottomCells};
+    return { topCells, bottomCells };
   }, [chartStart, totalDays, today, timeScale]);
 
   // Milestone positions (memoized)
@@ -420,7 +421,7 @@ export default function GanttChart({
         .map((m) => {
           const mDate = new Date(m.targetDate! + 'T00:00:00');
           const dayOffset = daysBetween(chartStart, mDate);
-          return {...m, dayOffset};
+          return { ...m, dayOffset };
         })
         .filter((m) => m.dayOffset >= 0 && m.dayOffset <= totalDays),
     [milestones, chartStart, totalDays],
@@ -451,8 +452,8 @@ export default function GanttChart({
         return;
       }
 
-      milestoneDragRef.current = {id: milestone.id, startX: e.clientX, didDrag: false};
-      setMilestoneDrag({id: milestone.id, delta: 0});
+      milestoneDragRef.current = { id: milestone.id, startX: e.clientX, didDrag: false };
+      setMilestoneDrag({ id: milestone.id, delta: 0 });
       document.body.style.cursor = 'col-resize';
 
       const onMove = (ev: MouseEvent) => {
@@ -460,7 +461,7 @@ export default function GanttChart({
         if (!ref) return;
         const delta = ev.clientX - ref.startX;
         if (Math.abs(delta) > 3) ref.didDrag = true;
-        setMilestoneDrag({id: ref.id, delta});
+        setMilestoneDrag({ id: ref.id, delta });
       };
 
       const onUp = (ev: MouseEvent) => {
@@ -509,7 +510,7 @@ export default function GanttChart({
       if (days === 0) return null;
       const d = new Date(m.targetDate + 'T00:00:00');
       d.setDate(d.getDate() + days);
-      return d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     },
     [milestoneDrag, dayWidth],
   );
@@ -522,8 +523,7 @@ export default function GanttChart({
     return (
       <div className="h-full w-full bg-bg-primary overflow-hidden flex items-center justify-center">
         <div className="text-center text-text-secondary">
-          <div
-            className="w-10 h-10 mx-auto mb-4 border-3 border-border-primary border-t-accent rounded-full animate-spin"/>
+          <div className="w-10 h-10 mx-auto mb-4 border-3 border-border-primary border-t-accent rounded-full animate-spin" />
           <div className="text-sm">Fetching issues from Linear...</div>
           <p className="text-xs text-text-muted mt-1">This may take a few seconds</p>
         </div>
@@ -546,16 +546,15 @@ export default function GanttChart({
               strokeLinecap="round"
               className="text-urgent"
             >
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
             </svg>
           </div>
           <h3 className="text-base font-semibold text-text-primary mb-2">Something went wrong</h3>
           <p className="text-sm text-text-secondary mb-1 max-w-md mx-auto">{error}</p>
           <p className="text-xs text-text-muted">
-            Press <kbd
-            className="px-1.5 py-0.5 bg-bg-hover rounded border border-border-secondary text-[10px]">R</kbd>{' '}
+            Press <kbd className="px-1.5 py-0.5 bg-bg-hover rounded border border-border-secondary text-[10px]">R</kbd>{' '}
             to retry
           </p>
         </div>
@@ -578,10 +577,10 @@ export default function GanttChart({
               strokeLinecap="round"
               className="text-accent"
             >
-              <rect x="3" y="4" width="18" height="18" rx="2"/>
-              <line x1="16" y1="2" x2="16" y2="6"/>
-              <line x1="8" y1="2" x2="8" y2="6"/>
-              <line x1="3" y1="10" x2="21" y2="10"/>
+              <rect x="3" y="4" width="18" height="18" rx="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
             </svg>
           </div>
           <h3 className="text-base font-semibold text-text-primary mb-2">No tasks to display</h3>
@@ -605,16 +604,26 @@ export default function GanttChart({
         <div className="max-w-2xl mx-auto py-12 px-6">
           <div className="text-center mb-8">
             <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-accent/10 flex items-center justify-center">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-accent">
-                <rect x="3" y="4" width="18" height="18" rx="2"/>
-                <line x1="16" y1="2" x2="16" y2="6"/>
-                <line x1="8" y1="2" x2="8" y2="6"/>
-                <line x1="3" y1="10" x2="21" y2="10"/>
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                className="text-accent"
+              >
+                <rect x="3" y="4" width="18" height="18" rx="2" />
+                <line x1="16" y1="2" x2="16" y2="6" />
+                <line x1="8" y1="2" x2="8" y2="6" />
+                <line x1="3" y1="10" x2="21" y2="10" />
               </svg>
             </div>
             <h3 className="text-base font-semibold text-text-primary mb-2">No issues with dates yet</h3>
             <p className="text-sm text-text-secondary max-w-md mx-auto">
-              {unscheduledTasks.length} {unscheduledTasks.length === 1 ? 'issue' : 'issues'} need a due date — or add a target date to the project in Linear, and they'll all line up against it.
+              {unscheduledTasks.length} {unscheduledTasks.length === 1 ? 'issue' : 'issues'} need a due date — or add a
+              target date to the project in Linear, and they'll all line up against it.
             </p>
           </div>
           <UnscheduledList tasks={unscheduledTasks} onReschedule={onReschedule} expanded />
@@ -632,129 +641,133 @@ export default function GanttChart({
       id="gantt-export-target"
       className="h-full w-full bg-bg-primary overflow-auto print:overflow-visible print:border-0"
     >
-      <div ref={innerRef} className="relative" style={{minWidth: '100%'}}>
-        <table className="border-collapse" style={{width: fixedColsWidth + totalDays * dayWidth}}>
+      <div ref={innerRef} className="relative" style={{ minWidth: '100%' }}>
+        <table className="border-collapse" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
           <thead ref={theadRef}>
-          <tr>
-            <th className={`${thBase} px-[18px]`} style={{width: colWidths.task, minWidth: MIN_WIDTHS.task}}>
-              Task
-              <ResizeHandle onResize={makeResizeHandler('task')}/>
-            </th>
-            <th className={`${thBase} px-3`} style={{width: colWidths.priority, minWidth: MIN_WIDTHS.priority}}>
-              Priority
-              <ResizeHandle onResize={makeResizeHandler('priority')}/>
-            </th>
-            <th className={`${thBase} px-3`} style={{width: colWidths.due, minWidth: MIN_WIDTHS.due}}>
-              Due
-              <ResizeHandle onResize={makeResizeHandler('due')}/>
-            </th>
-            <th className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5">
-              {/* Milestone band — flags sit above the calendar and act as drag handles */}
-              {milestonesInRange.length > 0 && (
-                <div className="relative h-[24px] border-b border-border-primary/50">
-                  {milestonesInRange.map((m) => {
-                    const dragging = milestoneDrag?.id === m.id;
-                    const dateLabel = draggedDateLabel(m);
-                    return (
-                      <div
-                        key={m.id}
-                        className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-1.5 h-[18px] rounded border whitespace-nowrap select-none ${
-                          onUpdateMilestoneDate ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-                        } ${
-                          dragging
-                            ? 'bg-amber-500 border-amber-500 text-white shadow-lg'
-                            : 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
-                        }`}
-                        style={{left: milestoneX(m), maxWidth: 180, transition: dragging ? 'none' : 'background-color 150ms'}}
-                        onMouseDown={(e) => handleMilestoneMouseDown(e, m)}
-                        title={
-                          onUpdateMilestoneDate
-                            ? `${m.name} — ${m.targetDate} · drag to reschedule, click for details`
-                            : `${m.name} — ${m.targetDate}`
-                        }
-                      >
-                        <span className="w-2 h-2 rotate-45 border border-current shrink-0" />
-                        <span className="text-[9.5px] font-bold uppercase tracking-wide overflow-hidden text-ellipsis">
-                          {dateLabel ?? m.name}
-                        </span>
-                      </div>
-                    );
-                  })}
+            <tr>
+              <th className={`${thBase} px-[18px]`} style={{ width: colWidths.task, minWidth: MIN_WIDTHS.task }}>
+                Task
+                <ResizeHandle onResize={makeResizeHandler('task')} />
+              </th>
+              <th className={`${thBase} px-3`} style={{ width: colWidths.priority, minWidth: MIN_WIDTHS.priority }}>
+                Priority
+                <ResizeHandle onResize={makeResizeHandler('priority')} />
+              </th>
+              <th className={`${thBase} px-3`} style={{ width: colWidths.due, minWidth: MIN_WIDTHS.due }}>
+                Due
+                <ResizeHandle onResize={makeResizeHandler('due')} />
+              </th>
+              <th className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5">
+                {/* Milestone band — flags sit above the calendar and act as drag handles */}
+                {milestonesInRange.length > 0 && (
+                  <div className="relative h-[24px] border-b border-border-primary/50">
+                    {milestonesInRange.map((m) => {
+                      const dragging = milestoneDrag?.id === m.id;
+                      const dateLabel = draggedDateLabel(m);
+                      return (
+                        <div
+                          key={m.id}
+                          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-1.5 h-[18px] rounded border whitespace-nowrap select-none ${
+                            onUpdateMilestoneDate ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                          } ${
+                            dragging
+                              ? 'bg-amber-500 border-amber-500 text-white shadow-lg'
+                              : 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
+                          }`}
+                          style={{
+                            left: milestoneX(m),
+                            maxWidth: 180,
+                            transition: dragging ? 'none' : 'background-color 150ms',
+                          }}
+                          onMouseDown={(e) => handleMilestoneMouseDown(e, m)}
+                          title={
+                            onUpdateMilestoneDate
+                              ? `${m.name} — ${m.targetDate} · drag to reschedule, click for details`
+                              : `${m.name} — ${m.targetDate}`
+                          }
+                        >
+                          <span className="w-2 h-2 rotate-45 border border-current shrink-0" />
+                          <span className="text-[9.5px] font-bold uppercase tracking-wide overflow-hidden text-ellipsis">
+                            {dateLabel ?? m.name}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <div className="flex border-b border-border-primary">
+                  {topCells.map((m, i) => (
+                    <div
+                      key={i}
+                      className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary py-2.5 text-center border-r border-border-primary overflow-hidden whitespace-nowrap"
+                      style={{ width: m.days * dayWidth }}
+                    >
+                      {m.label}
+                    </div>
+                  ))}
                 </div>
-              )}
-              <div className="flex border-b border-border-primary">
-                {topCells.map((m, i) => (
-                  <div
-                    key={i}
-                    className="text-[11px] font-semibold uppercase tracking-wider text-text-secondary py-2.5 text-center border-r border-border-primary overflow-hidden whitespace-nowrap"
-                    style={{width: m.days * dayWidth}}
-                  >
-                    {m.label}
-                  </div>
-                ))}
-              </div>
-              <div className="flex relative">
-                {bottomCells.map((d, i) => (
-                  <div
-                    key={i}
-                    className={`text-[10px] text-center py-1.5 shrink-0 border-r border-border-primary/60 overflow-hidden whitespace-nowrap ${
-                      d.isCurrent
-                        ? 'text-accent font-bold bg-accent/[0.08]'
-                        : d.isWeekend
-                          ? 'bg-bg-hover/40 text-text-muted'
-                          : 'text-text-muted'
-                    }`}
-                    style={{
-                      width: d.days * dayWidth,
-                    }}
-                  >
-                    <div className="leading-none">{d.label}</div>
-                    {d.sub !== undefined && (
-                      <div
-                        className={`text-[8px] leading-none mt-0.5 ${d.isCurrent ? 'text-accent' : 'text-text-muted/70'}`}
-                      >
-                        {d.sub}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                {/* Marker in the day row, aligned with the milestone's line below */}
-                {milestonesInRange.map((m) => (
-                  <div
-                    key={m.id}
-                    className="absolute bottom-0 z-10 w-2 h-2 rotate-45 -translate-x-1/2 translate-y-1/2 border border-amber-500 bg-amber-500 pointer-events-none"
-                    style={{left: milestoneX(m)}}
-                  />
-                ))}
-              </div>
-            </th>
-          </tr>
+                <div className="flex relative">
+                  {bottomCells.map((d, i) => (
+                    <div
+                      key={i}
+                      className={`text-[10px] text-center py-1.5 shrink-0 border-r border-border-primary/60 overflow-hidden whitespace-nowrap ${
+                        d.isCurrent
+                          ? 'text-accent font-bold bg-accent/[0.08]'
+                          : d.isWeekend
+                            ? 'bg-bg-hover/40 text-text-muted'
+                            : 'text-text-muted'
+                      }`}
+                      style={{
+                        width: d.days * dayWidth,
+                      }}
+                    >
+                      <div className="leading-none">{d.label}</div>
+                      {d.sub !== undefined && (
+                        <div
+                          className={`text-[8px] leading-none mt-0.5 ${d.isCurrent ? 'text-accent' : 'text-text-muted/70'}`}
+                        >
+                          {d.sub}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {/* Marker in the day row, aligned with the milestone's line below */}
+                  {milestonesInRange.map((m) => (
+                    <div
+                      key={m.id}
+                      className="absolute bottom-0 z-10 w-2 h-2 rotate-45 -translate-x-1/2 translate-y-1/2 border border-amber-500 bg-amber-500 pointer-events-none"
+                      style={{ left: milestoneX(m) }}
+                    />
+                  ))}
+                </div>
+              </th>
+            </tr>
           </thead>
           <tbody>
-          {groups.map((group) => (
-            <GroupRows
-              key={group.key}
-              group={group}
-              groupBy={groupBy}
-              showHeader={groupBy !== 'none'}
-              isCollapsed={collapsed.has(group.key)}
-              onToggle={() => toggleCollapse(group.key)}
-              chartStart={chartStart}
-              totalDays={totalDays}
-              today={today}
-              dayWidth={dayWidth}
-              timeScale={timeScale}
-              colWidths={colWidths}
-              onReschedule={onReschedule}
-              onRescheduleStart={onRescheduleStart}
-              onCycleStatus={onCycleStatus}
-              onConnectStart={onCreateRelation ? handleConnectStart : undefined}
-              isConnecting={isConnecting}
-              depViolations={depViolations}
-              baselines={baselines}
-              onReorder={onReorder}
-            />
-          ))}
+            {groups.map((group) => (
+              <GroupRows
+                key={group.key}
+                group={group}
+                groupBy={groupBy}
+                showHeader={groupBy !== 'none'}
+                isCollapsed={collapsed.has(group.key)}
+                onToggle={() => toggleCollapse(group.key)}
+                chartStart={chartStart}
+                totalDays={totalDays}
+                today={today}
+                dayWidth={dayWidth}
+                timeScale={timeScale}
+                colWidths={colWidths}
+                onReschedule={onReschedule}
+                onRescheduleStart={onRescheduleStart}
+                onCycleStatus={onCycleStatus}
+                onConnectStart={onCreateRelation ? handleConnectStart : undefined}
+                isConnecting={isConnecting}
+                depViolations={depViolations}
+                baselines={baselines}
+                onReorder={onReorder}
+              />
+            ))}
           </tbody>
         </table>
 
@@ -778,19 +791,17 @@ export default function GanttChart({
           );
         })}
 
-        {groupBy === 'none' && (
-          <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations}/>
-        )}
+        {groupBy === 'none' && <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations} />}
 
         {/* Connection line overlay — updated imperatively during drag for performance */}
         <svg
           ref={connectionSvgRef}
           className="absolute top-0 left-0 pointer-events-none z-[4]"
-          style={{display: 'none', overflow: 'visible'}}
+          style={{ display: 'none', overflow: 'visible' }}
         >
           <defs>
             <marker id="dep-arrow-temp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-              <polygon points="0 0, 8 3, 0 6" fill="#7c5cfc" opacity="0.9"/>
+              <polygon points="0 0, 8 3, 0 6" fill="#7c5cfc" opacity="0.9" />
             </marker>
           </defs>
           <path
@@ -823,9 +834,9 @@ export default function GanttChart({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{transform: doneVisible ? 'rotate(90deg)' : 'rotate(0deg)'}}
+                style={{ transform: doneVisible ? 'rotate(90deg)' : 'rotate(0deg)' }}
               >
-                <polyline points="9 18 15 12 9 6"/>
+                <polyline points="9 18 15 12 9 6" />
               </svg>
               <span className="font-medium">Completed</span>
               <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">{doneTasks.length}</span>
@@ -836,22 +847,22 @@ export default function GanttChart({
           {doneVisible && (
             <table
               className="border-collapse opacity-60 hover:opacity-100 transition-opacity"
-              style={{width: fixedColsWidth + totalDays * dayWidth}}
+              style={{ width: fixedColsWidth + totalDays * dayWidth }}
             >
               <tbody>
-              {doneTasks.map((task) => (
-                <GanttRow
-                  key={task.id}
-                  task={task}
-                  chartStart={chartStart}
-                  totalDays={totalDays}
-                  today={today}
-                  dayWidth={dayWidth}
-                  timeScale={timeScale}
-                  colWidths={colWidths}
-                  isDone
-                />
-              ))}
+                {doneTasks.map((task) => (
+                  <GanttRow
+                    key={task.id}
+                    task={task}
+                    chartStart={chartStart}
+                    totalDays={totalDays}
+                    today={today}
+                    dayWidth={dayWidth}
+                    timeScale={timeScale}
+                    colWidths={colWidths}
+                    isDone
+                  />
+                ))}
               </tbody>
             </table>
           )}
@@ -876,17 +887,29 @@ export default function GanttChart({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{transform: unscheduledVisible ? 'rotate(90deg)' : 'rotate(0deg)'}}
+                style={{ transform: unscheduledVisible ? 'rotate(90deg)' : 'rotate(0deg)' }}
               >
-                <polyline points="9 18 15 12 9 6"/>
+                <polyline points="9 18 15 12 9 6" />
               </svg>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-high">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-high"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               <span className="font-medium">Unscheduled</span>
-              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">{unscheduledTasks.length}</span>
+              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">
+                {unscheduledTasks.length}
+              </span>
               <span className="text-[11px] text-text-muted ml-1">— no due date set</span>
             </div>
             <span className="text-xs text-text-muted">{unscheduledVisible ? 'Hide' : 'Show'}</span>
@@ -939,21 +962,37 @@ function UnscheduledRow({
   const [date, setDate] = useState(todayStr);
   const [busy, setBusy] = useState(false);
 
-  const priorityCls = task.priorityVal === 1 ? 'urgent' : task.priorityVal === 2 ? 'high' : task.priorityVal === 3 ? 'medium' : task.priorityVal === 4 ? 'low' : 'none';
+  const priorityCls =
+    task.priorityVal === 1
+      ? 'urgent'
+      : task.priorityVal === 2
+        ? 'high'
+        : task.priorityVal === 3
+          ? 'medium'
+          : task.priorityVal === 4
+            ? 'low'
+            : 'none';
   const idColorMap: Record<string, string> = {
-    urgent: '#ef4444', high: '#f97316', medium: '#f59e0b', low: '#22c55e', none: '#a1a1aa',
+    urgent: '#ef4444',
+    high: '#f97316',
+    medium: '#f59e0b',
+    low: '#22c55e',
+    none: '#a1a1aa',
   };
   const idColor = idColorMap[priorityCls];
 
-  const schedule = useCallback(async (newDate: string) => {
-    if (!onReschedule || busy) return;
-    setBusy(true);
-    try {
-      await onReschedule(task.uuid, newDate);
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, onReschedule, task.uuid]);
+  const schedule = useCallback(
+    async (newDate: string) => {
+      if (!onReschedule || busy) return;
+      setBusy(true);
+      try {
+        await onReschedule(task.uuid, newDate);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, onReschedule, task.uuid],
+  );
 
   return (
     <div className="flex items-center gap-3 bg-bg-card border border-border-primary rounded-lg p-2.5 hover:border-border-secondary transition-colors">
@@ -966,10 +1005,7 @@ function UnscheduledRow({
           >
             {task.id}
           </span>
-          <span
-            className="text-[9.5px] font-semibold uppercase tracking-wide"
-            style={{ color: idColor }}
-          >
+          <span className="text-[9.5px] font-semibold uppercase tracking-wide" style={{ color: idColor }}>
             {task.priority}
           </span>
           <span className="text-[10px] text-text-muted ml-auto">{task.status}</span>
@@ -999,26 +1035,26 @@ function UnscheduledRow({
 
 // Sub-component for group rows
 function GroupRows({
-                     group,
-                     groupBy,
-                     showHeader,
-                     isCollapsed,
-                     onToggle,
-                     chartStart,
-                     totalDays,
-                     today,
-                     dayWidth,
-                     timeScale,
-                     colWidths,
-                     onReschedule,
-                     onRescheduleStart,
-                     onCycleStatus,
-                     onConnectStart,
-                     isConnecting,
-                     depViolations,
-                     baselines,
-                     onReorder,
-                   }: {
+  group,
+  groupBy,
+  showHeader,
+  isCollapsed,
+  onToggle,
+  chartStart,
+  totalDays,
+  today,
+  dayWidth,
+  timeScale,
+  colWidths,
+  onReschedule,
+  onRescheduleStart,
+  onCycleStatus,
+  onConnectStart,
+  isConnecting,
+  depViolations,
+  baselines,
+  onReorder,
+}: {
   group: { key: string; label: string; tasks: Task[] };
   groupBy: GroupBy;
   showHeader: boolean;
@@ -1058,11 +1094,11 @@ function GroupRows({
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)'}}
+                style={{ transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}
               >
-                <polyline points="9 18 15 12 9 6"/>
+                <polyline points="9 18 15 12 9 6" />
               </svg>
-              {groupBy === 'assignee' && <Avatar name={group.label} size="sm"/>}
+              {groupBy === 'assignee' && <Avatar name={group.label} size="sm" />}
               {group.label}
               <span className="text-text-muted font-normal">({group.tasks.length})</span>
             </div>

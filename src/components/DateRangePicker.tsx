@@ -88,7 +88,17 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
           hasRange ? 'border-accent text-accent' : 'border-border-secondary text-text-secondary'
         }`}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="shrink-0"
+        >
           <rect x="3" y="4" width="18" height="18" rx="2" />
           <line x1="16" y1="2" x2="16" y2="6" />
           <line x1="8" y1="2" x2="8" y2="6" />
@@ -99,11 +109,22 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
 
       {hasRange && (
         <button
-          onClick={(e) => { e.stopPropagation(); onChange('', ''); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange('', '');
+          }}
           className="p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer"
           title="Clear date range"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+          >
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -123,13 +144,16 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
               months: 'flex gap-4',
               month_caption: 'text-sm font-semibold text-text-primary mb-2 text-center',
               nav: 'flex items-center justify-between mb-1',
-              button_previous: 'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
-              button_next: 'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
+              button_previous:
+                'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
+              button_next:
+                'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
               weekdays: 'flex',
               weekday: 'w-9 text-center text-[10px] font-medium text-text-muted py-1',
               week: 'flex',
               day: 'w-9 h-8 text-center text-xs',
-              day_button: 'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
+              day_button:
+                'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
               selected: 'bg-accent text-white rounded-md font-semibold',
               range_start: 'bg-accent text-white rounded-l-md font-semibold',
               range_end: 'bg-accent text-white rounded-r-md font-semibold',

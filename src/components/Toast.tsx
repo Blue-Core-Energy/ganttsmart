@@ -1,28 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-
-export type ToastType = 'success' | 'error' | 'info';
-
-interface ToastItem {
-  id: number;
-  message: string;
-  type: ToastType;
-  action?: { label: string; onClick: () => void };
-}
+import { registerToastHandler, type ToastItem as ToastData, type ToastType } from './toastStore';
 
 let nextId = 0;
-let globalAddToast: ((item: Omit<ToastItem, 'id'>) => void) | null = null;
-
-export function toast(message: string, type: ToastType = 'info', action?: ToastItem['action']) {
-  globalAddToast?.({ message, type, action });
-}
-
-export function toastError(message: string, retry?: () => void) {
-  toast(message, 'error', retry ? { label: 'Retry', onClick: retry } : undefined);
-}
-
-export function toastSuccess(message: string) {
-  toast(message, 'success');
-}
 
 const ICONS: Record<ToastType, string> = {
   success: '✓',
@@ -43,9 +22,9 @@ const ICON_CLASSES: Record<ToastType, string> = {
 };
 
 export default function ToastContainer() {
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [toasts, setToasts] = useState<ToastData[]>([]);
 
-  const addToast = useCallback((item: Omit<ToastItem, 'id'>) => {
+  const addToast = useCallback((item: Omit<ToastData, 'id'>) => {
     const id = ++nextId;
     setToasts((prev) => [...prev.slice(-4), { ...item, id }]); // max 5 toasts
   }, []);
@@ -55,9 +34,9 @@ export default function ToastContainer() {
   }, []);
 
   useEffect(() => {
-    globalAddToast = addToast;
+    registerToastHandler(addToast);
     return () => {
-      globalAddToast = null;
+      registerToastHandler(null);
     };
   }, [addToast]);
 
@@ -70,7 +49,7 @@ export default function ToastContainer() {
   );
 }
 
-function ToastItem({ toast: t, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
+function ToastItem({ toast: t, onDismiss }: { toast: ToastData; onDismiss: () => void }) {
   useEffect(() => {
     const timer = setTimeout(onDismiss, t.type === 'error' ? 8000 : 4000);
     return () => clearTimeout(timer);

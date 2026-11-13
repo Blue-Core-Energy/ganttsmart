@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 
@@ -8,6 +8,45 @@ export default function Callback() {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('Connecting to Linear...');
   const exchangeStarted = useRef(false);
+
+  const exchangeToken = useCallback(
+    async (code: string) => {
+      try {
+        setStatus('Exchanging authorization code...');
+
+        // Refresh session to ensure we have a valid (non-expired) JWT
+        const { error: refreshError } = await supabase.auth.refreshSession();
+        if (refreshError) {
+          setError('Session expired. Please sign in again.');
+          return;
+        }
+
+        // Use supabase.functions.invoke — handles auth token automatically
+        // Pass redirect_uri so the edge function uses the same one that initiated the flow
+        const { data, error: fnError } = await supabase.functions.invoke('linear-oauth-callback', {
+          body: {
+            code,
+            state: searchParams.get('state'),
+            redirect_uri: import.meta.env.VITE_LINEAR_REDIRECT_URI,
+          },
+        });
+
+        if (fnError) {
+          throw new Error(fnError.message || 'Edge function error');
+        }
+
+        if (data?.error) {
+          throw new Error(data.error);
+        }
+
+        setStatus('Connected! Redirecting...');
+        setTimeout(() => navigate('/app', { replace: true }), 500);
+      } catch (err) {
+        setError((err as Error).message);
+      }
+    },
+    [navigate, searchParams],
+  );
 
   useEffect(() => {
     // Guard against React StrictMode double-mount
@@ -30,43 +69,7 @@ export default function Callback() {
     exchangeStarted.current = true;
     sessionStorage.removeItem('linear_oauth_state');
     exchangeToken(code);
-  }, [searchParams]);
-
-  const exchangeToken = async (code: string) => {
-    try {
-      setStatus('Exchanging authorization code...');
-
-      // Refresh session to ensure we have a valid (non-expired) JWT
-      const { error: refreshError } = await supabase.auth.refreshSession();
-      if (refreshError) {
-        setError('Session expired. Please sign in again.');
-        return;
-      }
-
-      // Use supabase.functions.invoke — handles auth token automatically
-      // Pass redirect_uri so the edge function uses the same one that initiated the flow
-      const { data, error: fnError } = await supabase.functions.invoke('linear-oauth-callback', {
-        body: {
-          code,
-          state: searchParams.get('state'),
-          redirect_uri: import.meta.env.VITE_LINEAR_REDIRECT_URI,
-        },
-      });
-
-      if (fnError) {
-        throw new Error(fnError.message || 'Edge function error');
-      }
-
-      if (data?.error) {
-        throw new Error(data.error);
-      }
-
-      setStatus('Connected! Redirecting...');
-      setTimeout(() => navigate('/app', { replace: true }), 500);
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  };
+  }, [exchangeToken, searchParams]);
 
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center">

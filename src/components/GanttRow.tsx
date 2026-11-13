@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import type { ColumnWidths } from './GanttChart';
@@ -13,7 +13,7 @@ import {
   statusDotColors,
 } from '@/utils/colors';
 import { buildTimeCells, daysBetween, formatDate, isWeekend } from '@/utils/date';
-import { openDetailPanel } from './DetailPanel';
+import { openDetailPanel } from './detailPanelStore';
 
 interface Props {
   task: Task;
@@ -55,12 +55,15 @@ export default function GanttRow({
   onReorder,
 }: Props) {
   const pCls = priorityClass(task.priorityVal);
-  const dueDate = new Date(task.due + 'T00:00:00');
+  const dueDate = useMemo(() => new Date(task.due + 'T00:00:00'), [task.due]);
   const daysLeft = daysBetween(today, dueDate);
   const overdue = daysLeft < 0;
 
   const hasStartDate = !!task.startDate;
-  const taskStartDate = hasStartDate ? new Date(task.startDate + 'T00:00:00') : null;
+  const taskStartDate = useMemo(
+    () => (task.startDate ? new Date(task.startDate + 'T00:00:00') : null),
+    [task.startDate],
+  );
 
   // Drag state — due date (right edge)
   const [dragDelta, setDragDelta] = useState(0);
@@ -423,7 +426,9 @@ export default function GanttRow({
         if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && onReorder) {
           e.preventDefault();
           const row = e.currentTarget as HTMLElement;
-          const sibling = (e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling) as HTMLElement | null;
+          const sibling = (
+            e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling
+          ) as HTMLElement | null;
           const siblingUuid = sibling?.dataset.taskUuid;
           if (siblingUuid) {
             onReorder(task.uuid, siblingUuid, e.key === 'ArrowDown');
@@ -507,7 +512,10 @@ export default function GanttRow({
                 </span>
               )}
               {task.totalChildren > 0 && (
-                <span className="text-[9px] font-mono text-text-muted shrink-0 tabular-nums" title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}>
+                <span
+                  className="text-[9px] font-mono text-text-muted shrink-0 tabular-nums"
+                  title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}
+                >
                   {task.completedChildren}/{task.totalChildren}
                 </span>
               )}
@@ -575,11 +583,7 @@ export default function GanttRow({
           (isDone ? ' · Completed' : overdue ? ` · ${Math.abs(daysLeft)}d late` : ` · ${daysLeft}d left`)
         }
       >
-        {task.isDueImplicit ? (
-          <span className="italic opacity-75">~{formatDate(task.due)}</span>
-        ) : (
-          formatDate(task.due)
-        )}
+        {task.isDueImplicit ? <span className="italic opacity-75">~{formatDate(task.due)}</span> : formatDate(task.due)}
       </td>
 
       {/* Chart */}
@@ -618,84 +622,86 @@ export default function GanttRow({
           )}
 
           {/* Bar wrapper — groups bar + connector dot for shared hover state */}
-          <div className="group/bar absolute top-0 h-full" style={{ left: displayBarLeft, width: displayBarWidth + 20 }}>
-          {/* Main bar */}
           <div
-            data-task-bar={task.id}
-            className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isDueImplicit ? 'opacity-75' : ''} ${onReschedule || onRescheduleStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
-            style={{
-              left: 0,
-              width: displayBarWidth,
-              background: isDone
-                ? 'linear-gradient(135deg, #15803d, #22c55e)'
-                : overdue
-                  ? 'linear-gradient(135deg, #b91c1c, #ef4444)'
-                  : barGradients[pCls],
-              boxShadow: isDone
-                ? '0 2px 8px rgba(34,197,94,0.3)'
-                : overdue
-                  ? '0 2px 12px rgba(239,68,68,0.4)'
-                  : barShadows[pCls],
-              overflow: 'hidden',
-              outline: task.isDueImplicit ? '1.5px dashed rgba(255,255,255,0.45)' : undefined,
-              outlineOffset: task.isDueImplicit ? '-3px' : undefined,
-            }}
-            onClick={() => {
-              if (!didDragRef.current) openDetailPanel(task);
-            }}
-            onMouseDown={onReschedule || onRescheduleStart ? handleMoveStart : undefined}
+            className="group/bar absolute top-0 h-full"
+            style={{ left: displayBarLeft, width: displayBarWidth + 20 }}
           >
-            {/* Left drag handle (start date — works for setting new or editing existing) */}
-            {onRescheduleStart && (
-              <div
-                className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-l-md"
-                onMouseDown={handleStartDragStart}
-                onClick={(e) => e.stopPropagation()}
-              />
-            )}
-            {progressWidth && (
-              <div
-                className="absolute left-0 top-0 bottom-0 rounded-md opacity-30 bg-white"
-                style={{ width: progressWidth }}
-              />
-            )}
-            {/* Label inside bar — task title at rest, drag feedback when dragging */}
-            {!barIsNarrow && (
-              <span
-                className="relative z-[1] whitespace-nowrap tracking-[0.01em] overflow-hidden text-ellipsis max-w-full pr-2"
-                style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
-                title={isAnyDrag ? undefined : task.title}
-              >
-                {isAnyDrag ? barLabel : isDone ? '✓ Done' : task.title}
-              </span>
-            )}
-
-            {onReschedule && (
-              <div
-                className="absolute right-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-r-md"
-                onMouseDown={handleDragStart}
-                onClick={(e) => e.stopPropagation()}
-              />
-            )}
-
-          </div>
-
-          {/* Connection dot — outside bar div to avoid overflow:hidden clipping */}
-          {onConnectStart && !isDone && (
+            {/* Main bar */}
             <div
-              className="absolute w-[12px] h-[12px] rounded-full bg-accent border-2 border-bg-card opacity-0 group-hover/bar:opacity-100 cursor-crosshair z-[5] transition-opacity hover:scale-125 top-1/2 -translate-y-1/2"
+              data-task-bar={task.id}
+              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isDueImplicit ? 'opacity-75' : ''} ${onReschedule || onRescheduleStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
-                left: displayBarWidth + 4,
+                left: 0,
+                width: displayBarWidth,
+                background: isDone
+                  ? 'linear-gradient(135deg, #15803d, #22c55e)'
+                  : overdue
+                    ? 'linear-gradient(135deg, #b91c1c, #ef4444)'
+                    : barGradients[pCls],
+                boxShadow: isDone
+                  ? '0 2px 8px rgba(34,197,94,0.3)'
+                  : overdue
+                    ? '0 2px 12px rgba(239,68,68,0.4)'
+                    : barShadows[pCls],
+                overflow: 'hidden',
+                outline: task.isDueImplicit ? '1.5px dashed rgba(255,255,255,0.45)' : undefined,
+                outlineOffset: task.isDueImplicit ? '-3px' : undefined,
               }}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onConnectStart(task.id, e);
+              onClick={() => {
+                if (!didDragRef.current) openDetailPanel(task);
               }}
-              onClick={(e) => e.stopPropagation()}
-              title="Drag to another task to create a dependency"
-            />
-          )}
+              onMouseDown={onReschedule || onRescheduleStart ? handleMoveStart : undefined}
+            >
+              {/* Left drag handle (start date — works for setting new or editing existing) */}
+              {onRescheduleStart && (
+                <div
+                  className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-l-md"
+                  onMouseDown={handleStartDragStart}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
+              {progressWidth && (
+                <div
+                  className="absolute left-0 top-0 bottom-0 rounded-md opacity-30 bg-white"
+                  style={{ width: progressWidth }}
+                />
+              )}
+              {/* Label inside bar — task title at rest, drag feedback when dragging */}
+              {!barIsNarrow && (
+                <span
+                  className="relative z-[1] whitespace-nowrap tracking-[0.01em] overflow-hidden text-ellipsis max-w-full pr-2"
+                  style={{ textShadow: '0 1px 3px rgba(0,0,0,0.3)' }}
+                  title={isAnyDrag ? undefined : task.title}
+                >
+                  {isAnyDrag ? barLabel : isDone ? '✓ Done' : task.title}
+                </span>
+              )}
+
+              {onReschedule && (
+                <div
+                  className="absolute right-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-r-md"
+                  onMouseDown={handleDragStart}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              )}
+            </div>
+
+            {/* Connection dot — outside bar div to avoid overflow:hidden clipping */}
+            {onConnectStart && !isDone && (
+              <div
+                className="absolute w-[12px] h-[12px] rounded-full bg-accent border-2 border-bg-card opacity-0 group-hover/bar:opacity-100 cursor-crosshair z-[5] transition-opacity hover:scale-125 top-1/2 -translate-y-1/2"
+                style={{
+                  left: displayBarWidth + 4,
+                }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onConnectStart(task.id, e);
+                }}
+                onClick={(e) => e.stopPropagation()}
+                title="Drag to another task to create a dependency"
+              />
+            )}
           </div>
 
           {/* Floating label for narrow bars — positioned to the right of the bar */}
