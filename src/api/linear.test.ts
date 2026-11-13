@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { linearRequestMock } = vi.hoisted(() => ({
   linearRequestMock: vi.fn(),
@@ -19,7 +19,9 @@ import {
   fetchProjectExternalLinks,
   fetchWorkflowStates,
   findActiveExternalLink,
+  isRetryableNetworkError,
   resolveFeedbackTarget,
+  testAuth,
   updateIssueState,
 } from './linear';
 
@@ -1008,5 +1010,175 @@ describe('workflowStates & updateIssueState', () => {
     await expect(updateIssueState('tok', 'uuid-1', 'st-3')).rejects.toThrow(
       'Linear did not confirm issue status update.',
     );
+  });
+});
+
+describe('isRetryableNetworkError', () => {
+  it('treats TypeError network errors across browsers as retryable', () => {
+    expect(isRetryableNetworkError(new TypeError('Load failed'))).toBe(true);
+    expect(isRetryableNetworkError(new TypeError('Failed to fetch'))).toBe(true);
+    expect(isRetryableNetworkError(new TypeError('NetworkError when attempting to fetch resource.'))).toBe(true);
+    expect(isRetryableNetworkError(new TypeError('fetch failed'))).toBe(true);
+  });
+
+  it('excludes AbortError even if wrapped or named AbortError', () => {
+    expect(isRetryableNetworkError(new DOMException('The operation was aborted.', 'AbortError'))).toBe(false);
+    expect(isRetryableNetworkError(Object.assign(new Error('Aborted'), { name: 'AbortError' }))).toBe(false);
+    expect(isRetryableNetworkError(Object.assign(new TypeError('Load failed'), { name: 'AbortError' }))).toBe(false);
+  });
+
+  it('excludes non-network errors and non-objects', () => {
+    expect(isRetryableNetworkError(new Error('Linear authentication expired. Please reconnect.'))).toBe(false);
+    expect(isRetryableNetworkError(new SyntaxError('Unexpected token'))).toBe(false);
+    expect(isRetryableNetworkError(null)).toBe(false);
+    expect(isRetryableNetworkError(undefined)).toBe(false);
+    expect(isRetryableNetworkError('Load failed')).toBe(false);
+  });
+});
+
+describe('gql retry behavior', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('retries once on Safari TypeError("Load failed") and succeeds when retry recovers', async () => {
+    linearRequestMock
+      .mockRejectedValueOnce(new TypeError('Load failed'))
+      .mockResolvedValueOnce(jsonResponse({ viewer: { id: 'user-1', name: 'Alice' } }));
+
+    const promise = testAuth('tok');
+    const assertion = expect(promise).resolves.toEqual({ id: 'user-1', name: 'Alice' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once on Safari TypeError("Load failed") for mutations and succeeds on retry', async () => {
+    linearRequestMock
+      .mockRejectedValueOnce(new TypeError('Load failed'))
+      .mockResolvedValueOnce(jsonResponse({ issueUpdate: { success: true } }));
+
+    const promise = updateIssueState('tok', 'issue-1', 'state-2');
+    const assertion = expect(promise).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails after one retry if Safari TypeError("Load failed") persists', async () => {
+    linearRequestMock.mockRejectedValue(new TypeError('Load failed'));
+
+    const promise = testAuth('tok');
+    const assertion = expect(promise).rejects.toThrow('Load failed');
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['Chrome', 'Failed to fetch'],
+    ['Firefox', 'NetworkError when attempting to fetch resource.'],
+  ])('retries once on %s TypeError("%s") and succeeds on retry', async (_browser, message) => {
+    linearRequestMock
+      .mockRejectedValueOnce(new TypeError(message))
+      .mockResolvedValueOnce(jsonResponse({ viewer: { id: 'user-1', name: 'Alice' } }));
+
+    const promise = testAuth('tok');
+    const assertion = expect(promise).resolves.toEqual({ id: 'user-1', name: 'Alice' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('retries once if reading the response body fails mid-stream with TypeError("Load failed")', async () => {
+    const brokenBodyResponse = {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers(),
+      json: () => Promise.reject(new TypeError('Load failed')),
+    } as unknown as Response;
+
+    linearRequestMock
+      .mockResolvedValueOnce(brokenBodyResponse)
+      .mockResolvedValueOnce(jsonResponse({ viewer: { id: 'user-1', name: 'Alice' } }));
+
+    const promise = testAuth('tok');
+    const assertion = expect(promise).resolves.toEqual({ id: 'user-1', name: 'Alice' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry on DOMException AbortError or Error with name AbortError', async () => {
+    const domAbort = new DOMException('The user aborted a request.', 'AbortError');
+    linearRequestMock.mockRejectedValueOnce(domAbort);
+    await expect(testAuth('tok')).rejects.toBe(domAbort);
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+
+    linearRequestMock.mockReset();
+    const errAbort = Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    linearRequestMock.mockRejectedValueOnce(errAbort);
+    await expect(testAuth('tok')).rejects.toBe(errAbort);
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry on 401 auth expiry, HTTP 4xx, GraphQL errors, or invalid JSON SyntaxError', async () => {
+    linearRequestMock.mockResolvedValueOnce(new Response('Unauthorized', { status: 401 }));
+    await expect(testAuth('tok')).rejects.toThrow('Linear authentication expired. Please reconnect.');
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+
+    linearRequestMock.mockReset();
+    linearRequestMock.mockResolvedValueOnce(new Response('Bad Request', { status: 400, statusText: 'Bad Request' }));
+    await expect(testAuth('tok')).rejects.toThrow('Linear API error (400): Bad Request');
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+
+    linearRequestMock.mockReset();
+    linearRequestMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ errors: [{ message: 'Entity not found' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    await expect(testAuth('tok')).rejects.toThrow('Entity not found');
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+
+    linearRequestMock.mockReset();
+    linearRequestMock.mockResolvedValueOnce(new Response('<html>502</html>', { status: 200 }));
+    await expect(testAuth('tok')).rejects.toThrow();
+    expect(linearRequestMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues retrying 5xx responses up to 2 times as before', async () => {
+    linearRequestMock
+      .mockResolvedValueOnce(new Response('Bad Gateway', { status: 502 }))
+      .mockResolvedValueOnce(new Response('Service Unavailable', { status: 503 }))
+      .mockResolvedValueOnce(jsonResponse({ viewer: { id: 'user-1', name: 'Alice' } }));
+
+    const promise = testAuth('tok');
+    const assertion = expect(promise).resolves.toEqual({ id: 'user-1', name: 'Alice' });
+    await vi.advanceTimersByTimeAsync(2000);
+    await assertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(3);
+
+    linearRequestMock.mockReset();
+    linearRequestMock.mockImplementation(async () => new Response('Server Error', { status: 500 }));
+    const failingPromise = testAuth('tok');
+    const failingAssertion = expect(failingPromise).rejects.toThrow('Linear API error (500): Server Error');
+    await vi.advanceTimersByTimeAsync(5000);
+    await failingAssertion;
+
+    expect(linearRequestMock).toHaveBeenCalledTimes(3);
   });
 });
