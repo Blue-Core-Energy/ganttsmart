@@ -17,8 +17,10 @@ import {
   FeedbackTargetNotFoundError,
   fetchIssues,
   fetchProjectExternalLinks,
+  fetchWorkflowStates,
   findActiveExternalLink,
   resolveFeedbackTarget,
+  updateIssueState,
 } from './linear';
 
 function jsonResponse(data: unknown): Response {
@@ -957,5 +959,54 @@ describe('Linear project external links', () => {
         'https://gantt.example.com/app?project=proj-2',
       )?.id,
     ).toBe('2');
+  });
+});
+
+describe('workflowStates & updateIssueState', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  it('fetchWorkflowStates declares $teamId as ID! and sorts nodes by position', async () => {
+    const calls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
+    linearRequestMock.mockImplementation(
+      async (_token: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        calls.push(body);
+        return jsonResponse({
+          workflowStates: {
+            nodes: [
+              { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+              { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+            ],
+          },
+        });
+      },
+    );
+
+    const states = await fetchWorkflowStates('tok', 'team-1');
+    expect(calls[0].query).toContain('$teamId: ID!');
+    expect(calls[0].query).toContain('first: 100');
+    expect(calls[0].variables).toEqual({ teamId: 'team-1' });
+    expect(states.map((s) => s.id)).toEqual(['st-1', 'st-2', 'st-3']);
+  });
+
+  it('updateIssueState sends issueUpdate mutation and throws when success is false', async () => {
+    const calls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
+    linearRequestMock.mockImplementation(
+      async (_token: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        calls.push(body);
+        return jsonResponse({ issueUpdate: { success: true } });
+      },
+    );
+
+    await updateIssueState('tok', 'uuid-1', 'st-2');
+    expect(calls[0].query).toContain('issueUpdate');
+    expect(calls[0].variables).toEqual({ id: 'uuid-1', stateId: 'st-2' });
+
+    linearRequestMock.mockResolvedValueOnce(jsonResponse({ issueUpdate: { success: false } }));
+    await expect(updateIssueState('tok', 'uuid-1', 'st-3')).rejects.toThrow(
+      'Linear did not confirm issue status update.',
+    );
   });
 });

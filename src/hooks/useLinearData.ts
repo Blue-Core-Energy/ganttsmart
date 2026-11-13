@@ -20,6 +20,7 @@ import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } f
 import type { Filters, GroupBy, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
+import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
 const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
@@ -47,7 +48,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   const [tasks, setTasks] = useState<Task[]>([]);
   const [unscheduledTasks, setUnscheduledTasks] = useState<Task[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
-  const [workflowStates, setWorkflowStates] = useState<WorkflowState[]>([]);
+  const [workflowStatesByTeam, setWorkflowStatesByTeam] = useState<Record<string, WorkflowState[]>>({});
+  const workflowStates = useMemo(() => Object.values(workflowStatesByTeam).flat(), [workflowStatesByTeam]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastSynced, setLastSynced] = useState('');
@@ -184,13 +186,24 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         setProjectName(result.projectName);
         setMilestones(result.milestones);
         setLastSynced(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-        const seedTeamId = result.tasks[0]?.teamId || result.unscheduledTasks[0]?.teamId;
-        if (seedTeamId) {
-          try {
-            const states = await fetchWorkflowStates(linearToken, seedTeamId);
-            setWorkflowStates(states);
-          } catch {
-            // Non-critical
+        const teamIds = [
+          ...new Set([...result.tasks, ...result.unscheduledTasks].map((t) => t.teamId).filter(Boolean)),
+        ];
+        if (teamIds.length > 0) {
+          const settled = await Promise.allSettled(
+            teamIds.map(async (tid) => [tid, await fetchWorkflowStates(linearToken, tid)] as const),
+          );
+          if (!activeProjectIdRef.current || activeProjectIdRef.current === projectId) {
+            const nextByTeam: Record<string, WorkflowState[]> = {};
+            for (const item of settled) {
+              if (item.status === 'fulfilled') {
+                const [tid, states] = item.value;
+                nextByTeam[tid] = states;
+              }
+            }
+            if (Object.keys(nextByTeam).length > 0) {
+              setWorkflowStatesByTeam((prev) => ({ ...prev, ...nextByTeam }));
+            }
           }
         }
       } catch (e) {
@@ -399,22 +412,44 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
   // Optimistic status cycle with rollback + undo
   const cycleStatus = useCallback(
-    async (taskUuid: string) => {
-      if (!linearToken || workflowStates.length === 0) return;
+    async (taskUuid: string): Promise<string | null> => {
+      if (!linearToken) return null;
       const task = tasks.find((t) => t.uuid === taskUuid);
-      if (!task) return;
+      if (!task) return null;
 
-      const typeOrder = ['unstarted', 'started', 'completed'];
-      const currentTypeIdx = typeOrder.indexOf(task.statusType);
-      const nextType = typeOrder[Math.min(currentTypeIdx + 1, typeOrder.length - 1)];
+      let teamStates = task.teamId ? workflowStatesByTeam[task.teamId] : undefined;
+      if ((!teamStates || teamStates.length === 0) && task.teamId) {
+        try {
+          const fetched = await fetchWorkflowStates(linearToken, task.teamId);
+          teamStates = fetched;
+          setWorkflowStatesByTeam((prev) => ({ ...prev, [task.teamId]: fetched }));
+        } catch (e) {
+          toastError(`Failed to load workflow states: ${(e as Error).message}`);
+          return null;
+        }
+      }
+      if (!teamStates || teamStates.length === 0) {
+        teamStates = workflowStates;
+      }
+      if (teamStates.length === 0) {
+        toastError('No workflow states available for this task');
+        return null;
+      }
 
-      const nextState = workflowStates.find((s) => s.type === nextType);
-      if (!nextState || nextState.name === task.status) return;
+      const nextState = getNextWorkflowState(task, teamStates);
+      if (!nextState) return null;
 
       const prevTasks = tasks;
-      const prevState = workflowStates.find((s) => s.name === task.status);
+      const prevSnapshot = {
+        status: task.status,
+        statusType: task.statusType,
+        completedAt: task.completedAt,
+      };
+      const prevState = findWorkflowStateForTask(task, teamStates);
+      const completedAtIso = new Date().toISOString();
+
       setTasks((prev) =>
-        prev.map((t) => (t.uuid === taskUuid ? { ...t, status: nextState.name, statusType: nextState.type } : t)),
+        prev.map((t) => (t.uuid === taskUuid ? applyWorkflowStateToTask(t, nextState, completedAtIso) : t)),
       );
 
       pendingMutations.current++;
@@ -424,18 +459,22 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         toast(`Status → ${nextState.name}`, 'success', {
           label: 'Undo',
           onClick: () => {
-            setTasks(prevTasks);
+            setTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...prevSnapshot } : t)));
             if (prevState) updateIssueState(linearToken, taskUuid, prevState.id).catch(() => {});
           },
         });
+        return nextState.name;
       } catch (e) {
-        setTasks(prevTasks);
-        toastError(`Failed to update status: ${(e as Error).message}`, () => cycleStatus(taskUuid));
+        setTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...prevSnapshot } : t)));
+        toastError(`Failed to update status: ${(e as Error).message}`, () => {
+          void cycleStatus(taskUuid);
+        });
+        return null;
       } finally {
         pendingMutations.current--;
       }
     },
-    [linearToken, workflowStates, tasks, pushUndo],
+    [linearToken, workflowStatesByTeam, workflowStates, tasks, pushUndo],
   );
 
   // Create a "blocks" relation between two tasks

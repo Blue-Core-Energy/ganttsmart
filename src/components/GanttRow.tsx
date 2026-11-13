@@ -415,11 +415,17 @@ export default function GanttRow({
         if (draggedUuid && draggedUuid !== task.uuid) onReorder(draggedUuid, task.uuid, placeAfter);
       }}
       onKeyDown={(e) => {
+        const targetEl = e.target instanceof Element ? e.target : null;
+        const isInteractiveChild = Boolean(
+          targetEl && targetEl !== e.currentTarget && targetEl.closest('button, a, input, select, textarea'),
+        );
         if (e.key === 'Enter' || e.key === ' ') {
+          if (isInteractiveChild) return;
           e.preventDefault();
           if (isSafeUrl(task.url)) window.open(task.url, '_blank', 'noopener,noreferrer');
         }
         if (e.key === 's' && onCycleStatus) {
+          if (targetEl?.closest('input, select, textarea')) return;
           e.preventDefault();
           onCycleStatus(task.uuid);
         }
@@ -520,25 +526,34 @@ export default function GanttRow({
                   {task.completedChildren}/{task.totalChildren}
                 </span>
               )}
-              {/* Status dot — clickable to cycle for active tasks, static indicator when completed */}
-              {isDone ? (
+              {/* Status dot — clickable to cycle through workflow states when interactive */}
+              {onCycleStatus ? (
+                <button
+                  type="button"
+                  data-status-bubble={task.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void onCycleStatus(task.uuid);
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+                  }}
+                  className="group/status w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer ml-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  title={`${task.status} — click to cycle`}
+                  aria-label={`${task.status} — click to cycle status`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
+                    style={{ backgroundColor: statusDotColor }}
+                  />
+                </button>
+              ) : (
                 <span
                   className="w-2 h-2 rounded-full shrink-0 ml-auto"
                   style={{ backgroundColor: statusDotColor }}
                   title={task.status}
                 />
-              ) : (
-                onCycleStatus && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onCycleStatus(task.uuid);
-                    }}
-                    className="w-2 h-2 rounded-full shrink-0 hover:scale-125 transition-transform cursor-pointer ml-auto"
-                    style={{ backgroundColor: statusDotColor }}
-                    title={`${task.status} — click to cycle`}
-                  />
-                )
               )}
             </div>
             <div

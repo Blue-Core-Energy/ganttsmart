@@ -1598,4 +1598,236 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('cycles task status when clicking or activating the status bubble without opening DetailPanel', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const stateUpdates: Array<{ id: string; stateId: string }> = [];
+    let failNextUpdate = false;
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string; stateId?: string; teamId?: string };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(15),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Verify telemetry',
+                      description: `${startTagOffsetDays(0)}\nTelemetry details`,
+                      dueDate: isoOffsetDays(7),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-2' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        const teamId = payload?.variables?.teamId;
+        expect(query).toContain('$teamId: ID!');
+        if (teamId === 'team-2') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              data: {
+                workflowStates: {
+                  nodes: [
+                    { id: 'st2-todo', name: 'Todo', type: 'unstarted', position: 0 },
+                    { id: 'st2-prog', name: 'Working', type: 'started', position: 0 },
+                    { id: 'st2-done', name: 'Shipped', type: 'completed', position: 0 },
+                  ],
+                },
+              },
+            }),
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-dup', name: 'Duplicate', type: 'duplicate', position: 0 },
+                  { id: 'st-done', name: 'Done', type: 'completed', position: 0 },
+                  { id: 'st-can', name: 'Canceled', type: 'canceled', position: 0 },
+                  { id: 'st-prog', name: 'In Progress', type: 'started', position: 0 },
+                  { id: 'st-todo', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-back', name: 'Backlog', type: 'backlog', position: 0 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        if (failNextUpdate) {
+          failNextUpdate = false;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ errors: [{ message: 'Permission denied' }] }),
+          });
+          return;
+        }
+        stateUpdates.push({
+          id: String(payload?.variables?.id ?? ''),
+          stateId: String(payload?.variables?.stateId ?? ''),
+        });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    const row101 = page.locator('tr[data-task-id="ENG-101"]');
+    const bubble101 = page.locator('[data-status-bubble="ENG-101"]');
+    const bar101 = page.locator('[data-task-bar="ENG-101"]');
+
+    await expect(bubble101).toBeVisible();
+    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to cycle');
+
+    // 1. Click status bubble: In Progress -> Done (updates completed state, does NOT open DetailPanel)
+    await bubble101.click();
+    await expect(bubble101).toHaveAttribute('title', 'Done — click to cycle');
+    await expect(row101).toHaveAttribute('data-task-done', 'true');
+    await expect(bar101).toHaveClass(/\bbar-done\b/);
+    await expect(bar101).toContainText('✓ Done');
+    await expect(page.getByText('Status → Done')).toBeVisible();
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+    expect(stateUpdates[0]).toEqual({ id: 'uuid-1', stateId: 'st-done' });
+
+    // 2. Click status bubble while Done: skips Canceled & Duplicate, wraps to Backlog, clears completed state
+    await bubble101.click();
+    await expect(bubble101).toHaveAttribute('title', 'Backlog — click to cycle');
+    await expect(row101).not.toHaveAttribute('data-task-done', 'true');
+    await expect(bar101).not.toHaveClass(/\bbar-done\b/);
+    await expect(page.getByText('Status → Backlog')).toBeVisible();
+    expect(stateUpdates[1]).toEqual({ id: 'uuid-1', stateId: 'st-back' });
+
+    // 3. Keyboard activation (Space and Enter) cycles status without opening DetailPanel or a Linear popup
+    await bubble101.focus();
+    await page.keyboard.press('Space');
+    await expect(bubble101).toHaveAttribute('title', 'Todo — click to cycle');
+    expect(stateUpdates[2]).toEqual({ id: 'uuid-1', stateId: 'st-todo' });
+
+    await page.keyboard.press('Enter');
+    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to cycle');
+    expect(stateUpdates[3]).toEqual({ id: 'uuid-1', stateId: 'st-prog' });
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+
+    // 4. Second team (team-2) uses its own workflow states
+    const bubble102 = page.locator('[data-status-bubble="ENG-102"]');
+    await expect(bubble102).toHaveAttribute('title', 'Todo — click to cycle');
+    await bubble102.click();
+    await expect(bubble102).toHaveAttribute('title', 'Working — click to cycle');
+    expect(stateUpdates[4]).toEqual({ id: 'uuid-2', stateId: 'st2-prog' });
+
+    // 5. Failed mutation rolls back status cleanly and displays an error toast
+    failNextUpdate = true;
+    await bubble102.click();
+    await expect(page.getByText('Failed to update status: Permission denied')).toBeVisible();
+    await expect(bubble102).toHaveAttribute('title', 'Working — click to cycle');
+
+    expect(errors).toEqual([]);
+  });
 });

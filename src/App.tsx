@@ -137,8 +137,8 @@ function GanttView({
   const cycleStatusWithHistory = useCallback(
     async (taskUuid: string) => {
       const task = tasks.find((t) => t.uuid === taskUuid);
-      if (task) logStatusTransition(task.id, task.status, '(next)');
-      return cycleStatus(taskUuid);
+      const nextStatus = await cycleStatus(taskUuid);
+      if (task && nextStatus) logStatusTransition(task.id, task.status, nextStatus);
     },
     [cycleStatus, tasks, logStatusTransition],
   );
