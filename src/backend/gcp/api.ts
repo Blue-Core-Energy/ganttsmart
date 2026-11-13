@@ -41,7 +41,7 @@ async function isLinearReconnect(res: Response): Promise<boolean> {
  * still readable), like every other response.
  *
  * fetch rejections (a network TypeError, an AbortError) are rethrown unchanged: they are transient,
- * not an expired session, and gql retries errors whose message mentions "fetch".
+ * not an expired session, and gql retries TypeError network failures across all browsers.
  */
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const res = await fetch(path, { ...init, credentials: 'same-origin', redirect: 'manual' });

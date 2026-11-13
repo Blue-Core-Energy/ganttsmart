@@ -29,14 +29,34 @@ function releaseSlot() {
   if (next) next();
 }
 
+/**
+ * Fetch rejects with a TypeError on network failures (Chrome: "Failed to fetch",
+ * Firefox: "NetworkError when attempting to fetch resource.", Safari: "Load failed").
+ * AbortError is explicitly excluded so cancelled requests are never retried.
+ */
+export function isRetryableNetworkError(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') return false;
+  if ((error as { name?: unknown }).name === 'AbortError') return false;
+  return error instanceof TypeError || (error instanceof Error && error.name === 'TypeError');
+}
+
 // ---- Core GraphQL with retry + rate limit awareness ----
 async function gql(
   apiKey: string,
   query: string,
   variables?: Record<string, unknown>,
   retries = 2,
+  networkRetries = 1,
 ): Promise<Record<string, unknown>> {
   await waitForSlot();
+  let slotReleased = false;
+  const releaseOnce = () => {
+    if (!slotReleased) {
+      slotReleased = true;
+      releaseSlot();
+    }
+  };
+
   try {
     const res = await backend.linearRequest(apiKey, { query, variables });
 
@@ -44,9 +64,9 @@ async function gql(
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get('retry-after') || '2', 10);
       if (retries > 0) {
-        releaseSlot();
+        releaseOnce();
         await delay(retryAfter * 1000);
-        return gql(apiKey, query, variables, retries - 1);
+        return gql(apiKey, query, variables, retries - 1, networkRetries);
       }
       throw new Error('Rate limited by Linear API. Please wait a moment and try again.');
     }
@@ -55,35 +75,38 @@ async function gql(
       const text = await res.text().catch(() => '');
       if (res.status === 401) throw new Error('Linear authentication expired. Please reconnect.');
       if (res.status >= 500 && retries > 0) {
-        releaseSlot();
+        releaseOnce();
         await delay(1000);
-        return gql(apiKey, query, variables, retries - 1);
+        return gql(apiKey, query, variables, retries - 1, networkRetries);
       }
       throw new Error(`Linear API error (${res.status}): ${text || res.statusText}`);
     }
 
     const data = await res.json();
-    if (data.errors) {
+    if (!data || typeof data !== 'object') {
+      throw new Error('Invalid GraphQL response');
+    }
+    if ('errors' in data && data.errors) {
       const msg = data.errors[0]?.message || 'Unknown GraphQL error';
       // Retry on transient errors
       if (retries > 0 && (msg.includes('timeout') || msg.includes('unavailable'))) {
-        releaseSlot();
+        releaseOnce();
         await delay(1000);
-        return gql(apiKey, query, variables, retries - 1);
+        return gql(apiKey, query, variables, retries - 1, networkRetries);
       }
       throw new Error(msg);
     }
-    return data.data as Record<string, unknown>;
+    return (data as { data: Record<string, unknown> }).data;
   } catch (e) {
     // Network errors — retry once
-    if (retries > 0 && (e as Error).message?.includes('fetch')) {
-      releaseSlot();
+    if (networkRetries > 0 && isRetryableNetworkError(e)) {
+      releaseOnce();
       await delay(1000);
-      return gql(apiKey, query, variables, retries - 1);
+      return gql(apiKey, query, variables, retries, networkRetries - 1);
     }
     throw e;
   } finally {
-    releaseSlot();
+    releaseOnce();
   }
 }
 

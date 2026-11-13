@@ -55,7 +55,7 @@ describe('apiFetch', () => {
     const networkError = new TypeError('Failed to fetch');
     fetchMock.mockRejectedValue(networkError);
 
-    // Unchanged, so gql's "message includes 'fetch'" retry still fires
+    // Unchanged, so gql's TypeError network retry still fires (including Safari's "Load failed")
     await expect(apiFetch('/api/me')).rejects.toBe(networkError);
     expect(listener).not.toHaveBeenCalled();
     unsubscribe();
