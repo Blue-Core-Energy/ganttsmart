@@ -2117,4 +2117,168 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('preserves workday duration and skips weekends when moving a task bar across weekends', async ({ page }) => {
+    const errors = trackErrors(page);
+    const today = localOffsetDate(0);
+    const monOffset = (8 - today.getDay()) % 7;
+    const friOffset = monOffset + 4;
+    const wedOffset = monOffset + 2;
+    const tueNextOffset = monOffset + 8;
+
+    const initialDescription = `${startTagOffsetDays(monOffset)}\nWeekly build`;
+    const dueUpdates: string[] = [];
+    const descUpdates: string[] = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string; dueDate?: string; description?: string };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(monOffset - 2),
+                targetDate: isoOffsetDays(tueNextOffset + 5),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Assemble test harness',
+                      description: initialDescription,
+                      dueDate: isoOffsetDays(friOffset),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issue(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issue: { description: initialDescription } } }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        if (payload?.variables?.dueDate) dueUpdates.push(payload.variables.dueDate);
+        if (payload?.variables?.description) descUpdates.push(payload.variables.description);
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    const bar = page.locator('[data-task-bar="ENG-101"]');
+    await expect(bar).toBeVisible();
+
+    const box = await bar.boundingBox();
+    expect(box).not.toBeNull();
+    const startX = box!.x + box!.width / 2;
+    const startY = box!.y + box!.height / 2;
+
+    // Move Mon->Fri task (5 workdays) 2 days right (DEFAULT_DAY_WIDTH = 28 -> 56px) -> Wed->Tue
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 56, startY, { steps: 4 });
+    await page.mouse.up();
+
+    await expect.poll(() => dueUpdates.length).toBe(1);
+    await expect.poll(() => descUpdates.length).toBe(1);
+
+    expect(dueUpdates[0]).toBe(isoOffsetDays(tueNextOffset));
+    expect(descUpdates[0]).toContain(startTagOffsetDays(wedOffset));
+
+    // DetailPanel reflects the preserved 5-workday duration
+    await bar.click();
+    await expect(page.getByText('5 workdays')).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
 });
