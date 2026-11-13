@@ -3,7 +3,7 @@ import type { Task } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import { priorityColors, statusDotColors } from '@/utils/colors';
-import { formatDateShort } from '@/utils/date';
+import { countWorkdaysInclusive, formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { isTaskDone } from '@/utils/tasks';
 import {
@@ -281,6 +281,20 @@ export default function DetailPanel() {
                   </span>
                 )}
               </div>
+              {currentTask.startDate &&
+                !currentTask.isUnscheduledExternal &&
+                (() => {
+                  const workdays = countWorkdaysInclusive(new Date(currentTask.startDate + 'T00:00:00'), dueDate);
+                  if (workdays <= 0) return null;
+                  return (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-text-muted">Duration</span>
+                      <span className="text-xs font-medium text-text-primary tabular-nums">
+                        {workdays} {workdays === 1 ? 'workday' : 'workdays'}
+                      </span>
+                    </div>
+                  );
+                })()}
             </div>
 
             {/* Baseline drift */}

@@ -12,7 +12,14 @@ import {
   priorityClass,
   statusDotColors,
 } from '@/utils/colors';
-import { buildTimeCells, daysBetween, formatDate, isWeekend } from '@/utils/date';
+import {
+  buildTimeCells,
+  daysBetween,
+  formatDate,
+  formatIsoDate,
+  isWeekend,
+  moveTaskDatesPreservingWorkdays,
+} from '@/utils/date';
 import { isTaskDone } from '@/utils/tasks';
 import { openDetailPanel } from './detailPanelStore';
 
@@ -139,9 +146,32 @@ export default function GanttRow({
     barLeft = 0;
   }
 
+  // Base start date for start-edge drag and whole-bar move
+  const barStartBaseDate = useMemo(() => {
+    if (taskStartDate) return taskStartDate;
+    if (overdue) return dueDate;
+    return today <= dueDate ? today : dueDate;
+  }, [taskStartDate, overdue, dueDate, today]);
+
+  const moveDays = Math.round(moveDelta / dayWidth);
+  const movedPreview =
+    isMoving && moveDays !== 0 ? moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, moveDays) : null;
+
   // Apply due date drag (extends/shrinks right edge), start drag (moves left edge), or whole-bar move
-  const displayBarWidth = Math.max(barWidth + dragDelta - startDragDelta, dayWidth);
-  const displayBarLeft = barLeft + startDragDelta + moveDelta;
+  let displayBarWidth = Math.max(barWidth + dragDelta - startDragDelta, dayWidth);
+  let displayBarLeft = barLeft + startDragDelta + moveDelta;
+  if (movedPreview) {
+    const rawLeft = daysBetween(chartStart, movedPreview.start) * dayWidth;
+    const previewEndDate = isDone || movedPreview.due >= today ? movedPreview.due : today;
+    const rawWidth = Math.max((daysBetween(movedPreview.start, previewEndDate) + 1) * dayWidth, dayWidth);
+    if (rawLeft < 0) {
+      displayBarLeft = 0;
+      displayBarWidth = Math.max(rawWidth + rawLeft, dayWidth);
+    } else {
+      displayBarLeft = rawLeft;
+      displayBarWidth = rawWidth;
+    }
+  }
 
   // Calculate new dates from drag deltas
   const dragDays = Math.round(dragDelta / dayWidth);
@@ -154,16 +184,7 @@ export default function GanttRow({
         })()
       : null;
 
-  // For start date drag: use existing start date as base, or the bar's visual start position
   const startDragDays = Math.round(startDragDelta / dayWidth);
-  const barStartBaseDate =
-    taskStartDate ||
-    (() => {
-      // Derive from bar's left position (barLeft / dayWidth days from chartStart)
-      const d = new Date(chartStart);
-      d.setDate(d.getDate() + Math.round(barLeft / dayWidth));
-      return d;
-    })();
   const newStartDate =
     startDragDays !== 0
       ? (() => {
@@ -173,13 +194,16 @@ export default function GanttRow({
         })()
       : null;
 
-  const moveDays = Math.round(moveDelta / dayWidth);
-
   let barLabel: string;
   if (isDragging && newDueDate) {
     barLabel = newDueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   } else if (isDraggingStart && newStartDate) {
     barLabel = newStartDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  } else if (movedPreview) {
+    const sLabel = movedPreview.start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dLabel = movedPreview.due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    barLabel =
+      movedPreview.workdays > 0 ? `${sLabel} → ${dLabel} (${movedPreview.workdays}wd)` : `${sLabel} → ${dLabel}`;
   } else if (isMoving && moveDays !== 0) {
     barLabel = `${moveDays > 0 ? '+' : ''}${moveDays}d`;
   } else if (isDone) {
@@ -193,10 +217,6 @@ export default function GanttRow({
   // When bar is too narrow for text, show label outside. The floor keeps labels
   // outside compressed bars at week/month scale, where dayWidth is only a few px.
   const barIsNarrow = displayBarWidth < Math.max(dayWidth * 1.8, 48);
-
-  function formatDateStr(d: Date): string {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
 
   // Due date drag (right edge)
   const handleDragStart = useCallback(
@@ -226,7 +246,7 @@ export default function GanttRow({
         if (onReschedule && days !== 0) {
           const nd = new Date(dueDate);
           nd.setDate(nd.getDate() + days);
-          onReschedule(task.uuid, formatDateStr(nd));
+          onReschedule(task.uuid, formatIsoDate(nd));
         }
       };
 
@@ -262,26 +282,19 @@ export default function GanttRow({
         setStartDragDelta(0);
 
         if (onRescheduleStart && days !== 0) {
-          const base =
-            taskStartDate ||
-            (() => {
-              const d = new Date(chartStart);
-              d.setDate(d.getDate() + Math.round(barLeft / dayWidth));
-              return d;
-            })();
-          const nd = new Date(base);
+          const nd = new Date(barStartBaseDate);
           nd.setDate(nd.getDate() + days);
-          onRescheduleStart(task.uuid, formatDateStr(nd));
+          onRescheduleStart(task.uuid, formatIsoDate(nd));
         }
       };
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [dayWidth, taskStartDate, onRescheduleStart, task.uuid, chartStart, barLeft],
+    [dayWidth, barStartBaseDate, onRescheduleStart, task.uuid],
   );
 
-  // Whole bar move (shift both start and due dates)
+  // Whole bar move (shift both start and due dates while preserving workday duration)
   const handleMoveStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -310,22 +323,14 @@ export default function GanttRow({
         setMoveDelta(0);
 
         if (days !== 0) {
-          if (onReschedule) {
-            const nd = new Date(dueDate);
-            nd.setDate(nd.getDate() + days);
-            onReschedule(task.uuid, formatDateStr(nd));
+          const moved = moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, days);
+          const nextDue = formatIsoDate(moved.due);
+          const nextStart = formatIsoDate(moved.start);
+          if (onReschedule && nextDue !== task.due) {
+            onReschedule(task.uuid, nextDue);
           }
-          if (onRescheduleStart) {
-            const base =
-              taskStartDate ||
-              (() => {
-                const d = new Date(chartStart);
-                d.setDate(d.getDate() + Math.round(barLeft / dayWidth));
-                return d;
-              })();
-            const ns = new Date(base);
-            ns.setDate(ns.getDate() + days);
-            onRescheduleStart(task.uuid, formatDateStr(ns));
+          if (onRescheduleStart && nextStart !== task.startDate) {
+            onRescheduleStart(task.uuid, nextStart);
           }
         }
       };
@@ -333,7 +338,7 @@ export default function GanttRow({
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [dayWidth, dueDate, taskStartDate, onReschedule, onRescheduleStart, task.uuid, chartStart, barLeft],
+    [dayWidth, dueDate, barStartBaseDate, onReschedule, onRescheduleStart, task.uuid, task.due, task.startDate],
   );
 
   // Background grid cells (per day/week/month depending on time scale)
