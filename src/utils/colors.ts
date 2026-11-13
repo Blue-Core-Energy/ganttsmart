@@ -11,6 +11,7 @@ export const statusDotColors: Record<string, string> = {
   unstarted: '#52525b',
   completed: '#22c55e',
   canceled: '#a1a1aa',
+  duplicate: '#a1a1aa',
   triage: '#f59e0b',
   backlog: '#52525b',
 };

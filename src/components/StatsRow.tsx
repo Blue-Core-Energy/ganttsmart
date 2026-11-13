@@ -1,4 +1,5 @@
 import type { Task } from '@/types';
+import { isIgnoredTask } from '@/utils/issues';
 
 interface Props {
   tasks: Task[];
@@ -93,12 +94,13 @@ function computeSpan(tasks: Task[]): number {
 }
 
 export default function StatsRow({ tasks }: Props) {
-  if (!tasks.length) return null;
+  const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
+  if (!visibleTasks.length) return null;
 
-  const active = tasks.filter((t) => t.statusType !== 'completed' && t.statusType !== 'canceled').length;
-  const inProgress = tasks.filter((t) => t.statusType === 'started').length;
-  const completed = tasks.filter((t) => t.statusType === 'completed').length;
-  const span = computeSpan(tasks);
+  const active = visibleTasks.filter((t) => t.statusType !== 'completed').length;
+  const inProgress = visibleTasks.filter((t) => t.statusType === 'started').length;
+  const completed = visibleTasks.filter((t) => t.statusType === 'completed').length;
+  const span = computeSpan(visibleTasks);
 
   const cards = [
     {

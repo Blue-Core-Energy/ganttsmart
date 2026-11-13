@@ -150,8 +150,21 @@ interface LinearIssueNode {
   priority: number;
   url: string | null;
   completedAt: string | null;
+  canceledAt?: string | null;
   state: { name: string; type: string } | null;
   assignee: { name: string } | null;
+}
+
+function isIgnoredIssueState(
+  state?: { name?: string | null; type?: string | null } | null,
+  canceledAt?: string | null,
+): boolean {
+  if (canceledAt) return true;
+  const type = state?.type?.trim().toLowerCase();
+  if (type === 'canceled' || type === 'cancelled' || type === 'duplicate') return true;
+  const name = state?.name?.trim().toLowerCase();
+  if (name === 'duplicate' || name === 'canceled' || name === 'cancelled') return true;
+  return false;
 }
 
 interface MappedTask {
@@ -202,16 +215,16 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
     project(id: $id) {
       name
       targetDate
-      issues(first: 250, filter: { completedAt: { null: true } }) {
+      issues(first: 250, filter: { completedAt: { null: true }, canceledAt: { null: true } }) {
         nodes {
-          id identifier title description dueDate priority url completedAt
+          id identifier title description dueDate priority url completedAt canceledAt
           state { name type }
           assignee { name }
         }
       }
-      doneIssues: issues(first: 100, filter: { completedAt: { null: false } }) {
+      doneIssues: issues(first: 100, filter: { completedAt: { null: false }, canceledAt: { null: true } }) {
         nodes {
-          id identifier title description dueDate priority url completedAt
+          id identifier title description dueDate priority url completedAt canceledAt
           state { name type }
           assignee { name }
         }
@@ -269,6 +282,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
   const tasks: MappedTask[] = [];
   const unscheduledTasks: MappedTask[] = [];
   for (const n of project.issues.nodes as LinearIssueNode[]) {
+    if (isIgnoredIssueState(n.state, n.canceledAt)) continue;
     const eff = effectiveDue(n);
     if (eff) {
       tasks.push(mapNode(n, eff.date, eff.isImplicit));
@@ -283,6 +297,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
   unscheduledTasks.sort((a, b) => a.priorityVal - b.priorityVal || a.id.localeCompare(b.id));
 
   const doneTasks = ((project.doneIssues?.nodes || []) as LinearIssueNode[])
+    .filter((n) => !isIgnoredIssueState(n.state, n.canceledAt))
     .map((n) => {
       const eff = effectiveDue(n);
       return eff ? mapNode(n, eff.date, eff.isImplicit) : null;

@@ -1,5 +1,6 @@
 import { backend } from '@/backend';
 import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
+import { isIgnoredIssueState, type IssueStateLike } from '@/utils/issues';
 
 // ---- Rate limiter: debounce + queue ----
 let pendingRequests = 0;
@@ -183,7 +184,7 @@ export async function fetchIssues(
             updatedAt
           }
         }
-        issues(first: 250, filter: { completedAt: { null: true } }) {
+        issues(first: 250, filter: { completedAt: { null: true }, canceledAt: { null: true } }) {
           nodes {
             id
             identifier
@@ -195,12 +196,13 @@ export async function fetchIssues(
             state { name type }
             createdAt
             completedAt
+            canceledAt
             assignee { name }
             team { id }
             projectMilestone { id }
           }
         }
-        doneIssues: issues(first: 100, filter: { completedAt: { null: false } }) {
+        doneIssues: issues(first: 100, filter: { completedAt: { null: false }, canceledAt: { null: true } }) {
           nodes {
             id
             identifier
@@ -212,6 +214,7 @@ export async function fetchIssues(
             state { name type }
             createdAt
             completedAt
+            canceledAt
             assignee { name }
             team { id }
             projectMilestone { id }
@@ -233,6 +236,7 @@ export async function fetchIssues(
     state: { name: string; type: string } | null;
     createdAt: string;
     completedAt: string | null;
+    canceledAt?: string | null;
     assignee: { name: string } | null;
     team: { id: string } | null;
     projectMilestone: { id: string } | null;
@@ -259,8 +263,24 @@ export async function fetchIssues(
 
   if (!project) throw new Error('Project not found');
 
-  const issueNodes = project.issues.nodes;
-  const doneIssueNodes = project.doneIssues?.nodes || [];
+  const ignoredIdentifiers = new Set<string>();
+  const issueNodes: IssueNode[] = [];
+  for (const n of project.issues.nodes) {
+    if (isIgnoredIssueState(n.state, n.canceledAt)) {
+      ignoredIdentifiers.add(n.identifier);
+    } else {
+      issueNodes.push(n);
+    }
+  }
+
+  const doneIssueNodes: IssueNode[] = [];
+  for (const n of project.doneIssues?.nodes || []) {
+    if (isIgnoredIssueState(n.state, n.canceledAt)) {
+      ignoredIdentifiers.add(n.identifier);
+    } else {
+      doneIssueNodes.push(n);
+    }
+  }
   const projectTargetDate = project.targetDate;
 
   // Effective due date: explicit dueDate, falling back to project's targetDate.
@@ -290,13 +310,19 @@ export async function fetchIssues(
               relations {
                 nodes {
                   type
-                  relatedIssue { identifier }
+                  relatedIssue {
+                    identifier
+                    canceledAt
+                    state { name type }
+                  }
                 }
               }
               children {
                 nodes {
                   id
                   completedAt
+                  canceledAt
+                  state { name type }
                 }
               }
             }
@@ -307,11 +333,17 @@ export async function fetchIssues(
 
       interface RelNode {
         type: string;
-        relatedIssue: { identifier: string };
+        relatedIssue: {
+          identifier: string;
+          canceledAt?: string | null;
+          state?: IssueStateLike | null;
+        };
       }
       interface ChildNode {
         id: string;
         completedAt: string | null;
+        canceledAt?: string | null;
+        state?: IssueStateLike | null;
       }
 
       const issues = detailData.issues as {
@@ -329,21 +361,45 @@ export async function fetchIssues(
         const blocks: string[] = [];
         const blockedBy: string[] = [];
         for (const rel of relations) {
-          if (rel.type === 'blocks') blocks.push(rel.relatedIssue.identifier);
-          else if (rel.type === 'blocked_by') blockedBy.push(rel.relatedIssue.identifier);
+          const relType = rel.type?.toLowerCase();
+          if (relType === 'duplicate') {
+            // Issue has an outgoing duplicate relation ("this issue is a duplicate of relatedIssue")
+            ignoredIdentifiers.add(identifier);
+            continue;
+          }
+          if (
+            ignoredIdentifiers.has(rel.relatedIssue.identifier) ||
+            isIgnoredIssueState(rel.relatedIssue.state, rel.relatedIssue.canceledAt)
+          ) {
+            ignoredIdentifiers.add(rel.relatedIssue.identifier);
+            continue;
+          }
+          if (relType === 'blocks') blocks.push(rel.relatedIssue.identifier);
+          else if (relType === 'blocked_by') blockedBy.push(rel.relatedIssue.identifier);
         }
         relationsMap[identifier] = { blocks, blockedBy };
 
-        const children = node.children?.nodes || [];
+        const children = (node.children?.nodes || []).filter((c) => !isIgnoredIssueState(c.state, c.canceledAt));
         childrenMap[identifier] = {
           total: children.length,
           completed: children.filter((c) => c.completedAt !== null).length,
         };
       }
+
+      // Remove references to any issues discovered to be duplicates in Query 2
+      if (ignoredIdentifiers.size > 0) {
+        for (const rel of Object.values(relationsMap)) {
+          rel.blocks = rel.blocks.filter((id) => !ignoredIdentifiers.has(id));
+          rel.blockedBy = rel.blockedBy.filter((id) => !ignoredIdentifiers.has(id));
+        }
+      }
     } catch {
       console.warn('Failed to fetch relations/children — continuing without them');
     }
   }
+
+  const activeIssueNodes =
+    ignoredIdentifiers.size > 0 ? issueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)) : issueNodes;
 
   function mapNode(n: IssueNode, due: string, isDueImplicit: boolean): Task {
     const rel = relationsMap[n.identifier] || { blocks: [], blockedBy: [] };
@@ -378,7 +434,7 @@ export async function fetchIssues(
   // Active issues: split into scheduled (have a due date or fallback) and unscheduled (no date at all).
   const tasks: Task[] = [];
   const unscheduledTasks: Task[] = [];
-  for (const n of issueNodes) {
+  for (const n of activeIssueNodes) {
     const eff = effectiveDue(n);
     if (eff) {
       tasks.push(mapNode(n, eff.date, eff.isImplicit));
