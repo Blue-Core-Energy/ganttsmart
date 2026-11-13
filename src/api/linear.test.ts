@@ -10,7 +10,7 @@ vi.mock('@/backend', () => ({
   },
 }));
 
-import { fetchIssues } from './linear';
+import { createFeedbackIssue, FeedbackTargetNotFoundError, fetchIssues, resolveFeedbackTarget } from './linear';
 
 function jsonResponse(data: unknown): Response {
   return new Response(JSON.stringify({ data }), {
@@ -430,5 +430,335 @@ describe('fetchIssues', () => {
     const result = await fetchIssues('tok', 'proj-2');
     expect(result.tasks).toEqual([]);
     expect(result.unscheduledTasks).toEqual([]);
+  });
+});
+
+describe('resolveFeedbackTarget', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  it('resolves GanttSmart project, IT team, and Feature/Bug labels', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        projects: {
+          nodes: [
+            {
+              id: '0ac0d58d-1852-4d27-9fbc-944cabc5b492',
+              name: 'GanttSmart',
+              url: 'https://linear.app/bluecoreenergy/project/ganttsmart-5114378da6de',
+              slugId: '5114378da6de',
+              teams: {
+                nodes: [
+                  {
+                    id: '2e7232fc-d509-4471-9922-e5f8c89459d3',
+                    key: 'IT',
+                    name: 'IT',
+                    labels: {
+                      nodes: [
+                        { id: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013', name: 'Feature' },
+                        { id: '79878471-e70d-405d-83b7-a50dd8a853fe', name: 'Bug' },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        teams: { nodes: [] },
+        issueLabels: { nodes: [] },
+      }),
+    );
+
+    const target = await resolveFeedbackTarget('tok');
+    expect(target).toEqual({
+      teamId: '2e7232fc-d509-4471-9922-e5f8c89459d3',
+      teamKey: 'IT',
+      teamName: 'IT',
+      projectId: '0ac0d58d-1852-4d27-9fbc-944cabc5b492',
+      projectName: 'GanttSmart',
+      projectUrl: 'https://linear.app/bluecoreenergy/project/ganttsmart-5114378da6de',
+      labelIds: {
+        feature: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013',
+        bug: '79878471-e70d-405d-83b7-a50dd8a853fe',
+      },
+    });
+  });
+
+  it('falls back to top-level IT team and workspace issueLabels when project teams lack labels', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        projects: {
+          nodes: [
+            {
+              id: 'proj-gs',
+              name: 'ganttsmart',
+              url: null,
+              slugId: '5114378da6de',
+              teams: { nodes: [] },
+            },
+          ],
+        },
+        teams: {
+          nodes: [
+            { id: 'team-eng', key: 'ENG', name: 'Engineering', labels: { nodes: [] } },
+            { id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } },
+          ],
+        },
+        issueLabels: {
+          nodes: [
+            { id: 'lbl-feat-ws', name: 'feature', team: null },
+            { id: 'lbl-bug-other', name: 'Bug', team: { id: 'team-eng' } },
+            { id: 'lbl-bug-it', name: 'Bug', team: { id: 'team-it' } },
+          ],
+        },
+      }),
+    );
+
+    const target = await resolveFeedbackTarget('tok');
+    expect(target.teamId).toBe('team-it');
+    expect(target.projectId).toBe('proj-gs');
+    expect(target.labelIds).toEqual({
+      feature: 'lbl-feat-ws',
+      bug: 'lbl-bug-it',
+    });
+  });
+
+  it('supports VITE_FEEDBACK_PROJECT_URL and VITE_FEEDBACK_TEAM_KEY overrides and project leadTeam fallback', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        projects: {
+          nodes: [
+            {
+              id: 'proj-custom',
+              name: 'Custom Tracker',
+              url: 'https://linear.app/acme/project/custom-tracker-abc999',
+              slugId: 'abc999',
+              leadTeam: {
+                id: 'team-ops',
+                key: 'OPS',
+                name: 'Operations',
+                labels: {
+                  nodes: [{ id: 'lbl-bug-ops', name: 'Bug' }],
+                },
+              },
+              teams: { nodes: [] },
+            },
+          ],
+        },
+        teams: { nodes: [] },
+        issueLabels: { nodes: [] },
+      }),
+    );
+
+    const target = await resolveFeedbackTarget('tok', {
+      VITE_FEEDBACK_PROJECT_URL: 'https://linear.app/acme/project/custom-tracker-abc999',
+      VITE_FEEDBACK_TEAM_KEY: 'OPS',
+    });
+
+    expect(target.projectId).toBe('proj-custom');
+    expect(target.teamId).toBe('team-ops');
+    expect(target.teamKey).toBe('OPS');
+    expect(target.labelIds).toEqual({ feature: undefined, bug: 'lbl-bug-ops' });
+  });
+
+  it('throws FeedbackTargetNotFoundError when the workspace has no GanttSmart project', async () => {
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        projects: {
+          nodes: [{ id: 'proj-other', name: 'Completely Different Project', teams: { nodes: [] } }],
+        },
+        teams: {
+          nodes: [{ id: 'team-eng', key: 'ENG', name: 'Engineering', labels: { nodes: [] } }],
+        },
+        issueLabels: { nodes: [] },
+      }),
+    );
+
+    await expect(resolveFeedbackTarget('tok')).rejects.toBeInstanceOf(FeedbackTargetNotFoundError);
+  });
+});
+
+describe('createFeedbackIssue', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  it('creates a Feature Request issue with resolved team, project, and Feature label', async () => {
+    const capturedCalls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
+
+    linearRequestMock.mockImplementation(
+      async (_apiKey: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        capturedCalls.push(body);
+        if (body.query.includes('FeedbackTarget')) {
+          return jsonResponse({
+            projects: {
+              nodes: [
+                {
+                  id: 'proj-gs',
+                  name: 'GanttSmart',
+                  url: 'https://linear.app/bluecoreenergy/project/ganttsmart-5114378da6de',
+                  slugId: '5114378da6de',
+                  teams: {
+                    nodes: [
+                      {
+                        id: 'team-it',
+                        key: 'IT',
+                        name: 'IT',
+                        labels: {
+                          nodes: [
+                            { id: 'lbl-feature', name: 'Feature' },
+                            { id: 'lbl-bug', name: 'Bug' },
+                          ],
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+            teams: { nodes: [] },
+            issueLabels: { nodes: [] },
+          });
+        }
+
+        if (body.query.includes('issueCreate')) {
+          return jsonResponse({
+            issueCreate: {
+              success: true,
+              issue: {
+                id: 'issue-uuid-1',
+                identifier: 'IT-99',
+                title: 'Add CSV export',
+                url: 'https://linear.app/bluecoreenergy/issue/IT-99',
+              },
+            },
+          });
+        }
+
+        throw new Error(`Unexpected query: ${body.query}`);
+      },
+    );
+
+    const created = await createFeedbackIssue({
+      apiKey: 'tok',
+      type: 'feature',
+      title: '  Add CSV export  ',
+      description: '### What would help?\nExport milestones to CSV.',
+    });
+
+    expect(created).toEqual({
+      id: 'issue-uuid-1',
+      identifier: 'IT-99',
+      title: 'Add CSV export',
+      url: 'https://linear.app/bluecoreenergy/issue/IT-99',
+    });
+
+    expect(capturedCalls).toHaveLength(2);
+    expect(capturedCalls[1].variables).toEqual({
+      input: {
+        teamId: 'team-it',
+        projectId: 'proj-gs',
+        title: 'Add CSV export',
+        description: '### What would help?\nExport milestones to CSV.',
+        labelIds: ['lbl-feature'],
+      },
+    });
+  });
+
+  it('creates a Bug Report issue without optional labelIds or description when omitted', async () => {
+    const capturedCalls: Array<{ query: string; variables?: Record<string, unknown> }> = [];
+
+    linearRequestMock.mockImplementation(
+      async (_apiKey: string, body: { query: string; variables?: Record<string, unknown> }) => {
+        capturedCalls.push(body);
+        if (body.query.includes('FeedbackTarget')) {
+          return jsonResponse({
+            projects: {
+              nodes: [
+                {
+                  id: 'proj-gs',
+                  name: 'GanttSmart',
+                  teams: {
+                    nodes: [{ id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } }],
+                  },
+                },
+              ],
+            },
+            teams: { nodes: [] },
+            issueLabels: { nodes: [] },
+          });
+        }
+        return jsonResponse({
+          issueCreate: {
+            success: true,
+            issue: {
+              id: 'issue-uuid-2',
+              identifier: 'IT-100',
+              title: 'Drag glitch',
+              url: 'https://linear.app/bluecoreenergy/issue/IT-100',
+            },
+          },
+        });
+      },
+    );
+
+    const created = await createFeedbackIssue({
+      apiKey: 'tok',
+      type: 'bug',
+      title: 'Drag glitch',
+      description: '   ',
+    });
+
+    expect(created.identifier).toBe('IT-100');
+    expect(capturedCalls[1].variables).toEqual({
+      input: {
+        teamId: 'team-it',
+        projectId: 'proj-gs',
+        title: 'Drag glitch',
+      },
+    });
+  });
+
+  it('rejects empty titles and unconfirmed Linear mutations', async () => {
+    await expect(
+      createFeedbackIssue({
+        apiKey: 'tok',
+        type: 'feature',
+        title: '   ',
+        description: '',
+      }),
+    ).rejects.toThrow('Title is required');
+
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        projects: {
+          nodes: [
+            {
+              id: 'proj-gs',
+              name: 'GanttSmart',
+              teams: { nodes: [{ id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } }] },
+            },
+          ],
+        },
+        teams: { nodes: [] },
+        issueLabels: { nodes: [] },
+      }),
+    );
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        issueCreate: { success: false, issue: null },
+      }),
+    );
+
+    await expect(
+      createFeedbackIssue({
+        apiKey: 'tok',
+        type: 'bug',
+        title: 'Broken bar',
+        description: 'Details',
+      }),
+    ).rejects.toThrow('Linear did not confirm issue creation.');
   });
 });

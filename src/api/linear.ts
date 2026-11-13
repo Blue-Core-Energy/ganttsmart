@@ -1,5 +1,6 @@
 import { backend } from '@/backend';
 import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
+import { getFeedbackConfig, type FeedbackEnv, type FeedbackType } from '@/utils/feedback';
 import { isIgnoredIssueState, type IssueStateLike } from '@/utils/issues';
 import { sortTasks } from '@/utils/tasks';
 
@@ -630,4 +631,252 @@ export async function fetchWorkflowStates(apiKey: string, teamId: string): Promi
   );
   const states = data.workflowStates as { nodes: WorkflowState[] };
   return states.nodes.sort((a, b) => a.position - b.position);
+}
+
+// ---- Feedback issue creation ----
+
+interface FeedbackLabelNode {
+  id: string;
+  name: string;
+  team?: { id: string } | null;
+}
+
+interface FeedbackTeamNode {
+  id: string;
+  key: string;
+  name: string;
+  labels?: { nodes: FeedbackLabelNode[] } | null;
+}
+
+interface FeedbackProjectNode {
+  id: string;
+  name: string;
+  url?: string | null;
+  slugId?: string | null;
+  leadTeam?: FeedbackTeamNode | null;
+  teams?: { nodes: FeedbackTeamNode[] } | null;
+}
+
+export interface FeedbackTarget {
+  teamId: string;
+  teamKey: string;
+  teamName: string;
+  projectId: string;
+  projectName: string;
+  projectUrl: string;
+  labelIds: Record<FeedbackType, string | undefined>;
+}
+
+export interface CreatedLinearIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  url: string;
+}
+
+export class FeedbackTargetNotFoundError extends Error {
+  readonly code = 'FEEDBACK_TARGET_NOT_FOUND';
+  constructor(message: string) {
+    super(message);
+    this.name = 'FeedbackTargetNotFoundError';
+  }
+}
+
+function normalizeUrl(url: string | null | undefined): string {
+  return (url || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
+  projects(first: 100) {
+    nodes {
+      id
+      name
+      url
+      slugId
+      teams(first: 20) {
+        nodes {
+          id
+          key
+          name
+          labels(first: 100) {
+            nodes {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+  teams(first: 100) {
+    nodes {
+      id
+      key
+      name
+      labels(first: 100) {
+        nodes {
+          id
+          name
+        }
+      }
+    }
+  }
+  issueLabels(first: 100) {
+    nodes {
+      id
+      name
+      team {
+        id
+      }
+    }
+  }
+}`;
+
+export async function resolveFeedbackTarget(apiKey: string, env?: FeedbackEnv): Promise<FeedbackTarget> {
+  const config = getFeedbackConfig(env);
+  const data = await gql(apiKey, FEEDBACK_TARGET_QUERY);
+
+  const projects = (data.projects as { nodes?: FeedbackProjectNode[] } | undefined)?.nodes ?? [];
+  const allTeams = (data.teams as { nodes?: FeedbackTeamNode[] } | undefined)?.nodes ?? [];
+  const issueLabels = (data.issueLabels as { nodes?: FeedbackLabelNode[] } | undefined)?.nodes ?? [];
+
+  const targetUrlNorm = normalizeUrl(config.projectUrl);
+  const targetNameNorm = config.projectName.trim().toLowerCase();
+
+  const findByName = (name: string) =>
+    projects.find((p) => p.name.trim().toLowerCase() === name) ??
+    projects.find((p) => p.name.trim().toLowerCase() === 'ganttsmart');
+
+  let project: FeedbackProjectNode | undefined;
+  if (config.hasCustomProjectUrl) {
+    project =
+      projects.find((p) => p.url && normalizeUrl(p.url) === targetUrlNorm) ??
+      (config.projectSlugId ? projects.find((p) => p.slugId === config.projectSlugId) : undefined) ??
+      (config.projectSlug
+        ? projects.find((p) => normalizeUrl(p.url).endsWith(`/${config.projectSlug!.toLowerCase()}`))
+        : undefined) ??
+      findByName(targetNameNorm);
+  } else {
+    project =
+      projects.find((p) => p.name.trim().toLowerCase() === 'ganttsmart') ??
+      (config.projectSlugId ? projects.find((p) => p.slugId === config.projectSlugId) : undefined) ??
+      projects.find((p) => normalizeUrl(p.url) === targetUrlNorm);
+  }
+
+  if (!project) {
+    throw new FeedbackTargetNotFoundError(
+      `Could not find the "${config.projectName}" project in your connected Linear workspace.`,
+    );
+  }
+
+  const projectTeams: FeedbackTeamNode[] = [
+    ...(project.leadTeam ? [project.leadTeam] : []),
+    ...(project.teams?.nodes ?? []),
+  ];
+  const targetTeamKey = config.teamKey.trim().toUpperCase();
+
+  const team =
+    projectTeams.find((t) => t.key.trim().toUpperCase() === targetTeamKey) ??
+    allTeams.find((t) => t.key.trim().toUpperCase() === targetTeamKey) ??
+    project.leadTeam ??
+    project.teams?.nodes?.[0];
+
+  if (!team) {
+    throw new FeedbackTargetNotFoundError(`Could not find team "${config.teamKey}" for project "${project.name}".`);
+  }
+
+  // Merge labels from the top-level team list if the project-nested team omitted them
+  const fullTeam = allTeams.find((t) => t.id === team.id);
+  const teamLabels = [
+    ...(team.labels?.nodes ?? []),
+    ...(fullTeam?.labels?.nodes ?? []),
+    ...issueLabels.filter((l) => !l.team || l.team.id === team.id),
+  ];
+
+  const findLabelId = (name: string): string | undefined =>
+    teamLabels.find((l) => l.name.trim().toLowerCase() === name)?.id;
+
+  return {
+    teamId: team.id,
+    teamKey: team.key,
+    teamName: team.name,
+    projectId: project.id,
+    projectName: project.name,
+    projectUrl: project.url || config.projectUrl,
+    labelIds: {
+      feature: findLabelId('feature'),
+      bug: findLabelId('bug'),
+    },
+  };
+}
+
+export async function createFeedbackIssue({
+  apiKey,
+  type,
+  title,
+  description,
+  env,
+}: {
+  apiKey: string;
+  type: FeedbackType;
+  title: string;
+  description: string;
+  env?: FeedbackEnv;
+}): Promise<CreatedLinearIssue> {
+  const trimmedTitle = title.trim();
+  if (!trimmedTitle) {
+    throw new Error('Title is required');
+  }
+
+  const target = await resolveFeedbackTarget(apiKey, env);
+  const labelId = target.labelIds[type];
+
+  const input: {
+    teamId: string;
+    title: string;
+    projectId: string;
+    description?: string;
+    labelIds?: string[];
+  } = {
+    teamId: target.teamId,
+    title: trimmedTitle,
+    projectId: target.projectId,
+  };
+
+  const trimmedDesc = description.trim();
+  if (trimmedDesc) {
+    input.description = trimmedDesc;
+  }
+  if (labelId) {
+    input.labelIds = [labelId];
+  }
+
+  const data = await gql(
+    apiKey,
+    `mutation CreateFeedbackIssue($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue {
+          id
+          identifier
+          title
+          url
+        }
+      }
+    }`,
+    { input },
+  );
+
+  const payload = data.issueCreate as
+    | {
+        success?: boolean;
+        issue?: CreatedLinearIssue | null;
+      }
+    | undefined;
+
+  if (!payload?.success || !payload.issue) {
+    throw new Error('Linear did not confirm issue creation.');
+  }
+
+  return payload.issue;
 }

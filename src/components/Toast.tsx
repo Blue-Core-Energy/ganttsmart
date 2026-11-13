@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { isSafeUrl } from '@/utils/url';
 import { registerToastHandler, type ToastItem as ToastData, type ToastType } from './toastStore';
 
 let nextId = 0;
@@ -66,17 +67,28 @@ function ToastItem({ toast: t, onDismiss }: { toast: ToastData; onDismiss: () =>
         {ICONS[t.type]}
       </span>
       <span className="text-xs text-text-primary flex-1">{t.message}</span>
-      {t.action && (
-        <button
-          onClick={() => {
-            t.action!.onClick();
-            onDismiss();
-          }}
-          className="text-[11px] font-semibold text-accent hover:text-accent/80 cursor-pointer shrink-0"
-        >
-          {t.action.label}
-        </button>
-      )}
+      {t.action &&
+        (t.action.href && isSafeUrl(t.action.href) ? (
+          <a
+            href={t.action.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onDismiss}
+            className="text-[11px] font-semibold text-accent hover:text-accent/80 cursor-pointer shrink-0 whitespace-nowrap"
+          >
+            {t.action.label}
+          </a>
+        ) : (
+          <button
+            onClick={() => {
+              t.action!.onClick?.();
+              onDismiss();
+            }}
+            className="text-[11px] font-semibold text-accent hover:text-accent/80 cursor-pointer shrink-0"
+          >
+            {t.action.label}
+          </button>
+        ))}
       <button
         onClick={onDismiss}
         className="text-text-muted hover:text-text-secondary cursor-pointer shrink-0 text-sm leading-none"

@@ -4,6 +4,8 @@ import type { Theme } from '@/hooks/useTheme';
 import { TIME_SCALES } from '@/types';
 import type { Task, TimeScale } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
+import type { FeedbackType } from '@/utils/feedback';
+import FeedbackDialog from './FeedbackDialog';
 import { toastError, toastSuccess } from './toastStore';
 
 // Loaded on demand: it pulls in the Supabase client, which only the Supabase backend has
@@ -25,6 +27,7 @@ interface Props {
   onThemeChange: (theme: Theme) => void;
   projectId: string;
   tasks: Task[];
+  linearToken?: string;
 }
 
 const iconBtn =
@@ -87,6 +90,52 @@ function MoonIcon() {
   );
 }
 
+function LightbulbIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 18h6" />
+      <path d="M10 22h4" />
+      <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0018 8 6 6 0 006 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 018.91 14" />
+    </svg>
+  );
+}
+
+function BugIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m8 2 1.88 1.88" />
+      <path d="M14.12 3.88 16 2" />
+      <path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1" />
+      <path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6" />
+      <path d="M12 20v-9" />
+      <path d="M6.53 9C4.6 8.8 3 7.1 3 5" />
+      <path d="M6 13H2" />
+      <path d="M3 21c0-2.1 1.7-3.9 3.8-4" />
+      <path d="M20.97 5c0 2.1-1.6 3.8-3.5 4" />
+      <path d="M22 13h-4" />
+      <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
+    </svg>
+  );
+}
+
 export default memo(function Header({
   projectName,
   loading,
@@ -103,19 +152,24 @@ export default memo(function Header({
   onThemeChange,
   projectId,
   tasks,
+  linearToken,
 }: Props) {
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showFeedbackMenu, setShowFeedbackMenu] = useState(false);
+  const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
   const [exporting, setExporting] = useState(false);
   const exportRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+  const feedbackRef = useRef<HTMLDivElement>(null);
 
   // Close menus on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
       if (accountRef.current && !accountRef.current.contains(e.target as Node)) setShowAccountMenu(false);
+      if (feedbackRef.current && !feedbackRef.current.contains(e.target as Node)) setShowFeedbackMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -371,6 +425,95 @@ export default memo(function Header({
           <Suspense fallback={null}>
             <ShareDialog projectId={projectId} projectName={projectName} onClose={() => setShowShareDialog(false)} />
           </Suspense>
+        )}
+
+        {/* Feedback: dedicated buttons on sm+, compact menu on mobile */}
+        <div className="hidden sm:flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5">
+          <button
+            type="button"
+            onClick={() => setFeedbackType('feature')}
+            className="flex items-center gap-1.5 px-2 h-[26px] rounded text-[11px] font-medium text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+            aria-label="Feature Request"
+            title="Feature Request"
+          >
+            <LightbulbIcon />
+            <span className="hidden xl:inline" aria-hidden="true">
+              Feature
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFeedbackType('bug')}
+            className="flex items-center gap-1.5 px-2 h-[26px] rounded text-[11px] font-medium text-text-secondary hover:bg-bg-card hover:text-text-primary transition-colors cursor-pointer"
+            aria-label="Bug Report"
+            title="Bug Report"
+          >
+            <BugIcon />
+            <span className="hidden xl:inline" aria-hidden="true">
+              Bug
+            </span>
+          </button>
+        </div>
+
+        <div className="relative sm:hidden" ref={feedbackRef}>
+          <button
+            type="button"
+            onClick={() => setShowFeedbackMenu((v) => !v)}
+            className={iconBtn}
+            aria-label="Send feedback"
+            aria-expanded={showFeedbackMenu}
+            title="Send feedback"
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <path d="M12 7v6" />
+              <path d="M9 10h6" />
+            </svg>
+          </button>
+          {showFeedbackMenu && (
+            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[168px] py-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFeedbackMenu(false);
+                  setFeedbackType('feature');
+                }}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <LightbulbIcon size={13} />
+                Feature Request
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowFeedbackMenu(false);
+                  setFeedbackType('bug');
+                }}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <BugIcon size={13} />
+                Bug Report
+              </button>
+            </div>
+          )}
+        </div>
+
+        {feedbackType && (
+          <FeedbackDialog
+            initialType={feedbackType}
+            linearToken={linearToken ?? ''}
+            projectName={projectName}
+            onClose={() => setFeedbackType(null)}
+          />
         )}
 
         {/* Divider */}
