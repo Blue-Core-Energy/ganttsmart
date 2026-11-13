@@ -639,6 +639,7 @@ Do every check. Use a normal browser window for your Bluecore account and a priv
 - [ ] **Connecting Linear keeps the IAP session.** Click **Connect Linear**, approve in Linear, and you are sent back through `https://ganttsmart.bluecore.energy/api/linear/callback`. **Expected:** you land on `/app` connected, with your Linear projects loading. **Not expected:** a Google sign-in page, a sign-in loop, or an error banner. If you see either, note the exact URL and stop.
 - [ ] **Edit and reload.** Drag an issue's dates in the Gantt chart, confirm the change in Linear, then reload the page. The change is still there, and the issue's history panel shows the edit.
 - [ ] **Disconnect and reconnect.** Disconnect Linear in the app (it shows the connect prompt), then connect again; it works without errors.
+- [ ] **Sign out clears the IAP cookie.** Click **Sign out** in the Account menu (or on the Connect Linear screen): it navigates to `/?gcp-iap-mode=CLEAR_LOGIN_COOKIE` and clears GanttSmart's IAP cookie. With multiple Google accounts signed in, Google shows an account picker; with a single Google account, IAP may silently sign straight back in.
 - [ ] **No errors in the logs.** `gcloud run services logs read $SERVICE --region=$REGION --limit=50` shows only the `IAP identity check failed` errors caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above, and no other `ERROR` lines.
 - [ ] **Secret rotation works.** Do the rotation in [Rotate the Linear client secret](#rotate-the-linear-client-secret) once, then repeat the Linear connect check.
 
@@ -755,7 +756,6 @@ gcloud compute addresses delete ganttsmart-ip --global --quiet
 
 ## Later improvements (not needed now)
 
-- **Sign out.** IAP supports clearing its login cookie with `https://ganttsmart.bluecore.energy/?gcp-iap-mode=CLEAR_LOGIN_COOKIE` ([IAP query parameters](https://cloud.google.com/iap/docs/special-urls-howto)). The GCP build currently hides **Sign out**; showing it and linking it to that URL is a separate app change. Note that with a single Google account signed in, the browser may sign straight back in.
 - **Narrow access to a Google Group** instead of the whole domain (step 10c).
 - **Pin the secret version.** Google recommends pinning a version number rather than `latest` for secrets exposed as environment variables. This guide uses `latest` plus the explicit redeploy in the rotation steps.
 - **Disable the `run.app` URL entirely** with `gcloud run services update ganttsmart --region=us-west2 --no-default-url`. Ingress already blocks it; this removes it ([Cloud Run ingress](https://cloud.google.com/run/docs/securing/ingress)).

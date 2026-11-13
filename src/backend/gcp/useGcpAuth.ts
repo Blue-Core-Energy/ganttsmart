@@ -8,6 +8,9 @@ import { sessionErrorMessage } from './sessionError';
 /** Stands in for the Linear token: the real one never leaves the server. */
 const SERVER_TOKEN = 'server';
 
+/** IAP special URL that clears the app's IAP login cookie and returns to `/`. */
+export const GCP_SIGN_OUT_URL = '/?gcp-iap-mode=CLEAR_LOGIN_COOKIE';
+
 interface Me {
   email: string;
   linearConnected: boolean;
@@ -88,9 +91,9 @@ export function useGcpAuth(): AuthState {
     setLinearConnected(false);
   }, []);
 
-  // Not offered in the UI (capabilities.signOut is false): this IAP parameter is unconfirmed.
+  // Clears the IAP login cookie for GanttSmart only (not Google) and reloads `/`.
   const signOut = useCallback(async () => {
-    window.location.href = '/?gcp-iap-mode=CLEAR_LOGIN_COOKIE';
+    window.location.href = GCP_SIGN_OUT_URL;
   }, []);
 
   const user = useMemo(() => (email !== null ? { id: email, email } : null), [email]);
