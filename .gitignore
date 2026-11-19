@@ -11,5 +11,6 @@ playwright/.cache
 .env.production
 .vite
 .netlify
+supabase/.temp
 .claude
 *.py
