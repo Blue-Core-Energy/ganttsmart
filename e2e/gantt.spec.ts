@@ -952,7 +952,22 @@ test.describe('GanttSmart GCP app', () => {
     await expect(completedStat).toBeVisible();
 
     // Dependency arrow renders between completed blocker ENG-100 and active ENG-101
-    await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
+    const arrow = exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]');
+    await expect(arrow).toHaveCount(1);
+
+    // ...routed with right angles only, and painted beneath the task bars
+    await expect(arrow).toHaveAttribute('d', /^M[\d\s.HV]+$/);
+    const arrowLayers = await page.evaluate(() => {
+      const svg = document.querySelector('#gantt-export-target svg path[data-arrow-source]')?.closest('svg');
+      const bar = document.querySelector('[data-task-bar="ENG-101"]');
+      return {
+        svg: svg ? Number(getComputedStyle(svg).zIndex) : null,
+        bar: bar ? Number(getComputedStyle(bar).zIndex) : null,
+      };
+    });
+    expect(arrowLayers.svg).not.toBeNull();
+    expect(arrowLayers.bar).not.toBeNull();
+    expect(arrowLayers.svg!).toBeLessThan(arrowLayers.bar!);
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
     const countBox = await page.getByText('3/3').boundingBox();
@@ -2105,6 +2120,10 @@ test.describe('GanttSmart GCP app', () => {
     const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');
     await expect(crossArrow).toHaveCount(1);
     await expect(crossArrow).toHaveAttribute('data-cross-project', 'true');
+    // Violated cross-project arrows keep their own color and marker, and route with right angles
+    await expect(crossArrow).toHaveAttribute('stroke', '#f97316');
+    await expect(crossArrow).toHaveAttribute('marker-end', 'url(#dep-arrow-warn)');
+    await expect(crossArrow).toHaveAttribute('d', /^M[\d\s.HV]+$/);
 
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);
