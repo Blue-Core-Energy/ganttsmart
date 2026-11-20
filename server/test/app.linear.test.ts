@@ -108,13 +108,22 @@ function stateFrom(res: Response): string {
   return match[1];
 }
 
-let errorLog: ReturnType<typeof vi.spyOn>;
+let logLines: string[];
+let stdoutSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+  logLines = [];
+  stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    logLines.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+    return true;
+  });
 });
 afterEach(() => {
-  errorLog.mockRestore();
+  stdoutSpy.mockRestore();
 });
+
+function parsedLogs(): Array<Record<string, unknown>> {
+  return logLines.map((line) => JSON.parse(line.trimEnd()) as Record<string, unknown>);
+}
 
 describe('identity middleware', () => {
   it('returns 401 on /api/me without an identity', async () => {
@@ -139,7 +148,7 @@ describe('identity middleware', () => {
     expect(linear.calls).toEqual([]);
   });
 
-  it('logs the failure reason and its cause, never the assertion', async () => {
+  it('logs the failure reason and its cause at WARNING, never the assertion', async () => {
     const assertion = 'eyJhbGciOiJFUzI1NiJ9.secret-payload.sig';
     const cause = Object.assign(new Error('JWKS request timed out'), { code: 'ERR_JWKS_TIMEOUT' });
     const app = createApp({
@@ -152,14 +161,26 @@ describe('identity middleware', () => {
     });
     const res = await app.request('/api/me', { headers: { 'x-goog-iap-jwt-assertion': assertion } });
     expect(res.status).toBe(401);
-    const logged = JSON.stringify(errorLog.mock.calls);
-    expect(logged).toContain('Invalid IAP assertion (ERR_JWKS_TIMEOUT)');
-    expect(logged).toContain('ERR_JWKS_TIMEOUT');
-    expect(logged).toContain('JWKS request timed out');
-    expect(logged).not.toContain(assertion);
+    const entries = parsedLogs();
+    expect(entries).toEqual([
+      {
+        severity: 'WARNING',
+        message: 'IAP identity check failed',
+        error: {
+          name: 'UnauthorizedError',
+          message: 'Invalid IAP assertion (ERR_JWKS_TIMEOUT)',
+          cause: {
+            name: 'Error',
+            message: 'JWKS request timed out',
+            code: 'ERR_JWKS_TIMEOUT',
+          },
+        },
+      },
+    ]);
+    expect(JSON.stringify(entries)).not.toContain(assertion);
   });
 
-  it('fails closed when identify throws something other than UnauthorizedError', async () => {
+  it('fails closed and logs ERROR when identify throws something other than UnauthorizedError', async () => {
     const app = createApp({
       config,
       store: createMemoryStore(),
@@ -171,7 +192,13 @@ describe('identity middleware', () => {
     const res = await app.request('/api/me', { headers: authed() });
     expect(res.status).toBe(500);
     await expect(res.json()).resolves.toEqual({ error: 'internal error' });
-    expect(errorLog).toHaveBeenCalled();
+    expect(parsedLogs()).toEqual([
+      {
+        severity: 'ERROR',
+        message: 'IAP identity check errored',
+        error: { name: 'TypeError', message: 'boom' },
+      },
+    ]);
   });
 });
 
@@ -356,7 +383,7 @@ describe('GET /api/linear/callback', () => {
     },
   );
 
-  it('redirects with exchange_failed when the code exchange fails', async () => {
+  it('redirects with exchange_failed and logs ERROR when the code exchange fails', async () => {
     const oauth = stubOAuth({
       exchangeCode: async () => {
         throw new Error('Linear token request (authorization_code) failed: HTTP 400 invalid_grant');
@@ -367,6 +394,16 @@ describe('GET /api/linear/callback', () => {
     expect(res.headers.get('location')).toBe('/app?linear_error=exchange_failed');
     await expect(store.getTokens(USER.sub)).resolves.toBeNull();
     expectCookieCleared(res);
+    expect(parsedLogs()).toEqual([
+      {
+        severity: 'ERROR',
+        message: 'Linear code exchange failed',
+        error: {
+          name: 'Error',
+          message: 'Linear token request (authorization_code) failed: HTTP 400 invalid_grant',
+        },
+      },
+    ]);
   });
 
   it('redirects with exchange_failed when the code is missing', async () => {
@@ -581,21 +618,37 @@ describe('POST /api/linear/graphql', () => {
         replies: [json({}, 401)],
       },
     ],
-  ])('never logs tokens, secrets or request bodies when %s', async (_name, opts) => {
+  ])('never logs tokens, secrets or request bodies and logs ERROR when %s', async (_name, opts) => {
     const { app } = await connected(opts);
     const res = await app.request(
       '/api/linear/graphql',
       post(JSON.stringify({ query: 'secret-query-text', variables: { v: 'secret-variable' } })),
     );
     expect(res.status).toBe(502);
-    expect(errorLog).toHaveBeenCalled();
-    const logged = errorLog.mock.calls
-      .flat()
-      .map((arg: unknown) => (typeof arg === 'string' ? arg : JSON.stringify(arg)))
-      .join('\n');
-    expect(logged).toContain('Linear GraphQL relay failed');
+    const entries = parsedLogs();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      severity: 'ERROR',
+      message: 'Linear GraphQL relay failed',
+    });
+    const logged = logLines.join('\n');
     for (const secret of ['access-', 'refresh-', config.linearClientSecret, 'secret-query-text', 'secret-variable']) {
       expect(logged).not.toContain(secret);
     }
+  });
+
+  it('logs ERROR with HTTP status when Linear GraphQL returns a non-JSON body', async () => {
+    const { app } = await connected({
+      replies: [() => new Response('<html>502 Bad Gateway</html>', { status: 502 })],
+    });
+    const res = await app.request('/api/linear/graphql', post(JSON.stringify(QUERY)));
+    expect(res.status).toBe(502);
+    expect(parsedLogs()).toEqual([
+      {
+        severity: 'ERROR',
+        message: 'Linear GraphQL returned a non-JSON body',
+        status: 502,
+      },
+    ]);
   });
 });

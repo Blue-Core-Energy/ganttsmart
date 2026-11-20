@@ -640,7 +640,12 @@ Do every check. Use a normal browser window for your Bluecore account and a priv
 - [ ] **Edit and reload.** Drag an issue's dates in the Gantt chart, confirm the change in Linear, then reload the page. The change is still there, and the issue's history panel shows the edit.
 - [ ] **Disconnect and reconnect.** Disconnect Linear in the app (it shows the connect prompt), then connect again; it works without errors.
 - [ ] **Sign out clears the IAP cookie.** Click **Sign out** in the Account menu (or on the Connect Linear screen): it navigates to `/?gcp-iap-mode=CLEAR_LOGIN_COOKIE` and clears GanttSmart's IAP cookie. With multiple Google accounts signed in, Google shows an account picker; with a single Google account, IAP may silently sign straight back in.
-- [ ] **No errors in the logs.** `gcloud run services logs read $SERVICE --region=$REGION --limit=50` shows only the `IAP identity check failed` errors caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above, and no other `ERROR` lines.
+- [ ] **Only expected warnings and no errors in the logs.** Check Cloud Logging at `WARNING` and `ERROR` separately:
+  ```bash
+  gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="ganttsmart" AND severity>=WARNING' --limit=20 --format='value(timestamp,severity,jsonPayload)'
+  gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="ganttsmart" AND severity>=ERROR' --limit=20 --format='value(timestamp,severity,jsonPayload)'
+  ```
+  The `severity>=WARNING` query shows only the `IAP identity check failed` `WARNING` entries caused by the deliberate `AUDIENCE` and `SIGNATURE` test tokens above; the `severity>=ERROR` query returns nothing (no unexpected 500s or Linear relay errors).
 - [ ] **Secret rotation works.** Do the rotation in [Rotate the Linear client secret](#rotate-the-linear-client-secret) once, then repeat the Linear connect check.
 
 ---

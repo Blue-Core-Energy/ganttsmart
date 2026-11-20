@@ -61,13 +61,22 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-let errorLog: ReturnType<typeof vi.spyOn>;
+let logLines: string[];
+let stdoutSpy: ReturnType<typeof vi.spyOn>;
 beforeEach(() => {
-  errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+  logLines = [];
+  stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: string | Uint8Array) => {
+    logLines.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+    return true;
+  });
 });
 afterEach(() => {
-  errorLog.mockRestore();
+  stdoutSpy.mockRestore();
 });
+
+function parsedLogs(): Array<Record<string, unknown>> {
+  return logLines.map((line) => JSON.parse(line.trimEnd()) as Record<string, unknown>);
+}
 
 function setup(store: Store = createMemoryStore()) {
   const app = createApp({ config: { ...baseConfig, staticDir }, identify, store, oauth });
@@ -340,7 +349,7 @@ describe('history: middleware', () => {
 });
 
 describe('error handling', () => {
-  it('returns a JSON 500 and logs safely when the store fails in /api/me', async () => {
+  it('returns a JSON 500 and logs ERROR safely when the store fails in /api/me', async () => {
     const store = createMemoryStore();
     store.getTokens = async () => {
       throw new Error('firestore unavailable', { cause: Object.assign(new Error('deadline'), { code: 'ETIMEDOUT' }) });
@@ -350,12 +359,45 @@ describe('error handling', () => {
     expect(res.status).toBe(500);
     expect(res.headers.get('content-type')).toMatch(/^application\/json/);
     await expect(res.json()).resolves.toEqual({ error: 'internal error' });
-    expect(errorLog).toHaveBeenCalledWith('Request failed', {
-      name: 'Error',
-      message: 'firestore unavailable',
-      cause: { name: 'Error', message: 'deadline', code: 'ETIMEDOUT' },
-    });
-    const logged = JSON.stringify(errorLog.mock.calls);
+    expect(parsedLogs()).toEqual([
+      {
+        severity: 'ERROR',
+        message: 'Request failed',
+        error: {
+          name: 'Error',
+          message: 'firestore unavailable',
+          cause: { name: 'Error', message: 'deadline', code: 'ETIMEDOUT' },
+        },
+      },
+    ]);
+    const logged = logLines.join('\n');
+    expect(logged).not.toContain(ALICE.email);
+    expect(logged).not.toContain('    at ');
+  });
+
+  it('returns a JSON 500 and logs ERROR with cause code when the store fails in /api/history/*', async () => {
+    const store = createMemoryStore();
+    store.listBaselines = async () => {
+      throw new Error('history store failed', {
+        cause: Object.assign(new Error('unavailable'), { code: 'UNAVAILABLE' }),
+      });
+    };
+    const { app } = setup(store);
+    const res = await app.request('/api/history/baselines?projectId=proj-1', { headers: as() });
+    expect(res.status).toBe(500);
+    await expect(res.json()).resolves.toEqual({ error: 'internal error' });
+    expect(parsedLogs()).toEqual([
+      {
+        severity: 'ERROR',
+        message: 'History request failed',
+        error: {
+          name: 'Error',
+          message: 'history store failed',
+          cause: { name: 'Error', message: 'unavailable', code: 'UNAVAILABLE' },
+        },
+      },
+    ]);
+    const logged = logLines.join('\n');
     expect(logged).not.toContain(ALICE.email);
     expect(logged).not.toContain('    at ');
   });

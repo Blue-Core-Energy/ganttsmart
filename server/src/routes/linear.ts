@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppEnv } from '../app.js';
 import { LinearReauthRequired, type LinearOAuth } from '../linear/oauth.js';
 import type { TokenService } from '../linear/tokens.js';
+import { describeError, log } from '../log.js';
 import type { Store } from '../store/types.js';
 
 const GRAPHQL_URL = 'https://api.linear.app/graphql';
@@ -42,11 +43,6 @@ function safeEqual(a: string, b: string): boolean {
 /** Linear's OAuth error code if it looks like one, so arbitrary text is never put in a redirect. */
 function oauthErrorCode(error: string): string {
   return /^[a-z_]{1,64}$/.test(error) ? error : 'oauth_error';
-}
-
-/** Error name and message only; callers pass errors whose messages never contain secrets. */
-function reason(err: unknown): string {
-  return err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error';
 }
 
 /**
@@ -155,7 +151,7 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       const linearTokens = await oauth.exchangeCode(code);
       await store.saveTokens(sub, email, linearTokens);
     } catch (err) {
-      console.error('Linear code exchange failed', reason(err));
+      log.error('Linear code exchange failed', { error: describeError(err) });
       return fail('exchange_failed');
     }
     return c.redirect(appUrl(), 302);
@@ -205,7 +201,7 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       return await passThrough(c, res);
     } catch (err) {
       if (err instanceof LinearReauthRequired) return c.json(RECONNECT, 401);
-      console.error('Linear GraphQL relay failed', reason(err));
+      log.error('Linear GraphQL relay failed', { error: describeError(err) });
       return c.json({ error: 'Linear request failed' }, 502);
     }
   });
@@ -219,7 +215,7 @@ async function passThrough(c: Context<AppEnv>, res: Response): Promise<Response>
   try {
     JSON.parse(text);
   } catch {
-    console.error('Linear GraphQL returned a non-JSON body', `HTTP ${res.status}`);
+    log.error('Linear GraphQL returned a non-JSON body', { status: res.status });
     return c.json({ error: 'Linear request failed' }, 502);
   }
   const headers: Record<string, string> = { 'content-type': 'application/json' };
