@@ -3065,4 +3065,221 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('date range picker keeps month arrows beside the caption and fits narrow viewports', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: {
+                  nodes: [
+                    {
+                      id: 'ms-1',
+                      name: 'Beta Release',
+                      description: 'Initial milestone',
+                      targetDate: isoOffsetDays(10),
+                      sortOrder: 1,
+                      createdAt: '2026-01-01T00:00:00Z',
+                      updatedAt: '2026-01-02T00:00:00Z',
+                    },
+                  ],
+                },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: { id: 'ms-1' },
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Pressure test rig',
+                      description: `${startTagOffsetDays(1)}\nTest details`,
+                      dueDate: isoOffsetDays(9),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-1',
+                    identifier: 'ENG-101',
+                    relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'ENG-102' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-2',
+                    identifier: 'ENG-102',
+                    relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-101' } }] },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                  { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    const popover = page.locator('[data-popover="date-range"]');
+    const prev = page.getByRole('button', { name: /previous month/i });
+    const next = page.getByRole('button', { name: /next month/i });
+
+    const openPicker = async () => {
+      await page.getByRole('button', { name: 'Filter', exact: true }).click();
+      await page.getByRole('button', { name: 'Date range' }).click();
+      await expect(popover).toBeVisible();
+    };
+
+    /** Geometry of the nav row against the day grid it must not sit inside */
+    const layout = async () =>
+      popover.evaluate((pop) => {
+        const days = [...pop.querySelectorAll('button')].filter((b) => /^\d+$/.test(b.textContent?.trim() ?? ''));
+        const firstDay = days[0].getBoundingClientRect();
+        const box = (el: Element) => el.getBoundingClientRect();
+        const navButtons = [...pop.querySelectorAll('button')].filter((b) =>
+          /previous|next/i.test(b.getAttribute('aria-label') ?? ''),
+        );
+        return {
+          popRight: box(pop).right,
+          noHorizontalScroll: pop.scrollWidth <= pop.clientWidth,
+          gridTop: firstDay.top,
+          gridLeft: firstDay.left,
+          navBottom: Math.max(...navButtons.map((b) => box(b).bottom)),
+          prevRight: box(navButtons[0]).right,
+          nextLeft: box(navButtons[1]).left,
+        };
+      });
+
+    // Desktop: two months, arrows flanking the captions above the grid
+    await openPicker();
+    const desktop = await layout();
+    expect(desktop.noHorizontalScroll).toBe(true);
+    // The nav sits above the day grid rather than stacked inside it
+    expect(desktop.navBottom).toBeLessThanOrEqual(desktop.gridTop);
+    // ...with previous on the left edge and next out past the second month
+    expect(desktop.prevRight).toBeLessThanOrEqual(desktop.gridLeft + 40);
+    expect(desktop.nextLeft).toBeGreaterThan(desktop.gridLeft + 400);
+
+    // Arrows still navigate
+    const caption = popover
+      .locator('div')
+      .filter({ hasText: /^[A-Z][a-z]+ \d{4}$/ })
+      .first();
+    const firstCaption = (await caption.textContent())!.trim();
+    await next.click();
+    await expect(caption).not.toHaveText(firstCaption);
+    await prev.click();
+    await expect(caption).toHaveText(firstCaption);
+
+    // Narrow viewport: one month, no horizontal scroll, inside the viewport
+    await page.setViewportSize({ width: 375, height: 760 });
+    // The first Escape closes the date popover, the second the filter panel around it
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
+    await openPicker();
+    const mobile = await layout();
+    expect(mobile.noHorizontalScroll).toBe(true);
+    expect(mobile.navBottom).toBeLessThanOrEqual(mobile.gridTop);
+    expect(mobile.popRight).toBeLessThanOrEqual(375);
+
+    expect(errors).toEqual([]);
+  });
 });
