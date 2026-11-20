@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Filters, Project } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import CustomDropdown from './CustomDropdown';
@@ -24,6 +24,9 @@ interface Props {
   allowExternalEdits?: boolean;
   onAllowExternalEditsChange?: (allow: boolean) => void;
 }
+
+/** Width of the filter panel, in px — also used to keep it inside the bar's right edge */
+const PANEL_WIDTH = 224;
 
 // Icons
 function SearchIcon() {
@@ -237,7 +240,12 @@ export default function FilterBar({
   onAllowExternalEditsChange,
 }: Props) {
   const [filterOpen, setFilterOpen] = useState(false);
-  const filterRef = useRef<HTMLDivElement>(null);
+  const [panelLeft, setPanelLeft] = useState(0);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  const panelId = useId();
 
   const hasSearch = !!filters.search;
   const hasAssignee = !!filters.assignee;
@@ -260,26 +268,69 @@ export default function FilterBar({
     });
   };
 
-  // Close the filter panel on outside click or Escape. Nested popovers (the
-  // dropdowns and the date picker) live inside the panel, so clicks within them
-  // never count as "outside", and Escape closes them before the panel itself.
+  // The trigger, the panel and the active-chip row form one filter surface:
+  // working in any of them keeps the panel open.
+  const isInsideFilter = useCallback(
+    (node: Node | null) =>
+      Boolean(
+        node &&
+        (panelRef.current?.contains(node) || triggerRef.current?.contains(node) || chipRowRef.current?.contains(node)),
+      ),
+    [],
+  );
+
+  const closeFilter = useCallback((opts?: { returnFocus?: boolean }) => {
+    setFilterOpen(false);
+    if (opts?.returnFocus) triggerRef.current?.focus();
+  }, []);
+
+  // Keep the panel aligned under its trigger. It is positioned against the bar
+  // as a whole (not the trigger) so the chip row stays usable, and it is clamped
+  // so it can't run off the right edge once the bar wraps on narrow screens.
+  useLayoutEffect(() => {
+    if (!filterOpen) return;
+    const update = () => {
+      const trigger = triggerRef.current;
+      const root = rootRef.current;
+      if (!trigger || !root) return;
+      const offset = trigger.getBoundingClientRect().left - root.getBoundingClientRect().left;
+      const maxLeft = Math.max(8, root.clientWidth - PANEL_WIDTH - 8);
+      setPanelLeft(Math.round(Math.min(Math.max(offset, 8), maxLeft)));
+    };
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, [filterOpen]);
+
+  // Dismiss on outside click, on Escape, and when focus leaves the panel. Nested
+  // popovers (the dropdowns and the date picker) live inside the panel, so clicks
+  // and focus within them never count as "outside", and Escape closes them first.
   useEffect(() => {
     if (!filterOpen) return;
     const onMouseDown = (e: MouseEvent) => {
-      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
+      if (!isInsideFilter(e.target as Node)) closeFilter();
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (filterRef.current?.querySelector('[role="listbox"], [data-popover="date-range"]')) return;
-      setFilterOpen(false);
+      if (panelRef.current?.querySelector('[role="listbox"], [data-popover="date-range"]')) return;
+      closeFilter({ returnFocus: true });
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as Node | null;
+      // Focus landing on <body> means focus was lost (e.g. a chip unmounted),
+      // not deliberately moved somewhere else
+      if (!target || target === document.body) return;
+      if (!isInsideFilter(target)) closeFilter();
     };
     document.addEventListener('mousedown', onMouseDown);
     document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('focusin', onFocusIn);
     return () => {
       document.removeEventListener('mousedown', onMouseDown);
       document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('focusin', onFocusIn);
     };
-  }, [filterOpen]);
+  }, [filterOpen, isInsideFilter, closeFilter]);
 
   // Build dropdown options
   const projectOptions: DropdownOption[] = useMemo(
@@ -298,7 +349,7 @@ export default function FilterBar({
   );
 
   return (
-    <div className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20">
+    <div ref={rootRef} className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20">
       {/* Main filter row */}
       <div className="min-h-12 py-1.5 flex flex-wrap items-center gap-2 px-4">
         {/* Search */}
@@ -331,91 +382,36 @@ export default function FilterBar({
           />
         )}
 
-        {/* Filters — assignee, status, date range and completed visibility */}
-        <div className="relative shrink-0" ref={filterRef}>
-          <button
-            type="button"
-            onClick={() => setFilterOpen((v) => !v)}
-            aria-haspopup="dialog"
-            aria-expanded={filterOpen}
-            title={
-              activeFilterCount > 0
-                ? `${activeFilterCount} active ${activeFilterCount === 1 ? 'filter' : 'filters'}`
-                : 'Filter tasks'
-            }
-            className={`inline-flex items-center gap-1.5 py-[7px] px-3 bg-bg-card border rounded-md text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted ${
-              activeFilterCount > 0 || filterOpen
-                ? 'border-accent text-accent'
-                : 'border-border-secondary text-text-secondary'
-            }`}
-          >
-            <FilterIcon />
-            Filter
-            {activeFilterCount > 0 && (
-              <span
-                aria-hidden="true"
-                className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] font-bold font-mono tabular-nums flex items-center justify-center"
-              >
-                {activeFilterCount}
-              </span>
-            )}
-          </button>
-
-          {filterOpen && (
-            <div
-              role="dialog"
-              aria-label="Filters"
-              className="absolute top-full left-0 mt-1 z-50 w-[224px] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 flex flex-col gap-3"
+        {/* Filters — assignee, status, date range and completed visibility.
+            The panel itself is rendered after the chip row so it can't cover it. */}
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setFilterOpen((v) => !v)}
+          aria-expanded={filterOpen}
+          aria-controls={filterOpen ? panelId : undefined}
+          title={
+            activeFilterCount > 0
+              ? `Filter tasks — ${activeFilterCount} active`
+              : 'Filter tasks by assignee, status, date range and completion'
+          }
+          className={`shrink-0 inline-flex items-center gap-1.5 py-[7px] px-3 bg-bg-card border rounded-md text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted ${
+            activeFilterCount > 0 || filterOpen
+              ? 'border-accent text-accent'
+              : 'border-border-secondary text-text-secondary'
+          }`}
+        >
+          <FilterIcon />
+          Filter
+          {activeFilterCount > 0 && (
+            <span
+              aria-hidden="true"
+              className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] font-bold font-mono tabular-nums flex items-center justify-center"
             >
-              <FilterField label="Assignee">
-                <CustomDropdown
-                  value={filters.assignee}
-                  options={assigneeOptions}
-                  placeholder="Any assignee"
-                  placeholderIcon={<UsersIcon />}
-                  onChange={(v) => onFiltersChange({ ...filters, assignee: v })}
-                  className="w-full"
-                  ariaLabel="Assignee"
-                />
-              </FilterField>
-
-              <FilterField label="Status">
-                <CustomDropdown
-                  value={filters.status}
-                  options={statusOptions}
-                  placeholder="Any status"
-                  placeholderIcon={<StatusIcon />}
-                  onChange={(v) => onFiltersChange({ ...filters, status: v })}
-                  className="w-full"
-                  ariaLabel="Status"
-                />
-              </FilterField>
-
-              <FilterField label="Date range">
-                <DateRangePicker
-                  from={filters.dateFrom}
-                  to={filters.dateTo}
-                  onChange={(dateFrom, dateTo) => onFiltersChange({ ...filters, dateFrom, dateTo })}
-                />
-              </FilterField>
-
-              <button
-                type="button"
-                onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
-                aria-pressed={filters.showCompleted}
-                title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
-                className={`h-7 px-2.5 self-start rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 ${
-                  filters.showCompleted
-                    ? 'border-low/60 text-low bg-low/10'
-                    : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
-                }`}
-              >
-                <CheckIcon />
-                Completed
-              </button>
-            </div>
+              {activeFilterCount}
+            </span>
           )}
-        </div>
+        </button>
 
         {/* Plan vs Actual — toggles the dashed baseline ghost bars */}
         {onShowBaselinesChange && (
@@ -491,7 +487,10 @@ export default function FilterBar({
 
       {/* Active filter chips row */}
       {anyActiveChip && (
-        <div className="flex items-center gap-1.5 px-4 py-1.5 border-t border-border-primary/50 bg-bg-primary/40 flex-wrap">
+        <div
+          ref={chipRowRef}
+          className="flex items-center gap-1.5 px-4 py-1.5 border-t border-border-primary/50 bg-bg-primary/40 flex-wrap"
+        >
           <span className="text-[10.5px] uppercase tracking-wider text-text-muted font-semibold mr-1">Filters</span>
           {hasSearch && (
             <ActiveChip label={`"${filters.search}"`} onClear={() => onFiltersChange({ ...filters, search: '' })} />
@@ -516,6 +515,66 @@ export default function FilterBar({
             className="ml-1 text-[11px] text-text-muted hover:text-text-primary cursor-pointer underline underline-offset-2 decoration-dotted"
           >
             Clear all
+          </button>
+        </div>
+      )}
+
+      {/* Filter panel — anchored under its trigger but below the whole bar, so the
+          chip row stays visible and clickable while the panel is open. */}
+      {filterOpen && (
+        <div
+          ref={panelRef}
+          id={panelId}
+          role="group"
+          aria-label="Filters"
+          className="absolute top-full mt-1 z-50 w-[224px] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 flex flex-col gap-3"
+          style={{ left: panelLeft }}
+        >
+          <FilterField label="Assignee">
+            <CustomDropdown
+              value={filters.assignee}
+              options={assigneeOptions}
+              placeholder="Any assignee"
+              placeholderIcon={<UsersIcon />}
+              onChange={(v) => onFiltersChange({ ...filters, assignee: v })}
+              className="w-full"
+              ariaLabel="Assignee"
+            />
+          </FilterField>
+
+          <FilterField label="Status">
+            <CustomDropdown
+              value={filters.status}
+              options={statusOptions}
+              placeholder="Any status"
+              placeholderIcon={<StatusIcon />}
+              onChange={(v) => onFiltersChange({ ...filters, status: v })}
+              className="w-full"
+              ariaLabel="Status"
+            />
+          </FilterField>
+
+          <FilterField label="Date range">
+            <DateRangePicker
+              from={filters.dateFrom}
+              to={filters.dateTo}
+              onChange={(dateFrom, dateTo) => onFiltersChange({ ...filters, dateFrom, dateTo })}
+            />
+          </FilterField>
+
+          <button
+            type="button"
+            onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
+            aria-pressed={filters.showCompleted}
+            title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
+            className={`h-7 px-2.5 self-start rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 ${
+              filters.showCompleted
+                ? 'border-low/60 text-low bg-low/10'
+                : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
+            }`}
+          >
+            <CheckIcon />
+            Completed
           </button>
         </div>
       )}

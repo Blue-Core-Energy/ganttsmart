@@ -21,6 +21,19 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  // Two months need ~620px; show one on narrow screens so the popover fits
+  const [wideEnough, setWideEnough] = useState(
+    () => typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)');
+    const update = () => setWideEnough(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+
   // Draft state — only committed on Apply
   const [draft, setDraft] = useState<DateRange | undefined>(undefined);
 
@@ -134,38 +147,41 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
       {open && (
         <div
           data-popover="date-range"
-          className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 max-w-[calc(100vw-1.5rem)] overflow-x-auto"
+          className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 max-w-[calc(100vw-4rem)]"
         >
-          <DayPicker
-            mode="range"
-            selected={draft}
-            onSelect={setDraft}
-            numberOfMonths={2}
-            showOutsideDays
-            classNames={{
-              root: 'text-text-primary text-xs',
-              months: 'flex gap-4',
-              month_caption: 'text-sm font-semibold text-text-primary mb-2 text-center',
-              nav: 'flex items-center justify-between mb-1',
-              button_previous:
-                'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
-              button_next:
-                'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
-              weekdays: 'flex',
-              weekday: 'w-9 text-center text-[10px] font-medium text-text-muted py-1',
-              week: 'flex',
-              day: 'w-9 h-8 text-center text-xs',
-              day_button:
-                'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
-              selected: 'bg-accent text-white rounded-md font-semibold',
-              range_start: 'bg-accent text-white rounded-l-md font-semibold',
-              range_end: 'bg-accent text-white rounded-r-md font-semibold',
-              range_middle: 'bg-accent/15 text-accent',
-              today: 'font-bold text-accent',
-              outside: 'text-text-muted/40',
-              disabled: 'text-text-muted/30',
-            }}
-          />
+          {/* Only the calendar scrolls, so the footer actions stay put */}
+          <div className="overflow-x-auto">
+            <DayPicker
+              mode="range"
+              selected={draft}
+              onSelect={setDraft}
+              numberOfMonths={wideEnough ? 2 : 1}
+              showOutsideDays
+              classNames={{
+                root: 'text-text-primary text-xs',
+                months: 'flex gap-4',
+                month_caption: 'text-sm font-semibold text-text-primary mb-2 text-center',
+                nav: 'flex items-center justify-between mb-1',
+                button_previous:
+                  'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
+                button_next:
+                  'p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors cursor-pointer',
+                weekdays: 'flex',
+                weekday: 'w-9 text-center text-[10px] font-medium text-text-muted py-1',
+                week: 'flex',
+                day: 'w-9 h-8 text-center text-xs',
+                day_button:
+                  'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
+                selected: 'bg-accent text-white rounded-md font-semibold',
+                range_start: 'bg-accent text-white rounded-l-md font-semibold',
+                range_end: 'bg-accent text-white rounded-r-md font-semibold',
+                range_middle: 'bg-accent/15 text-accent',
+                today: 'font-bold text-accent',
+                outside: 'text-text-muted/40',
+                disabled: 'text-text-muted/30',
+              }}
+            />
+          </div>
 
           {/* Footer with selection summary and actions */}
           <div className="flex items-center justify-between mt-2 pt-2 border-t border-border-primary">

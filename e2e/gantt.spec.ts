@@ -237,7 +237,7 @@ test.describe('GanttSmart GCP app', () => {
     // Assignee and date range live in the single Filter dropdown
     const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
     await filterButton.click();
-    await expect(page.getByRole('dialog', { name: 'Filters' })).toBeVisible();
+    await expect(page.getByRole('group', { name: 'Filters' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Date range' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Any assignee' }).click();
@@ -245,14 +245,25 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
     await expect(page.getByText('1/2', { exact: true })).toBeVisible();
-    await expect(filterButton).toHaveAttribute('title', '1 active filter');
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
 
-    // Escape closes the panel; the active chip row clears the filter
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Clear all' }).click();
+    // The open panel sits below the chip row, so "Clear all" stays clickable
+    const panel = page.getByRole('group', { name: 'Filters' });
+    const clearAll = page.getByRole('button', { name: 'Clear all' });
+    const panelBox = await panel.boundingBox();
+    const clearBox = await clearAll.boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(clearBox).not.toBeNull();
+    expect(clearBox!.y + clearBox!.height).toBeLessThanOrEqual(panelBox!.y);
+    await clearAll.click({ timeout: 5000 });
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
-    await expect(filterButton).toHaveAttribute('title', 'Filter tasks');
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks by assignee, status, date range and completion');
+
+    // Escape returns focus to the trigger and closes the panel
+    await expect(panel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(filterButton).toBeFocused();
 
     // Time scale toggle updates aria-pressed
     const weekBtn = page.getByRole('button', { name: 'week', exact: true });
@@ -742,7 +753,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('option', { name: 'Rejected', exact: true })).toHaveCount(0);
     await statusTrigger.click();
     await filterButton.click();
-    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
 
     // DetailPanel excludes dependencies to ignored duplicate issues and excludes duplicate sub-issues
     await page.locator('[data-task-bar="ENG-101"]').click();
@@ -967,7 +978,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Completed hidden')).toBeVisible();
 
     // The Filter button surfaces the active filter count while the panel is open
-    await expect(filterButton).toHaveAttribute('title', '1 active filter');
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
 
     await completedToggle.click();
     await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
@@ -975,12 +986,13 @@ test.describe('GanttSmart GCP app', () => {
 
     // Escape closes the panel and the bar no longer offers a grouping control
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'No grouping' })).toHaveCount(0);
 
-    // Arrows render with no grouping control able to suppress them
+    // Arrows still render with no grouping control left to suppress them
     await expect(exportTarget.locator('table')).toHaveCount(1);
     await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
+    await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
 
     expect(errors).toEqual([]);
   });
