@@ -5,6 +5,7 @@ import {
   DEFAULT_VISIBLE_COLUMNS,
   loadColumnWidths,
   loadVisibleColumns,
+  MAX_COLUMN_WIDTH,
   normalizeColumnWidths,
   normalizeVisibleColumns,
   saveColumnWidths,
@@ -61,6 +62,15 @@ describe('normalizeColumnWidths', () => {
   it('clamps widths to each column minimum', () => {
     expect(normalizeColumnWidths({ task: 10 }).task).toBe(220);
     expect(normalizeColumnWidths({ due: 0 }).due).toBe(70);
+  });
+
+  it('caps a column at the maximum width', () => {
+    expect(normalizeColumnWidths({ task: 1e9 }).task).toBe(MAX_COLUMN_WIDTH);
+  });
+
+  it('keeps widths for columns that are currently hidden', () => {
+    const stored = normalizeColumnWidths({ priority: 150 });
+    expect(stored.priority).toBe(150);
   });
 
   it('ignores unknown keys and non-numeric values', () => {

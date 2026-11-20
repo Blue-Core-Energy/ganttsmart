@@ -488,10 +488,12 @@ export default function GanttRow({
                   </span>
                 )}
                 {!showsColumn('progress') && subIssueProgress}
+                {/* Keep click-to-cycle reachable when the status column is hidden */}
+                {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
               </div>
               <div
                 className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-                style={{ maxWidth: colWidths.task - 60 }}
+                style={{ maxWidth: colWidths.task - 36 }}
                 title={task.title}
               >
                 {task.title}
@@ -578,6 +580,13 @@ export default function GanttRow({
           >
             <span className="truncate">{name}</span>
           </button>
+        ) : task.isExternal ? (
+          <span
+            className="inline-flex items-center max-w-full px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[10.5px] font-medium text-text-muted truncate"
+            title={`External issue · ${name}`}
+          >
+            <span className="truncate">{name}</span>
+          </span>
         ) : (
           <span className="block text-[11.5px] text-text-secondary truncate" title={name}>
             {name}

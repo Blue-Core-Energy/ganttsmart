@@ -21,6 +21,8 @@ async function captureAsDataUrl(element: HTMLElement): Promise<string> {
       width: element.scrollWidth,
       height: element.scrollHeight,
       backgroundColor: getComputedStyle(element).backgroundColor || '#09090b',
+      // Leave interactive-only affordances (e.g. the column picker) out of the image
+      filter: (node) => !(node instanceof HTMLElement && node.hasAttribute('data-export-hide')),
     });
     return dataUrl;
   } finally {

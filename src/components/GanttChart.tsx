@@ -107,6 +107,15 @@ export default function GanttChart({
   const [pickerOpen, setPickerOpen] = useState(false);
   const ganttRef = useRef<HTMLDivElement>(null);
   const baseWidthsRef = useRef<ColumnWidths>(colWidths);
+  /** Mirrors colWidths for the resize handlers, which persist on mouseup */
+  const liveWidthsRef = useRef<ColumnWidths>(colWidths);
+  liveWidthsRef.current = colWidths;
+
+  // Right-clicking any header toggles the picker, so a second right-click closes it
+  const togglePickerFromContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setPickerOpen((open) => !open);
+  }, []);
 
   const changeVisibleColumns = useCallback((next: ColumnKey[]) => {
     // Normalize up front so showing a column slots it into the canonical order
@@ -246,21 +255,21 @@ export default function GanttChart({
         if (!baseSet) {
           baseWidthsRef.current = { ...colWidths };
           baseSet = true;
-          // Reset on mouseup, and persist the width the drag settled on
+          // Reset on mouseup, and persist the width the drag settled on. The live
+          // widths come from a ref: saving inside a state updater would run twice
+          // under StrictMode.
           const resetBase = () => {
             baseSet = false;
             document.removeEventListener('mouseup', resetBase);
-            setColWidths((settled) => {
-              saveColumnWidths(settled);
-              return settled;
-            });
+            saveColumnWidths(liveWidthsRef.current);
           };
           document.addEventListener('mouseup', resetBase);
         }
-        setColWidths((prev) => ({
-          ...prev,
-          [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth),
-        }));
+        setColWidths((prev) => {
+          const next = { ...prev, [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth) };
+          liveWidthsRef.current = next;
+          return next;
+        });
       };
     },
     [colWidths],
@@ -623,11 +632,8 @@ export default function GanttChart({
                   key={key}
                   className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'}`}
                   style={{ width: colWidths[key], minWidth: getColumnDef(key).minWidth }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setPickerOpen(true);
-                  }}
-                  title="Right-click to choose columns"
+                  onContextMenu={togglePickerFromContextMenu}
+                  title={i === 0 ? 'Right-click any column header to choose columns' : undefined}
                 >
                   <span className="inline-flex items-center gap-1.5 max-w-full">
                     <span className="truncate">{getColumnDef(key).label}</span>
@@ -644,7 +650,10 @@ export default function GanttChart({
                   <ResizeHandle onResize={makeResizeHandler(key)} />
                 </th>
               ))}
-              <th className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5">
+              <th
+                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5"
+                onContextMenu={togglePickerFromContextMenu}
+              >
                 {/* Milestone band — flags sit above the calendar and act as drag handles */}
                 {milestonesInRange.length > 0 && (
                   <div className="relative h-[24px] border-b border-border-primary/50">

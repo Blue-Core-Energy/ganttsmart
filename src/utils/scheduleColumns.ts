@@ -29,10 +29,15 @@ export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['task', 'assignee', 'status
 
 export type ColumnWidths = Record<ColumnKey, number>;
 
+/** Upper bound for a single column, so a stale or hand-edited value can't bury the timeline */
+export const MAX_COLUMN_WIDTH = 600;
+
 export const DEFAULT_COLUMN_WIDTHS: ColumnWidths = Object.fromEntries(
   COLUMN_DEFS.map((c) => [c.key, c.defaultWidth]),
 ) as ColumnWidths;
 
+// Per-person display preference, shared by the app and the public shared view.
+// Last write wins across tabs, which is fine for a preference of this kind.
 const VISIBLE_KEY = 'gantt_columns';
 const WIDTHS_KEY = 'gantt_column_widths';
 
@@ -78,7 +83,7 @@ export function normalizeColumnWidths(widths: unknown): ColumnWidths {
     for (const [key, value] of Object.entries(widths as Record<string, unknown>)) {
       const def = defByKey.get(key as ColumnKey);
       if (!def || typeof value !== 'number' || !Number.isFinite(value)) continue;
-      merged[def.key] = Math.max(value, def.minWidth);
+      merged[def.key] = Math.min(Math.max(value, def.minWidth), MAX_COLUMN_WIDTH);
     }
   }
   return merged;

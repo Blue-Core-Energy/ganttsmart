@@ -36,6 +36,7 @@ function ColumnsIcon() {
 export default function ColumnPicker({ open, onOpenChange, visible, onChange }: Props) {
   const ref = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
   const close = useCallback(
@@ -45,6 +46,14 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
     },
     [onOpenChange],
   );
+
+  // Move focus into the menu on open, so Escape has somewhere sensible to return it
+  // even when the picker was opened by right-clicking a header
+  useEffect(() => {
+    if (!open) return;
+    const first = menuRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)');
+    first?.focus();
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +75,8 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
     onChange(visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key]);
   };
 
+  const optionalVisibleCount = COLUMN_DEFS.filter((d) => !d.required && visible.includes(d.key)).length;
+
   return (
     <span className="relative inline-flex" ref={ref}>
       <button
@@ -76,7 +87,8 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
         aria-controls={open ? menuId : undefined}
         aria-label="Choose columns"
         title="Choose columns"
-        className={`inline-flex items-center justify-center w-5 h-5 rounded transition-colors cursor-pointer hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+        data-export-hide
+        className={`inline-flex items-center justify-center w-5 h-5 rounded transition-colors cursor-pointer print:hidden hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
           open ? 'text-accent' : 'text-text-muted/70'
         }`}
       >
@@ -85,6 +97,7 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
 
       {open && (
         <div
+          ref={menuRef}
           id={menuId}
           role="group"
           aria-label="Columns"
@@ -92,18 +105,28 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
         >
           {COLUMN_DEFS.map((def) => {
             const checked = visible.includes(def.key);
+            // The task column alone is unreadable, so the last optional column holds
+            // rather than silently snapping the whole set back to the defaults
+            const isLastOptional = checked && !def.required && optionalVisibleCount === 1;
+            const locked = def.required || isLastOptional;
             return (
               <label
                 key={def.key}
                 className={`flex items-center gap-2.5 px-3 py-1.5 text-xs font-medium text-text-primary ${
-                  def.required ? 'opacity-50' : 'cursor-pointer hover:bg-bg-hover'
+                  locked ? 'opacity-50' : 'cursor-pointer hover:bg-bg-hover'
                 }`}
-                title={def.required ? 'The task column is always shown' : undefined}
+                title={
+                  def.required
+                    ? 'The task column is always shown'
+                    : isLastOptional
+                      ? 'Keep at least one column besides Task'
+                      : undefined
+                }
               >
                 <input
                   type="checkbox"
                   checked={checked}
-                  disabled={def.required}
+                  disabled={locked}
                   onChange={() => toggle(def.key)}
                   className="w-3.5 h-3.5 accent-accent cursor-pointer disabled:cursor-default"
                 />

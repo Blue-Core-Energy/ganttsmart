@@ -39,6 +39,7 @@
 - **Undo** — `Ctrl+Z` to revert any drag or status change
 - **Export** — PNG, PDF, or browser print
 - **Dark / Light / System** theme toggle
+- **Configurable columns** — Task, Assignee, Status and Due by default, with start date, priority, project, sub-issue progress and issue ID available from the picker (right-click any column header). Your choice and column widths are remembered
 - **Resizable columns** and **zoom controls** (`+` / `-`)
 - **Keyboard shortcuts** for power users
 

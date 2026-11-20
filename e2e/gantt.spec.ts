@@ -2735,6 +2735,27 @@ test.describe('GanttSmart GCP app', () => {
     await picker.getByRole('checkbox', { name: 'Assignee' }).uncheck();
     expect(await headerLabels()).not.toContain('ASSIGNEE');
     await picker.getByRole('checkbox', { name: 'Assignee' }).check();
+
+    // Hiding the status column keeps click-to-cycle reachable in the task cell
+    await picker.getByRole('checkbox', { name: 'Status' }).uncheck();
+    expect(await headerLabels()).not.toContain('STATUS');
+    await expect(page.locator('button[data-status-bubble="ENG-101"]')).toBeVisible();
+    await picker.getByRole('checkbox', { name: 'Status' }).check();
+
+    // The last optional column can't be hidden: that would leave only the task column
+    for (const label of ['Assignee', 'Status', 'Start date', 'Due date', 'Priority', 'Project', 'Sub-issue progress']) {
+      await picker.getByRole('checkbox', { name: label }).uncheck();
+    }
+    expect(await headerLabels()).toEqual(['TASK', 'ID']);
+    await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeDisabled();
+    await picker.getByRole('checkbox', { name: 'Due date' }).check();
+    await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeEnabled();
+
+    // Back to a full set for the resize and reload checks below
+    await page.getByRole('button', { name: 'Reset to defaults' }).click();
+    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress', 'Issue ID']) {
+      await picker.getByRole('checkbox', { name: label }).check();
+    }
     await page.keyboard.press('Escape');
 
     // Resizing works for a column that isn't shown by default
