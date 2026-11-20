@@ -2536,4 +2536,238 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+
+  test('shows configurable schedule columns with assignee and status by default', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: {
+                  nodes: [
+                    {
+                      id: 'ms-1',
+                      name: 'Beta Release',
+                      description: 'Initial milestone',
+                      targetDate: isoOffsetDays(10),
+                      sortOrder: 1,
+                      createdAt: '2026-01-01T00:00:00Z',
+                      updatedAt: '2026-01-02T00:00:00Z',
+                    },
+                  ],
+                },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: { id: 'ms-1' },
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Pressure test rig',
+                      description: `${startTagOffsetDays(1)}\nTest details`,
+                      dueDate: isoOffsetDays(9),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-1',
+                    identifier: 'ENG-101',
+                    relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'ENG-102' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-2',
+                    identifier: 'ENG-102',
+                    relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-101' } }] },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                  { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    const headers = page.locator('#gantt-export-target thead th');
+    const headerLabels = async () => (await headers.allInnerTexts()).slice(0, -1).map((t) => t.split('\n')[0]);
+
+    // Default columns: task, assignee, status, due date — priority is no longer shown
+    expect(await headerLabels()).toEqual(['TASK', 'ASSIGNEE', 'STATUS', 'DUE']);
+
+    // Assignee and status are real columns, not just icons in the task cell
+    const assigneeCell = page.locator('tr[data-task-id="ENG-101"] td').nth(1);
+    await expect(assigneeCell).toContainText('Andrew Phillips');
+    const statusCell = page.locator('tr[data-task-id="ENG-101"] td').nth(2);
+    await expect(statusCell).toContainText('In Progress');
+    await expect(statusCell.locator('[data-status-bubble="ENG-101"]')).toBeVisible();
+
+    // Right-clicking a header opens the picker, as does its header button
+    await headers.nth(1).click({ button: 'right' });
+    const picker = page.getByRole('group', { name: 'Columns' });
+    await expect(picker).toBeVisible();
+    await expect(picker.getByRole('checkbox', { name: 'Task' })).toBeDisabled();
+    await expect(picker.getByRole('checkbox', { name: 'Task' })).toBeChecked();
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+
+    const pickerButton = page.getByRole('button', { name: 'Choose columns' });
+    await pickerButton.click();
+    await expect(picker).toBeVisible();
+
+    // Every optional column can be shown, and lands in the canonical order
+    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress', 'Issue ID']) {
+      await picker.getByRole('checkbox', { name: label }).check();
+    }
+    expect(await headerLabels()).toEqual([
+      'TASK',
+      'ASSIGNEE',
+      'STATUS',
+      'START',
+      'DUE',
+      'PRIORITY',
+      'PROJECT',
+      'SUB-ISSUES',
+      'ID',
+    ]);
+    await expect(page.locator('tr[data-task-id="ENG-101"]')).toContainText('Demo Project');
+    await expect(page.locator('tr[data-task-id="ENG-101"] td').nth(8)).toContainText('ENG-101');
+
+    // ...and hidden again
+    await picker.getByRole('checkbox', { name: 'Assignee' }).uncheck();
+    expect(await headerLabels()).not.toContain('ASSIGNEE');
+    await picker.getByRole('checkbox', { name: 'Assignee' }).check();
+    await page.keyboard.press('Escape');
+
+    // Resizing works for a column that isn't shown by default
+    const statusHeader = headers.nth(2);
+    const before = (await statusHeader.boundingBox())!;
+    await page.mouse.move(before.x + before.width - 2, before.y + before.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(before.x + before.width + 60, before.y + before.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const after = (await statusHeader.boundingBox())!;
+    expect(after.width).toBeGreaterThan(before.width + 40);
+
+    // The selection and widths survive a reload
+    await page.reload();
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    expect(await headerLabels()).toEqual([
+      'TASK',
+      'ASSIGNEE',
+      'STATUS',
+      'START',
+      'DUE',
+      'PRIORITY',
+      'PROJECT',
+      'SUB-ISSUES',
+      'ID',
+    ]);
+    expect((await headers.nth(2).boundingBox())!.width).toBeCloseTo(after.width, 0);
+
+    // Reset puts the defaults back
+    await page.getByRole('button', { name: 'Choose columns' }).click();
+    await page.getByRole('button', { name: 'Reset to defaults' }).click();
+    expect(await headerLabels()).toEqual(['TASK', 'ASSIGNEE', 'STATUS', 'DUE']);
+
+    expect(errors).toEqual([]);
+  });
 });

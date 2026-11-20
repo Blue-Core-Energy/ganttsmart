@@ -281,6 +281,7 @@ function GanttView({
           externalTasksForViolations={externalTasks}
           allowExternalEdits={allowExternalEdits}
           onSelectProject={selectProject}
+          projectName={projectName}
         />
       </div>
 

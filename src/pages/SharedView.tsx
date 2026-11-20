@@ -263,6 +263,7 @@ export default function SharedView() {
           error=""
           dayWidth={effectiveDayWidth}
           timeScale={timeScale}
+          projectName={projectName}
         />
         <MilestonePanel />
         <Tooltip />
