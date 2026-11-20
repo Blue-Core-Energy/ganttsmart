@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { AppEnv } from '../app.js';
+import { describeError, log } from '../log.js';
 import type { BaselineRow, ChangeInput, Store, TransitionInput } from '../store/types.js';
 
 const CHANGES_LIMIT = 50;
@@ -93,7 +94,7 @@ export function historyRoutes(deps: { store: Store }): Hono<AppEnv> {
 
   routes.onError((err, c) => {
     if (err instanceof InvalidInput) return c.json({ error: err.message }, 400);
-    console.error('History request failed', err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error');
+    log.error('History request failed', { error: describeError(err) });
     return c.json({ error: 'internal error' }, 500);
   });
 

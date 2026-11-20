@@ -6,6 +6,7 @@ import type { Config } from './config.js';
 import { UnauthorizedError, type Identity } from './identity.js';
 import type { LinearOAuth } from './linear/oauth.js';
 import { createTokenService } from './linear/tokens.js';
+import { describeError, log } from './log.js';
 import { historyRoutes } from './routes/history.js';
 import { linearRoutes } from './routes/linear.js';
 import type { Store } from './store/types.js';
@@ -49,18 +50,6 @@ function staticFiles(root: string, cacheControl: string): MiddlewareHandler<AppE
   };
 }
 
-/** The error's message and its cause's code and message. Never includes the request or assertion. */
-function describeFailure(err: unknown): Record<string, unknown> {
-  if (!(err instanceof Error)) return { error: typeof err };
-  const out: Record<string, unknown> = { name: err.name, message: err.message };
-  const cause = err.cause;
-  if (cause instanceof Error) {
-    const code = (cause as { code?: unknown }).code;
-    out.cause = { name: cause.name, message: cause.message, ...(typeof code === 'string' ? { code } : {}) };
-  }
-  return out;
-}
-
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const { config, identify, store, oauth } = deps;
   const tokens = createTokenService({ store, oauth });
@@ -69,7 +58,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   // Anything a route does not handle itself is a JSON 500. Logs only the error's name, message and
   // cause code: never the stack, the request or any token.
   app.onError((err, c) => {
-    console.error('Request failed', describeFailure(err));
+    log.error('Request failed', { error: describeError(err) });
     return c.json({ error: 'internal error' }, 500);
   });
 
@@ -80,10 +69,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       identity = await identify(c.req.raw);
     } catch (err) {
       if (err instanceof UnauthorizedError) {
-        console.error('IAP identity check failed', describeFailure(err));
+        log.warn('IAP identity check failed', { error: describeError(err) });
         return c.json({ error: 'unauthorized' }, 401);
       }
-      console.error('IAP identity check errored', describeFailure(err));
+      log.error('IAP identity check errored', { error: describeError(err) });
       return c.json({ error: 'internal error' }, 500);
     }
     c.set('identity', identity);
