@@ -40,7 +40,7 @@
 - **Export** — PNG, PDF, or browser print
 - **Dark / Light / System** theme toggle
 - **Configurable columns** — Task, Assignee, Status and Due by default, with start date, priority, project, sub-issue progress and issue ID available from the picker (right-click any column header). Your choice and column widths are remembered
-- **Resizable columns** and **zoom controls** (`+` / `-`)
+- **Resizable columns** and **direct timeline zoom & pan** (Ctrl/Cmd+scroll or pinch to zoom, drag background to pan, or `+` / `-` keys) with automatic day / week / month granularity
 - **Keyboard shortcuts** for power users
 
 ---
@@ -83,7 +83,7 @@ ganttsmart/
 │   │   ├── DetailPanel   # Slide-out issue detail panel
 │   │   ├── FilterBar     # Search, project selector, and the Filter dropdown
 │   │   ├── ShareDialog   # Shareable link management
-│   │   └── ...           # AuthPage, Toolbar, Toast, etc.
+│   │   └── ...           # AuthPage, Toast, etc.
 │   ├── hooks/            # useAuth, useLinearData, useTheme
 │   ├── lib/              # Supabase client
 │   ├── pages/            # Landing, Callback, SharedView, NotFound

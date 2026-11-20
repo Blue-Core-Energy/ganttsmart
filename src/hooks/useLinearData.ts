@@ -16,9 +16,9 @@ import {
   updateMilestoneTargetDate,
 } from '@/api/linear';
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
-import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
-import type { Filters, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
+import type { Filters, Milestone, Project, Task, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
+import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
 import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
@@ -63,10 +63,13 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [lastSynced, setLastSynced] = useState('');
-  const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH);
-  const [timeScale, setTimeScaleState] = useState<TimeScale>(() => {
-    const s = localStorage.getItem('gantt_time_scale');
-    return s === 'week' || s === 'month' ? s : 'day';
+  const [dayWidth, setDayWidthState] = useState<number>(() => {
+    try {
+      const stored = Number(localStorage.getItem('gantt_day_width'));
+      return Number.isFinite(stored) && stored > 0 ? clampDayWidth(stored) : DEFAULT_DAY_WIDTH;
+    } catch {
+      return DEFAULT_DAY_WIDTH;
+    }
   });
   const [filters, setFilters] = useState<Filters>({
     assignee: '',
@@ -348,25 +351,23 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     }
   }, [selectedProjectId, loadIssues, loadProjectLinks]);
 
-  const zoomIn = useCallback(() => {
-    setDayWidth((w) => Math.min(w + 7, MAX_DAY_WIDTH));
+  /** Zoom is a single continuous px-per-day value; the header granularity follows it */
+  const setDayWidth = useCallback((next: number | ((current: number) => number)) => {
+    setDayWidthState((current) => {
+      const value = clampDayWidth(typeof next === 'function' ? next(current) : next);
+      try {
+        localStorage.setItem('gantt_day_width', String(value));
+      } catch {
+        // localStorage unavailable — the zoom still applies for this session
+      }
+      return value;
+    });
   }, []);
 
-  const zoomOut = useCallback(() => {
-    setDayWidth((w) => Math.max(w - 7, MIN_DAY_WIDTH));
-  }, []);
+  const zoomIn = useCallback(() => setDayWidth((w) => zoomDayWidth(w, ZOOM_STEP)), [setDayWidth]);
+  const zoomOut = useCallback(() => setDayWidth((w) => zoomDayWidth(w, 1 / ZOOM_STEP)), [setDayWidth]);
 
-  const setTimeScale = useCallback((scale: TimeScale) => {
-    setTimeScaleState(scale);
-    try {
-      localStorage.setItem('gantt_time_scale', scale);
-    } catch {
-      // localStorage unavailable — scale still applies for this session
-    }
-  }, []);
-
-  // Effective px-per-day: week/month views compress the axis
-  const effectiveDayWidth = dayWidth * TIME_SCALE_FACTORS[timeScale];
+  const timeScale = useMemo(() => deriveTimeScale(dayWidth), [dayWidth]);
 
   // Optimistic reschedule (due date) with rollback + undo.
   // Also handles "promoting" an unscheduled task: if the uuid lives in unscheduledTasks,
@@ -825,9 +826,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     error,
     lastSynced,
     dayWidth,
-    effectiveDayWidth,
+    setDayWidth,
     timeScale,
-    setTimeScale,
     filters,
     setFilters,
     selectProject,

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
-import type { Filters, Milestone, Task, TimeScale } from '@/types';
+import type { Filters, Milestone, Task } from '@/types';
+import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterActiveTasks, isIgnoredTask } from '@/utils/issues';
 import { filterTasks, isTaskDone, mergeUnifiedTasks } from '@/utils/tasks';
 
@@ -15,8 +15,7 @@ export function useSharedData(shareToken: string) {
   const [error, setError] = useState('');
   const [needsPassword, setNeedsPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
-  const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH);
-  const [timeScale, setTimeScale] = useState<TimeScale>('day');
+  const [dayWidth, setDayWidthState] = useState(DEFAULT_DAY_WIDTH);
   const [filters, setFilters] = useState<Filters>({
     assignee: '',
     status: '',
@@ -93,16 +92,15 @@ export function useSharedData(shareToken: string) {
     [fetchSharedData],
   );
 
-  const zoomIn = useCallback(() => {
-    setDayWidth((w) => Math.min(w + 7, MAX_DAY_WIDTH));
+  /** Zoom is a single continuous px-per-day value; the header granularity follows it */
+  const setDayWidth = useCallback((next: number | ((current: number) => number)) => {
+    setDayWidthState((current) => clampDayWidth(typeof next === 'function' ? next(current) : next));
   }, []);
 
-  const zoomOut = useCallback(() => {
-    setDayWidth((w) => Math.max(w - 7, MIN_DAY_WIDTH));
-  }, []);
+  const zoomIn = useCallback(() => setDayWidth((w) => zoomDayWidth(w, ZOOM_STEP)), [setDayWidth]);
+  const zoomOut = useCallback(() => setDayWidth((w) => zoomDayWidth(w, 1 / ZOOM_STEP)), [setDayWidth]);
 
-  // Effective px-per-day: week/month views compress the axis
-  const effectiveDayWidth = dayWidth * TIME_SCALE_FACTORS[timeScale];
+  const timeScale = useMemo(() => deriveTimeScale(dayWidth), [dayWidth]);
 
   useEffect(() => {
     if (shareToken) fetchSharedData();
@@ -123,9 +121,8 @@ export function useSharedData(shareToken: string) {
     passwordError,
     submitPassword,
     dayWidth,
-    effectiveDayWidth,
+    setDayWidth,
     timeScale,
-    setTimeScale,
     filters,
     setFilters,
     zoomIn,

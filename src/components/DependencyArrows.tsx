@@ -6,6 +6,9 @@ interface Props {
   tasks: Task[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   depViolations?: Map<string, string[]>;
+  /** Layout drivers — ensure arrows recompute on zoom or column changes even if table width stays viewport-padded */
+  dayWidth?: number;
+  fixedColsWidth?: number;
 }
 
 interface Arrow {
@@ -39,11 +42,13 @@ function ArrowPath({ arrow: a }: { arrow: Arrow }) {
   );
 }
 
-export default memo(function DependencyArrows({ tasks, containerRef, depViolations }: Props) {
+export default memo(function DependencyArrows({ tasks, containerRef, depViolations, dayWidth, fixedColsWidth }: Props) {
   const [arrows, setArrows] = useState<Arrow[]>([]);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   const computeArrows = useCallback(() => {
+    void dayWidth;
+    void fixedColsWidth;
     const container = containerRef.current;
     if (!container) return;
 
@@ -88,7 +93,7 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
 
     setArrows(newArrows);
     setSize({ width: container.scrollWidth, height: container.scrollHeight });
-  }, [tasks, containerRef, depViolations]);
+  }, [tasks, containerRef, depViolations, dayWidth, fixedColsWidth]);
 
   useEffect(() => {
     // Initial compute after paint

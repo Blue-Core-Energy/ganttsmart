@@ -1,8 +1,7 @@
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
-import { TIME_SCALES } from '@/types';
-import type { Task, TimeScale } from '@/types';
+import type { Task } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import type { FeedbackType } from '@/utils/feedback';
 import { isSafeUrl } from '@/utils/url';
@@ -19,11 +18,6 @@ interface Props {
   onRefresh: () => void;
   onDisconnectLinear: () => void | Promise<void>;
   onSignOut: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  dayWidth: number;
-  timeScale: TimeScale;
-  onTimeScaleChange: (scale: TimeScale) => void;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   projectId: string;
@@ -204,11 +198,6 @@ export default memo(function Header({
   onRefresh,
   onDisconnectLinear,
   onSignOut,
-  onZoomIn,
-  onZoomOut,
-  dayWidth,
-  timeScale,
-  onTimeScaleChange,
   theme,
   onThemeChange,
   projectId,
@@ -399,59 +388,6 @@ export default memo(function Header({
           )}
           <span className="hidden md:inline">Sync</span>
         </button>
-
-        {/* Time scale: Day | Week | Month */}
-        <div className="flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary p-0.5 gap-0.5 shrink-0">
-          {TIME_SCALES.map((s) => (
-            <button
-              key={s}
-              onClick={() => onTimeScaleChange(s)}
-              className={`px-1.5 sm:px-2.5 h-[26px] rounded text-[11px] font-medium capitalize transition-colors cursor-pointer ${
-                timeScale === s
-                  ? 'bg-bg-card text-text-primary shadow-sm'
-                  : 'text-text-secondary hover:text-text-primary'
-              }`}
-              title={`${s.charAt(0).toUpperCase() + s.slice(1)} view`}
-              aria-pressed={timeScale === s}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        {/* Zoom controls */}
-        <div className="hidden sm:flex items-center h-8 rounded-md bg-bg-hover/50 border border-border-primary shrink-0">
-          <button onClick={onZoomOut} className={iconBtn} title="Zoom out (−)" style={{ width: 28 }}>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <span className="text-[11px] text-text-muted w-7 text-center font-mono tabular-nums">
-            {Math.round(dayWidth)}
-          </span>
-          <button onClick={onZoomIn} className={iconBtn} title="Zoom in (+)" style={{ width: 28 }}>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-        </div>
 
         {/* Export */}
         <div className="relative" ref={exportRef}>

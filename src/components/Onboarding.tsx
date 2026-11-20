@@ -29,9 +29,9 @@ const steps = [
     tip: 'Hover over bars to see full details in a tooltip.',
   },
   {
-    title: 'Zoom & Export',
+    title: 'Zoom, Pan & Export',
     description:
-      'Use the + / − buttons (or keyboard shortcuts) to zoom the timeline. Export your Gantt chart as PNG or PDF for meetings.',
+      'Hold Ctrl/Cmd + scroll (or pinch) anywhere on the chart to zoom, and drag the empty timeline background to pan. Export your Gantt chart as PNG or PDF for meetings.',
     tip: 'Press R to refresh, + / − to zoom.',
   },
 ];
