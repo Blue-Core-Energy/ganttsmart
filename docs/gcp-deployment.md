@@ -650,6 +650,253 @@ Do every check. Use a normal browser window for your Bluecore account and a priv
 
 ---
 
+## Step 13: Set up monitoring and alerts
+
+**What this does:** creates an email notification channel and three Cloud Monitoring alerts so IT is notified if GanttSmart goes unreachable, starts returning 5xx responses, or logs server `ERROR`s.
+
+Because IAP stops unauthenticated requests before they reach Cloud Run, do **not** add an unauthenticated `/healthz` bypass endpoint. Instead, combine Cloud Run metric and log-based alerts with an HTTPS uptime check that treats IAP's `302` redirect to Google sign-in as healthy ([Cloud Run monitoring](https://cloud.google.com/run/docs/monitoring)).
+
+### 13a. Enable Monitoring and create an email notification channel
+
+```bash
+source ~/ganttsmart-vars.sh
+gcloud services enable monitoring.googleapis.com
+```
+
+Replace `it@bluecore.energy` with the email address that should receive alerts, then create the notification channel. (If `gcloud beta` asks to install the `beta` component, answer `y`, or install `google-cloud-cli-beta` as in step 7.)
+
+```bash
+cat > /tmp/ganttsmart-email-channel.json <<'EOF'
+{
+  "type": "email",
+  "displayName": "GanttSmart IT Alerts",
+  "description": "Email notifications for GanttSmart outages and errors",
+  "enabled": true,
+  "labels": {
+    "email_address": "it@bluecore.energy"
+  }
+}
+EOF
+
+gcloud beta monitoring channels create --channel-content-from-file=/tmp/ganttsmart-email-channel.json
+export ALERT_CHANNEL=$(gcloud beta monitoring channels list --filter='displayName="GanttSmart IT Alerts"' --format='value(name)' | head -n1)
+echo "export ALERT_CHANNEL=$ALERT_CHANNEL" >> ~/ganttsmart-vars.sh
+echo $ALERT_CHANNEL
+```
+
+You should see `projects/.../notificationChannels/<number>`.
+
+### 13b. Alert on Cloud Run 5xx errors
+
+Triggers when `ganttsmart` in `us-west2` returns more than 3 `5xx` responses per minute sustained for 60 seconds (using `run.googleapis.com/request_count`):
+
+```bash
+cat <<'EOF' | sed "s|__SERVICE__|$SERVICE|g; s|__REGION__|$REGION|g; s|__ALERT_CHANNEL__|$ALERT_CHANNEL|g" > /tmp/ganttsmart-5xx-alert.json
+{
+  "displayName": "GanttSmart: Cloud Run 5xx errors",
+  "documentation": {
+    "content": "Cloud Run service `__SERVICE__` in `__REGION__` returned more than 3 5xx responses in 1 minute. Check Cloud Logging for `severity>=ERROR` and inspect recent revisions.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Cloud Run 5xx count > 3 in 60s",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"__SERVICE__\" AND resource.labels.location=\"__REGION__\" AND metric.type=\"run.googleapis.com/request_count\" AND metric.labels.response_code_class=\"5xx\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": [
+              "resource.label.service_name"
+            ]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 3,
+        "duration": "60s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "__ALERT_CHANNEL__"
+  ]
+}
+EOF
+
+gcloud monitoring policies create --policy-from-file=/tmp/ganttsmart-5xx-alert.json
+```
+
+### 13c. Alert on server `ERROR` logs (log-based metric)
+
+The server logs structured JSON with Cloud Logging `severity`: normal startup/shutdown is `INFO`, rejected IAP assertions (`401`) are `WARNING`, and unexpected 500s or Linear relay failures are `ERROR`. Creating a log-based metric on `severity>=ERROR` alerts on real failures without noise from invalid IAP tokens:
+
+```bash
+gcloud logging metrics create ganttsmart_server_errors \
+  --description="GanttSmart server ERROR log entries" \
+  --log-filter="resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"$SERVICE\" AND severity>=ERROR"
+```
+
+Attach a Cloud Monitoring alert policy to `logging.googleapis.com/user/ganttsmart_server_errors`:
+
+```bash
+cat <<'EOF' | sed "s|__SERVICE__|$SERVICE|g; s|__ALERT_CHANNEL__|$ALERT_CHANNEL|g" > /tmp/ganttsmart-error-log-alert.json
+{
+  "displayName": "GanttSmart: Server ERROR logs",
+  "documentation": {
+    "content": "Server logged at least one `ERROR` entry in `__SERVICE__`. Run `gcloud logging read 'resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"__SERVICE__\" AND severity>=ERROR' --limit=20` to inspect.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Server ERROR log count > 0 in 60s",
+      "conditionThreshold": {
+        "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"__SERVICE__\" AND metric.type=\"logging.googleapis.com/user/ganttsmart_server_errors\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "60s",
+            "perSeriesAligner": "ALIGN_DELTA",
+            "crossSeriesReducer": "REDUCE_SUM",
+            "groupByFields": [
+              "resource.label.service_name"
+            ]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 0,
+        "duration": "0s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "__ALERT_CHANNEL__"
+  ]
+}
+EOF
+
+gcloud monitoring policies create --policy-from-file=/tmp/ganttsmart-error-log-alert.json
+```
+
+### 13d. HTTPS uptime check (IAP-aware) and SSL certificate expiry
+
+Metric and log alerts only fire when users are sending requests. An HTTPS uptime check catches DNS, load balancer, or certificate failures even when nobody is actively using the app — without bypassing IAP, by treating IAP's `302` redirect to Google sign-in as healthy:
+
+```bash
+gcloud monitoring uptime create "GanttSmart HTTPS (via IAP)" \
+  --resource-type=uptime-url \
+  --resource-labels=host=$DOMAIN,project_id=$PROJECT_ID \
+  --protocol=https \
+  --path=/app \
+  --status-codes=302 \
+  --validate-ssl=true \
+  --period=5 \
+  --timeout=10
+
+export UPTIME_CHECK_ID=$(gcloud monitoring uptime list-configs --filter='displayName="GanttSmart HTTPS (via IAP)"' --format='value(name.basename())' | head -n1)
+echo "export UPTIME_CHECK_ID=$UPTIME_CHECK_ID" >> ~/ganttsmart-vars.sh
+echo $UPTIME_CHECK_ID
+```
+
+Create an alerting policy that fires when more than one probe region fails for 5 minutes or the TLS certificate has fewer than 15 days remaining:
+
+```bash
+cat <<'EOF' | sed "s|__DOMAIN__|$DOMAIN|g; s|__UPTIME_CHECK_ID__|$UPTIME_CHECK_ID|g; s|__ALERT_CHANNEL__|$ALERT_CHANNEL|g" > /tmp/ganttsmart-uptime-alert.json
+{
+  "displayName": "GanttSmart: Uptime check or SSL cert",
+  "documentation": {
+    "content": "HTTPS uptime check `__UPTIME_CHECK_ID__` for `https://__DOMAIN__/app` failed across multiple regions (expected HTTP 302 from IAP) or the TLS certificate expires within 15 days.",
+    "mimeType": "text/markdown"
+  },
+  "combiner": "OR",
+  "conditions": [
+    {
+      "displayName": "Uptime check failed from > 1 region",
+      "conditionThreshold": {
+        "filter": "resource.type=\"uptime_url\" AND metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.labels.check_id=\"__UPTIME_CHECK_ID__\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "1200s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+            "groupByFields": [
+              "resource.label.*"
+            ]
+          }
+        ],
+        "comparison": "COMPARISON_GT",
+        "thresholdValue": 1,
+        "duration": "300s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "displayName": "TLS certificate expires in < 15 days",
+      "conditionThreshold": {
+        "filter": "resource.type=\"uptime_url\" AND metric.type=\"monitoring.googleapis.com/uptime_check/time_until_ssl_cert_expires\" AND metric.labels.check_id=\"__UPTIME_CHECK_ID__\"",
+        "aggregations": [
+          {
+            "alignmentPeriod": "1200s",
+            "perSeriesAligner": "ALIGN_NEXT_OLDER",
+            "crossSeriesReducer": "REDUCE_MEAN",
+            "groupByFields": [
+              "resource.label.*"
+            ]
+          }
+        ],
+        "comparison": "COMPARISON_LT",
+        "thresholdValue": 15,
+        "duration": "300s",
+        "trigger": {
+          "count": 1
+        }
+      }
+    }
+  ],
+  "notificationChannels": [
+    "__ALERT_CHANNEL__"
+  ]
+}
+EOF
+
+gcloud monitoring policies create --policy-from-file=/tmp/ganttsmart-uptime-alert.json
+```
+
+### 13e. Check and test notifications
+
+Verify the metric, uptime check, and all three alerting policies exist:
+
+```bash
+gcloud logging metrics describe ganttsmart_server_errors
+gcloud monitoring uptime list-configs --format='table(displayName,name.basename(),period)'
+gcloud monitoring policies list --format='table(displayName,enabled,name)'
+```
+
+Confirm notification delivery end-to-end without affecting live users:
+
+1. **Test the email channel immediately:** in the Google Cloud console, open **Monitoring → Alerting → Edit notification channels**, click **⋮ → Send test notification** on **GanttSmart IT Alerts**, and confirm the email arrives.
+2. **Test the uptime alert with zero user impact:** temporarily require HTTP `200` instead of `302` on the uptime check (IAP still returns `302`, so probes fail while real users are unaffected), wait ~10-15 minutes for the alert email, then restore `302` and confirm the incident auto-resolves:
+
+   ```bash
+   gcloud monitoring uptime update $UPTIME_CHECK_ID --set-status-codes=200
+   # Wait for the alert email to arrive, then restore:
+   gcloud monitoring uptime update $UPTIME_CHECK_ID --set-status-codes=302
+   ```
+
+Note: because Cloud Run uses `--ingress=internal-and-cloud-load-balancing`, a `--no-traffic --tag=...` revision URL cannot be reached directly from the internet (`404`/`403` at ingress). If you also want to test the 5xx / `ERROR` log alerts live, do so during a brief low-traffic window by deploying a failing test revision and rolling traffic right back afterward (`gcloud run services update-traffic $SERVICE --region=$REGION --to-revisions=GOOD_REVISION_NAME=100`, then `--to-latest` once a healthy revision is restored).
+
+---
+
 ## Rotate the Linear client secret
 
 Do this if the secret may have leaked, or on a regular schedule.
@@ -757,6 +1004,12 @@ gcloud compute ssl-certificates delete ganttsmart-cert --global --quiet
 gcloud compute backend-services delete ganttsmart-backend --global --quiet
 gcloud compute network-endpoint-groups delete ganttsmart-neg --region=$REGION --quiet
 gcloud compute addresses delete ganttsmart-ip --global --quiet
+```
+
+If you set up step 13's uptime check, also delete or disable it so it doesn't alert once the load balancer is gone:
+
+```bash
+gcloud monitoring uptime delete $UPTIME_CHECK_ID --quiet
 ```
 
 ## Later improvements (not needed now)
