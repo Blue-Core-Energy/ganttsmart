@@ -29,7 +29,6 @@ function defaultFilters(overrides: Partial<Filters> = {}): Filters {
   return {
     assignee: '',
     status: '',
-    priorities: new Set([0, 1, 2, 3, 4]),
     search: '',
     dateFrom: '',
     dateTo: '',

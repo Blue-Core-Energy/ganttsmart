@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
-import type { Filters, GroupBy, Milestone, Task, TimeScale } from '@/types';
+import type { Filters, Milestone, Task, TimeScale } from '@/types';
 import { filterActiveTasks, isIgnoredTask } from '@/utils/issues';
 import { filterTasks, isTaskDone, mergeUnifiedTasks } from '@/utils/tasks';
-
-const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 
 export function useSharedData(shareToken: string) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -19,11 +17,9 @@ export function useSharedData(shareToken: string) {
   const [passwordError, setPasswordError] = useState('');
   const [dayWidth, setDayWidth] = useState(DEFAULT_DAY_WIDTH);
   const [timeScale, setTimeScale] = useState<TimeScale>('day');
-  const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [filters, setFilters] = useState<Filters>({
     assignee: '',
     status: '',
-    priorities: new Set(DEFAULT_PRIORITIES),
     search: '',
     dateFrom: '',
     dateTo: '',
@@ -130,10 +126,8 @@ export function useSharedData(shareToken: string) {
     effectiveDayWidth,
     timeScale,
     setTimeScale,
-    groupBy,
     filters,
     setFilters,
-    setGroupBy,
     zoomIn,
     zoomOut,
   };

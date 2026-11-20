@@ -62,7 +62,12 @@ export default function CustomDropdown({
     setQuery('');
     setHighlightedIndex(getInitialHighlightIndex(options, value, !required));
     setOpen(true);
-  }, [options, value, required]);
+    // Keyboard handling lives on this subtree, so focus has to be inside it.
+    // Safari and Firefox don't focus a <button> on click, which would otherwise
+    // leave Escape and the arrow keys inert after opening with the mouse.
+    // Searchable dropdowns focus their search input instead (see below).
+    if (!searchable) triggerRef.current?.focus();
+  }, [options, value, required, searchable]);
 
   const closeDropdown = useCallback((opts?: { returnFocus?: boolean }) => {
     setOpen(false);
@@ -107,6 +112,22 @@ export default function CustomDropdown({
       searchInputRef.current?.focus();
     }
   }, [open, searchable]);
+
+  // Escape also has to work when focus is not inside the dropdown: clicking a
+  // non-focusable element drops focus to <body>, and some browsers never focus
+  // a clicked button. When focus *is* inside, handleKeyDown below runs instead
+  // and stops the event from reaching any enclosing popover.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (ref.current?.contains(document.activeElement)) return;
+      e.stopPropagation();
+      closeDropdown({ returnFocus: true });
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, closeDropdown]);
 
   useEffect(() => {
     if (!open || activeHighlightIndex < 0) return;

@@ -234,6 +234,37 @@ test.describe('GanttSmart GCP app', () => {
     await search.fill('');
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
+    // Assignee and date range live in the single Filter dropdown
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
+    await expect(page.getByRole('group', { name: 'Filters' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Date range' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Any assignee' }).click();
+    await page.getByRole('option', { name: /Nate Jones/ }).click();
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible();
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
+
+    // The open panel sits below the chip row, so "Clear all" stays clickable
+    const panel = page.getByRole('group', { name: 'Filters' });
+    const clearAll = page.getByRole('button', { name: 'Clear all' });
+    const panelBox = await panel.boundingBox();
+    const clearBox = await clearAll.boundingBox();
+    expect(panelBox).not.toBeNull();
+    expect(clearBox).not.toBeNull();
+    expect(clearBox!.y + clearBox!.height).toBeLessThanOrEqual(panelBox!.y);
+    await clearAll.click({ timeout: 5000 });
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks by assignee, status, date range and completion');
+
+    // Escape returns focus to the trigger and closes the panel
+    await expect(panel).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(filterButton).toBeFocused();
+
     // Time scale toggle updates aria-pressed
     const weekBtn = page.getByRole('button', { name: 'week', exact: true });
     const dayBtn = page.getByRole('button', { name: 'day', exact: true });
@@ -446,12 +477,12 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('button', { name: 'Valve Actuator' })).toBeVisible();
     await expect(page.locator('[data-task-bar="VLV-501"]')).toBeVisible();
 
-    // Tab from the search input closes the dropdown and moves focus to the next control (Assignee)
+    // Tab from the search input closes the dropdown and moves focus to the next control (Filter)
     await page.getByRole('button', { name: 'Valve Actuator' }).click();
     await expect(projectSearch).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(projectSearch).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Assignee' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
 
     expect(errors).toEqual([]);
   });
@@ -711,13 +742,18 @@ test.describe('GanttSmart GCP app', () => {
     // FilterBar count pill reflects only the 2 active scheduled tasks
     await expect(page.getByText('2/2', { exact: true })).toBeVisible();
 
-    // Status filter excludes Duplicate / Rejected
-    await page.getByRole('button', { name: 'Status', exact: true }).click();
+    // Status filter, inside the Filter dropdown, excludes Duplicate / Rejected
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
+    const statusTrigger = page.getByRole('button', { name: 'Any status', exact: true });
+    await statusTrigger.click();
     await expect(page.getByRole('option', { name: 'In Progress', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Todo', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Duplicate', exact: true })).toHaveCount(0);
     await expect(page.getByRole('option', { name: 'Rejected', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Status', exact: true }).first().click();
+    await statusTrigger.click();
+    await filterButton.click();
+    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
 
     // DetailPanel excludes dependencies to ignored duplicate issues and excludes duplicate sub-issues
     await page.locator('[data-task-bar="ENG-101"]').click();
@@ -916,7 +952,38 @@ test.describe('GanttSmart GCP app', () => {
     await expect(completedStat).toBeVisible();
 
     // Dependency arrow renders between completed blocker ENG-100 and active ENG-101
-    await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
+    const arrow = exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]');
+    await expect(arrow).toHaveCount(1);
+
+    // ...routed with right angles only, and painted beneath the task bars
+    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
+    const arrowLayers = await page.evaluate(() => {
+      const svg = document.querySelector('#gantt-export-target svg path[data-arrow-source]')?.closest('svg');
+      const bar = document.querySelector('[data-task-bar="ENG-101"]');
+      return {
+        svg: svg ? Number(getComputedStyle(svg).zIndex) : null,
+        bar: bar ? Number(getComputedStyle(bar).zIndex) : null,
+      };
+    });
+    expect(arrowLayers.svg).not.toBeNull();
+    expect(arrowLayers.bar).not.toBeNull();
+    expect(arrowLayers.svg!).toBeLessThan(arrowLayers.bar!);
+
+    // ...and re-measured when zooming moves the bars, so it keeps landing on its target
+    const arrowEndsOnTarget = async () => {
+      const d = await arrow.getAttribute('d');
+      const endX = Number(d!.trim().split(/\s+/).at(-1));
+      const barBox = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!;
+      const innerBox = (await exportTarget.locator('> div').boundingBox())!;
+      return { endX, barLeft: barBox.x - innerBox.x, d };
+    };
+    const beforeZoom = await arrowEndsOnTarget();
+    expect(beforeZoom.endX).toBeCloseTo(beforeZoom.barLeft, 0);
+    await page.keyboard.press('+');
+    await expect.poll(async () => (await arrow.getAttribute('d')) !== beforeZoom.d, { timeout: 5000 }).toBe(true);
+    const afterZoom = await arrowEndsOnTarget();
+    expect(afterZoom.endX).toBeCloseTo(afterZoom.barLeft, 0);
+    await page.keyboard.press('-');
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
     const countBox = await page.getByText('3/3').boundingBox();
@@ -929,18 +996,9 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('(Completed)')).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // Grouping by status places completed task in its own status group inside the same table
-    await page.getByRole('button', { name: 'No grouping' }).click();
-    await page.getByRole('option', { name: 'Group by status' }).click();
-    await expect(exportTarget.locator('table')).toHaveCount(1);
-    await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
-    await expect(exportTarget.getByText('Done').first()).toBeVisible();
-
-    // Reset grouping to none
-    await page.getByRole('button', { name: 'Group by status' }).click();
-    await page.getByRole('option', { name: 'No grouping' }).click();
-
-    // Completed filter toggle hides and restores completed tasks without a separate section
+    // Completed toggle, inside the Filter dropdown, hides and restores completed tasks
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
     const completedToggle = page.getByRole('button', { name: 'Completed', exact: true });
     await expect(completedToggle).toHaveAttribute('aria-pressed', 'true');
     await completedToggle.click();
@@ -950,9 +1008,22 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('2/3')).toBeVisible();
     await expect(page.getByText('Completed hidden')).toBeVisible();
 
+    // The Filter button surfaces the active filter count while the panel is open
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
+
     await completedToggle.click();
     await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
     await expect(page.getByText('3/3')).toBeVisible();
+
+    // Escape closes the panel and the bar no longer offers a grouping control
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'No grouping' })).toHaveCount(0);
+
+    // Arrows still render with no grouping control left to suppress them
+    await expect(exportTarget.locator('table')).toHaveCount(1);
+    await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
+    await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
 
     expect(errors).toEqual([]);
   });
@@ -2065,6 +2136,10 @@ test.describe('GanttSmart GCP app', () => {
     const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');
     await expect(crossArrow).toHaveCount(1);
     await expect(crossArrow).toHaveAttribute('data-cross-project', 'true');
+    // Violated cross-project arrows keep their own color and marker, and route with right angles
+    await expect(crossArrow).toHaveAttribute('stroke', '#f97316');
+    await expect(crossArrow).toHaveAttribute('marker-end', 'url(#dep-arrow-warn)');
+    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
 
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);

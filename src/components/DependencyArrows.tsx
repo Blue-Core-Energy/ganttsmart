@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import type { Task } from '@/types';
+import { buildArrowPath } from '@/utils/dependencyArrows';
 
 interface Props {
   tasks: Task[];
@@ -19,29 +20,12 @@ interface Arrow {
 }
 
 function ArrowPath({ arrow: a }: { arrow: Arrow }) {
-  const dx = a.toX - a.fromX;
-  const dy = a.toY - a.fromY;
   const color = a.violated ? '#f97316' : a.crossProject ? '#8b5cf6' : '#ef4444';
   const markerId = a.violated ? 'dep-arrow-warn' : a.crossProject ? 'dep-arrow-cross' : 'dep-arrow';
 
-  let path: string;
-  if (Math.abs(dy) < 5 && dx > 0) {
-    // Nearly horizontal — straight line
-    path = `M ${a.fromX} ${a.fromY} L ${a.toX} ${a.toY}`;
-  } else if (dx > 30) {
-    // Normal: target bar starts after source bar ends
-    const cx = Math.min(Math.abs(dx) * 0.4, 60);
-    path = `M ${a.fromX} ${a.fromY} C ${a.fromX + cx} ${a.fromY}, ${a.toX - cx} ${a.toY}, ${a.toX} ${a.toY}`;
-  } else {
-    // Overlapping or reversed — route around with an S-curve
-    const loopOut = 40;
-    const midY = a.fromY + (a.toY - a.fromY) / 2;
-    path = `M ${a.fromX} ${a.fromY} C ${a.fromX + loopOut} ${a.fromY}, ${a.fromX + loopOut} ${midY}, ${(a.fromX + a.toX) / 2} ${midY} S ${a.toX - loopOut} ${a.toY}, ${a.toX} ${a.toY}`;
-  }
-
   return (
     <path
-      d={path}
+      d={buildArrowPath(a)}
       fill="none"
       stroke={color}
       strokeWidth={a.violated ? 2 : 1.5}
@@ -115,6 +99,11 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
 
     const observer = new ResizeObserver(computeArrows);
     observer.observe(container);
+    // The container is a block element, so its box stays the viewport width while
+    // the chart grows sideways. Observe the table too, otherwise zooming and
+    // switching time scale move the bars without recomputing the arrows.
+    const table = container.querySelector('table');
+    if (table) observer.observe(table);
     window.addEventListener('resize', computeArrows);
 
     return () => {
@@ -127,20 +116,48 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
   if (arrows.length === 0) return null;
 
   return (
+    // z-[1] keeps arrows under the task bars (z-[2]) while still painting over the
+    // today line, which shares z-[1] but comes earlier in the DOM
     <svg
-      className="absolute top-0 left-0 pointer-events-none z-[3]"
+      className="absolute top-0 left-0 pointer-events-none z-[1]"
       width={size.width}
       height={size.height}
       style={{ overflow: 'visible' }}
     >
+      {/* markerUnits="userSpaceOnUse" keeps every head 8px long regardless of stroke
+          width, so it always fits inside the arrow's final approach (ARROW_STUB) */}
       <defs>
-        <marker id="dep-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <marker
+          id="dep-arrow"
+          markerUnits="userSpaceOnUse"
+          markerWidth="8"
+          markerHeight="6"
+          refX="7"
+          refY="3"
+          orient="auto"
+        >
           <polygon points="0 0, 8 3, 0 6" fill="#ef4444" opacity="0.8" />
         </marker>
-        <marker id="dep-arrow-warn" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <marker
+          id="dep-arrow-warn"
+          markerUnits="userSpaceOnUse"
+          markerWidth="8"
+          markerHeight="6"
+          refX="7"
+          refY="3"
+          orient="auto"
+        >
           <polygon points="0 0, 8 3, 0 6" fill="#f97316" opacity="0.9" />
         </marker>
-        <marker id="dep-arrow-cross" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <marker
+          id="dep-arrow-cross"
+          markerUnits="userSpaceOnUse"
+          markerWidth="8"
+          markerHeight="6"
+          refX="7"
+          refY="3"
+          orient="auto"
+        >
           <polygon points="0 0, 8 3, 0 6" fill="#8b5cf6" opacity="0.85" />
         </marker>
       </defs>

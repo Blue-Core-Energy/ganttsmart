@@ -54,8 +54,6 @@ export interface WorkflowState {
   position: number;
 }
 
-export type GroupBy = 'none' | 'assignee' | 'priority' | 'status';
-
 export const PRIORITY_MAP: Record<number, string> = {
   0: 'None',
   1: 'Urgent',
@@ -82,7 +80,6 @@ export const TIME_SCALE_FACTORS: Record<TimeScale, number> = {
 export interface Filters {
   assignee: string;
   status: string;
-  priorities: Set<number>;
   search: string;
   dateFrom: string;
   dateTo: string;

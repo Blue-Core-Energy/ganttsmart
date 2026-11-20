@@ -1,4 +1,4 @@
-import type { Filters, GroupBy, Task } from '@/types';
+import type { Filters, Task } from '@/types';
 
 /** Whether a task is considered completed (statusType 'completed' or has completedAt, excluding canceled). */
 export function isTaskDone(task: Pick<Task, 'statusType' | 'completedAt'>): boolean {
@@ -50,12 +50,11 @@ export function mergeUnifiedTasks(tasks: Task[], doneTasks?: Task[]): Task[] {
   return sortTasks(merged);
 }
 
-/** Filter tasks by priority, assignee, status, completed visibility, and search text. */
+/** Filter tasks by assignee, status, completed visibility, and search text. */
 export function filterTasks(tasks: Task[], filters: Filters): Task[] {
   const searchLower = filters.search.trim().toLowerCase();
   return tasks.filter((t) => {
     if (!filters.showCompleted && isTaskDone(t)) return false;
-    if (!filters.priorities.has(t.priorityVal)) return false;
     if (filters.assignee && t.assignee !== filters.assignee) return false;
     if (filters.status && t.status !== filters.status) return false;
     if (searchLower) {
@@ -64,25 +63,6 @@ export function filterTasks(tasks: Task[], filters: Filters): Task[] {
     }
     return true;
   });
-}
-
-/** Group tasks for the Gantt chart table. */
-export function groupTasks(tasks: Task[], groupBy: GroupBy): { key: string; label: string; tasks: Task[] }[] {
-  if (groupBy === 'none') return [{ key: '__all', label: '', tasks }];
-
-  const map = new Map<string, Task[]>();
-  for (const t of tasks) {
-    let key: string;
-    if (groupBy === 'assignee') key = t.assignee;
-    else if (groupBy === 'priority') key = t.priority;
-    else key = t.status;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(t);
-  }
-
-  return Array.from(map.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([key, grouped]) => ({ key, label: key, tasks: grouped }));
 }
 
 /**

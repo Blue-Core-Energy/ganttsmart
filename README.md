@@ -27,8 +27,7 @@
 
 - **Interactive Gantt timeline** with start dates, due dates, and drag-to-reschedule (writes back to Linear via API)
 - **Multi-project switching** across your entire Linear workspace
-- **Smart filtering** by assignee, status, priority — with instant search across all tasks
-- **Collapsible grouping** by assignee, priority, or status for workload visibility
+- **Smart filtering** by assignee, status, and date range from one Filter dropdown — with instant search across all tasks
 - **Dependency arrows** between blocking/blocked issues (uses Linear's native relations)
 - **Milestone markers** rendered as diamonds on the timeline
 - **Progress bars** showing sub-issue completion percentage on each Gantt bar
@@ -81,7 +80,7 @@ ganttsmart/
 │   │   ├── GanttChart    # Main chart with calendar, rows, dependency arrows
 │   │   ├── GanttRow      # Individual task row with drag handles
 │   │   ├── DetailPanel   # Slide-out issue detail panel
-│   │   ├── FilterBar     # Project/assignee/status/priority filters
+│   │   ├── FilterBar     # Search, project selector, and the Filter dropdown
 │   │   ├── ShareDialog   # Shareable link management
 │   │   └── ...           # AuthPage, Toolbar, Toast, etc.
 │   ├── hooks/            # useAuth, useLinearData, useTheme

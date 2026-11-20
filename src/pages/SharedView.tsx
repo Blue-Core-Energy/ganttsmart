@@ -43,10 +43,8 @@ export default function SharedView() {
     effectiveDayWidth,
     timeScale,
     setTimeScale,
-    groupBy,
     filters,
     setFilters,
-    setGroupBy,
     zoomIn,
     zoomOut,
   } = useSharedData(shareToken || '');
@@ -251,8 +249,6 @@ export default function SharedView() {
           onFiltersChange={setFilters}
           totalCount={tasks.length}
           filteredCount={filteredTasks.length}
-          groupBy={groupBy}
-          onGroupByChange={setGroupBy}
           hideProjectSelector
         />
 
@@ -267,7 +263,6 @@ export default function SharedView() {
           error=""
           dayWidth={effectiveDayWidth}
           timeScale={timeScale}
-          groupBy={groupBy}
         />
         <MilestonePanel />
         <Tooltip />
