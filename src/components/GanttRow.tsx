@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
-import type { ColumnWidths } from './GanttChart';
+import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import {
@@ -31,7 +31,10 @@ interface Props {
   today: Date;
   dayWidth: number;
   timeScale?: TimeScale;
+  visibleColumns: ColumnKey[];
   colWidths: ColumnWidths;
+  /** Name of the project being viewed, used by the Project column for local tasks */
+  projectName?: string;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
   onCycleStatus?: (taskUuid: string) => Promise<void>;
@@ -53,7 +56,9 @@ export default function GanttRow({
   today,
   dayWidth,
   timeScale = 'day',
+  visibleColumns,
   colWidths,
+  projectName,
   onReschedule,
   onRescheduleStart,
   onCycleStatus,
@@ -342,6 +347,275 @@ export default function GanttRow({
     return { left: ghostLeft, width: ghostWidth };
   })();
 
+  const showsColumn = (key: ColumnKey) => visibleColumns.includes(key);
+
+  /** Status dot, clickable to cycle workflow states when the row is interactive */
+  const statusBubble =
+    canCycleStatus && onCycleStatus ? (
+      <button
+        type="button"
+        data-status-bubble={task.id}
+        onClick={(e) => {
+          e.stopPropagation();
+          void onCycleStatus(task.uuid);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+        }}
+        className="group/status w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        title={`${task.status} — click to cycle`}
+        aria-label={`${task.status} — click to cycle status`}
+      >
+        <span
+          className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
+          style={{ backgroundColor: statusDotColor }}
+        />
+      </button>
+    ) : (
+      <span
+        data-status-bubble={task.id}
+        className="w-2 h-2 rounded-full shrink-0"
+        style={{ backgroundColor: statusDotColor }}
+        title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
+      />
+    );
+
+  const dueColor = isDone
+    ? 'var(--color-success)'
+    : overdue
+      ? 'var(--color-urgent)'
+      : daysLeft <= 7
+        ? 'var(--color-high)'
+        : 'var(--color-text-secondary)';
+
+  const issueIdLink = (
+    <a
+      href={isSafeUrl(task.url) ? task.url : '#'}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-mono text-[10px] text-text-muted tracking-[0.03em] hover:text-accent hover:underline shrink-0"
+      onClick={(e) => e.stopPropagation()}
+    >
+      {task.id}
+    </a>
+  );
+
+  const subIssueProgress = task.totalChildren > 0 && (
+    <span
+      className="text-[9px] font-mono text-text-muted shrink-0 tabular-nums"
+      title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}
+    >
+      {task.completedChildren}/{task.totalChildren}
+    </span>
+  );
+
+  function renderCell(key: ColumnKey) {
+    switch (key) {
+      case 'task':
+        return (
+          <div className="flex items-center gap-2.5 min-w-0">
+            {onReorder && (
+              <span
+                className={`shrink-0 -ml-2 text-text-muted opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity ${isRowDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
+                onMouseDown={() => setRowDragEnabled(true)}
+                onMouseUp={() => setRowDragEnabled(false)}
+                title="Drag to reorder (Alt+↑/↓)"
+                aria-hidden="true"
+              >
+                <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor">
+                  <circle cx="3" cy="2.5" r="1.2" />
+                  <circle cx="7" cy="2.5" r="1.2" />
+                  <circle cx="3" cy="7" r="1.2" />
+                  <circle cx="7" cy="7" r="1.2" />
+                  <circle cx="3" cy="11.5" r="1.2" />
+                  <circle cx="7" cy="11.5" r="1.2" />
+                </svg>
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                {/* The ID and sub-issue counts move out when they have a column of their own */}
+                {!showsColumn('id') && issueIdLink}
+                {task.isExternal &&
+                  !showsColumn('project') &&
+                  (task.projectId && onSelectProject ? (
+                    <button
+                      type="button"
+                      data-external-project-jump={task.projectId}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectProject(task.projectId!);
+                      }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
+                      title={`From ${task.projectName || 'External project'} — click to open project`}
+                    >
+                      <span className="truncate">{task.projectName || 'External'}</span>
+                    </button>
+                  ) : (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
+                      title={`External issue · ${task.projectName || 'No Project'}`}
+                    >
+                      {task.projectName || 'External'}
+                    </span>
+                  ))}
+                {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
+                  <svg
+                    width="10"
+                    height="10"
+                    viewBox="0 0 16 16"
+                    fill="currentColor"
+                    className="text-text-muted shrink-0"
+                    aria-label={
+                      (task.blocks.length > 0 ? `Blocks ${task.blocks.length}` : '') +
+                      (task.blocks.length > 0 && task.blockedBy.length > 0 ? ' · ' : '') +
+                      (task.blockedBy.length > 0 ? `Blocked by ${task.blockedBy.length}` : '')
+                    }
+                  >
+                    <path d="M4.5 2A2.5 2.5 0 002 4.5v1a.5.5 0 001 0v-1A1.5 1.5 0 014.5 3h1a.5.5 0 000-1h-1zm6 0a.5.5 0 000 1h1A1.5 1.5 0 0113 4.5v1a.5.5 0 001 0v-1A2.5 2.5 0 0011.5 2h-1zm-8 8a.5.5 0 01.5.5v1A1.5 1.5 0 004.5 13h1a.5.5 0 010 1h-1A2.5 2.5 0 012 11.5v-1a.5.5 0 01.5-.5zm11 0a.5.5 0 01.5.5v1a2.5 2.5 0 01-2.5 2.5h-1a.5.5 0 010-1h1a1.5 1.5 0 001.5-1.5v-1a.5.5 0 01.5-.5z" />
+                  </svg>
+                )}
+                {depViolation && depViolation.length > 0 && (
+                  <span
+                    className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
+                    title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
+                    </svg>
+                  </span>
+                )}
+                {!showsColumn('progress') && subIssueProgress}
+                {/* Keep click-to-cycle reachable when the status column is hidden */}
+                {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
+              </div>
+              <div
+                className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
+                style={{ maxWidth: colWidths.task - 36 }}
+                title={task.title}
+              >
+                {task.title}
+              </div>
+            </div>
+          </div>
+        );
+
+      case 'assignee':
+        return (
+          <div className="flex items-center gap-2 min-w-0" title={task.assignee}>
+            <Avatar name={task.assignee} size="sm" />
+            <span className="text-[11.5px] text-text-secondary truncate">{task.assignee}</span>
+          </div>
+        );
+
+      case 'status':
+        return (
+          <div className="flex items-center gap-2 min-w-0">
+            {statusBubble}
+            <span className="text-[11.5px] text-text-secondary truncate" title={task.status}>
+              {task.status}
+            </span>
+          </div>
+        );
+
+      case 'start':
+        return (
+          <span
+            className="text-[11.5px] font-mono tabular-nums text-text-secondary whitespace-nowrap"
+            title={hasStartDate ? formatDate(task.startDate!) : 'No start date — the bar starts on its due date'}
+          >
+            {hasStartDate ? formatDate(task.startDate!) : <span className="text-text-muted">—</span>}
+          </span>
+        );
+
+      case 'due':
+        return (
+          <span
+            className="text-[11.5px] font-mono tabular-nums whitespace-nowrap"
+            style={{ color: dueColor }}
+            title={
+              (hasStartDate ? `${formatDate(task.startDate!)} → ` : '') +
+              formatDate(task.due) +
+              (task.isDueImplicit ? ' (from project target)' : '') +
+              (isDone ? ' · Completed' : overdue ? ` · ${Math.abs(daysLeft)}d late` : ` · ${daysLeft}d left`)
+            }
+          >
+            {task.isDueImplicit ? (
+              <span className="italic opacity-75">~{formatDate(task.due)}</span>
+            ) : (
+              formatDate(task.due)
+            )}
+          </span>
+        );
+
+      case 'priority':
+        return (
+          <span
+            className={`inline-flex items-center gap-1.5 text-[11px] font-semibold py-[3px] pl-[7px] pr-2 rounded-full ${priorityBadgeClasses[pCls]}`}
+          >
+            <span
+              className="w-[6px] h-[6px] rounded-full shrink-0"
+              style={{ backgroundColor: idColors[pCls], boxShadow: `0 0 5px ${idColors[pCls]}` }}
+            />
+            {task.priority}
+          </span>
+        );
+
+      case 'project': {
+        const name = task.projectName || projectName || '';
+        if (!name) return <span className="text-[11.5px] text-text-muted">—</span>;
+        return task.isExternal && task.projectId && onSelectProject ? (
+          <button
+            type="button"
+            data-external-project-jump={task.projectId}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              onSelectProject(task.projectId!);
+            }}
+            className="inline-flex items-center max-w-full px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[10.5px] font-medium text-accent hover:bg-accent/20 transition-colors truncate cursor-pointer"
+            title={`From ${name} — click to open project`}
+          >
+            <span className="truncate">{name}</span>
+          </button>
+        ) : task.isExternal ? (
+          <span
+            className="inline-flex items-center max-w-full px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[10.5px] font-medium text-text-muted truncate"
+            title={`External issue · ${name}`}
+          >
+            <span className="truncate">{name}</span>
+          </span>
+        ) : (
+          <span className="block text-[11.5px] text-text-secondary truncate" title={name}>
+            {name}
+          </span>
+        );
+      }
+
+      case 'progress':
+        return task.totalChildren > 0 ? (
+          <div
+            className="flex items-center gap-1.5 min-w-0"
+            title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}
+          >
+            <span className="text-[11px] font-mono tabular-nums text-text-secondary shrink-0">
+              {task.completedChildren}/{task.totalChildren}
+            </span>
+            <span className="h-1 flex-1 min-w-[16px] rounded-full bg-bg-hover overflow-hidden">
+              <span className="block h-full rounded-full bg-accent" style={{ width: `${task.progress}%` }} />
+            </span>
+          </div>
+        ) : (
+          <span className="text-[11.5px] text-text-muted">—</span>
+        );
+
+      case 'id':
+        return issueIdLink;
+    }
+  }
+
   // Reorder drop indicator: box-shadow won't render on <tr>, so paint it on the cells
   const dropIndicatorCls =
     dropPosition === 'above'
@@ -437,186 +711,17 @@ export default function GanttRow({
         }
       }}
     >
-      {/* Task info */}
-      <td
-        className="h-[56px] px-[18px] border-b border-r border-border-primary align-middle overflow-hidden"
-        style={{ width: colWidths.task, minWidth: 220, maxWidth: colWidths.task }}
-      >
-        <div className="flex items-center gap-2.5 min-w-0">
-          {onReorder && (
-            <span
-              className={`shrink-0 -ml-2 text-text-muted opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity ${isRowDragging ? 'cursor-grabbing' : 'cursor-grab'}`}
-              onMouseDown={() => setRowDragEnabled(true)}
-              onMouseUp={() => setRowDragEnabled(false)}
-              title="Drag to reorder (Alt+↑/↓)"
-              aria-hidden="true"
-            >
-              <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor">
-                <circle cx="3" cy="2.5" r="1.2" />
-                <circle cx="7" cy="2.5" r="1.2" />
-                <circle cx="3" cy="7" r="1.2" />
-                <circle cx="7" cy="7" r="1.2" />
-                <circle cx="3" cy="11.5" r="1.2" />
-                <circle cx="7" cy="11.5" r="1.2" />
-              </svg>
-            </span>
-          )}
-          <Avatar name={task.assignee} size="sm" />
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5">
-              <a
-                href={isSafeUrl(task.url) ? task.url : '#'}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono text-[10px] text-text-muted tracking-[0.03em] hover:text-accent hover:underline shrink-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {task.id}
-              </a>
-              {task.isExternal &&
-                (task.projectId && onSelectProject ? (
-                  <button
-                    type="button"
-                    data-external-project-jump={task.projectId}
-                    onMouseDown={(e) => e.stopPropagation()}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSelectProject(task.projectId!);
-                    }}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
-                    title={`From ${task.projectName || 'External project'} — click to open project`}
-                  >
-                    <span className="truncate">{task.projectName || 'External'}</span>
-                  </button>
-                ) : (
-                  <span
-                    className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
-                    title={`External issue · ${task.projectName || 'No Project'}`}
-                  >
-                    {task.projectName || 'External'}
-                  </span>
-                ))}
-              {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 16 16"
-                  fill="currentColor"
-                  className="text-text-muted shrink-0"
-                  aria-label={
-                    (task.blocks.length > 0 ? `Blocks ${task.blocks.length}` : '') +
-                    (task.blocks.length > 0 && task.blockedBy.length > 0 ? ' · ' : '') +
-                    (task.blockedBy.length > 0 ? `Blocked by ${task.blockedBy.length}` : '')
-                  }
-                >
-                  <path d="M4.5 2A2.5 2.5 0 002 4.5v1a.5.5 0 001 0v-1A1.5 1.5 0 014.5 3h1a.5.5 0 000-1h-1zm6 0a.5.5 0 000 1h1A1.5 1.5 0 0113 4.5v1a.5.5 0 001 0v-1A2.5 2.5 0 0011.5 2h-1zm-8 8a.5.5 0 01.5.5v1A1.5 1.5 0 004.5 13h1a.5.5 0 010 1h-1A2.5 2.5 0 012 11.5v-1a.5.5 0 01.5-.5zm11 0a.5.5 0 01.5.5v1a2.5 2.5 0 01-2.5 2.5h-1a.5.5 0 010-1h1a1.5 1.5 0 001.5-1.5v-1a.5.5 0 01.5-.5z" />
-                </svg>
-              )}
-              {depViolation && depViolation.length > 0 && (
-                <span
-                  className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
-                  title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
-                >
-                  <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
-                  </svg>
-                </span>
-              )}
-              {task.totalChildren > 0 && (
-                <span
-                  className="text-[9px] font-mono text-text-muted shrink-0 tabular-nums"
-                  title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}
-                >
-                  {task.completedChildren}/{task.totalChildren}
-                </span>
-              )}
-              {/* Status dot — clickable to cycle through workflow states when interactive */}
-              {canCycleStatus && onCycleStatus ? (
-                <button
-                  type="button"
-                  data-status-bubble={task.id}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void onCycleStatus(task.uuid);
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-                  }}
-                  className="group/status w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer ml-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  title={`${task.status} — click to cycle`}
-                  aria-label={`${task.status} — click to cycle status`}
-                >
-                  <span
-                    className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
-                    style={{ backgroundColor: statusDotColor }}
-                  />
-                </button>
-              ) : (
-                <span
-                  data-status-bubble={task.id}
-                  className="w-2 h-2 rounded-full shrink-0 ml-auto"
-                  style={{ backgroundColor: statusDotColor }}
-                  title={
-                    task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status
-                  }
-                />
-              )}
-            </div>
-            <div
-              className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-              style={{ maxWidth: colWidths.task - 60 }}
-              title={task.title}
-            >
-              {task.title}
-            </div>
-          </div>
-        </div>
-      </td>
-
-      {/* Priority */}
-      <td
-        className="h-[56px] px-3 border-b border-r border-border-primary align-middle"
-        style={{ width: colWidths.priority, minWidth: 80 }}
-      >
-        <span
-          className={`inline-flex items-center gap-1.5 text-[11px] font-semibold py-[3px] pl-[7px] pr-2 rounded-full ${priorityBadgeClasses[pCls]}`}
+      {visibleColumns.map((key) => (
+        <td
+          key={key}
+          className={`h-[56px] border-b border-r border-border-primary align-middle overflow-hidden ${
+            key === 'task' ? 'px-[18px]' : 'px-3'
+          }`}
+          style={{ width: colWidths[key], minWidth: getColumnDef(key).minWidth, maxWidth: colWidths[key] }}
         >
-          <span
-            className="w-[6px] h-[6px] rounded-full shrink-0"
-            style={{
-              backgroundColor: idColors[pCls],
-              boxShadow: `0 0 5px ${idColors[pCls]}`,
-            }}
-          />
-          {task.priority}
-        </span>
-      </td>
-
-      {/* Due date */}
-      <td
-        className="h-[56px] px-3 text-[11.5px] whitespace-nowrap border-b border-r border-border-primary align-middle font-mono tabular-nums"
-        style={{
-          width: colWidths.due,
-          minWidth: 70,
-          color: isDone
-            ? 'var(--color-success)'
-            : overdue
-              ? 'var(--color-urgent)'
-              : daysLeft <= 7
-                ? 'var(--color-high)'
-                : 'var(--color-text-secondary)',
-        }}
-        title={
-          (hasStartDate ? `${formatDate(task.startDate!)} → ` : '') +
-          formatDate(task.due) +
-          (task.isDueImplicit ? ' (from project target)' : '') +
-          (isDone ? ' · Completed' : overdue ? ` · ${Math.abs(daysLeft)}d late` : ` · ${daysLeft}d left`)
-        }
-      >
-        {task.isDueImplicit ? <span className="italic opacity-75">~{formatDate(task.due)}</span> : formatDate(task.due)}
-      </td>
-
+          {renderCell(key)}
+        </td>
+      ))}
       {/* Chart */}
       <td className="h-[56px] p-0 relative border-b border-border-primary align-middle">
         <div className="relative h-full flex items-center" style={{ width: totalDays * dayWidth }}>

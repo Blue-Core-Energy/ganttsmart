@@ -4,7 +4,19 @@ import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
 import { buildArrowPath } from '@/utils/dependencyArrows';
+import {
+  getColumnDef,
+  loadColumnWidths,
+  loadVisibleColumns,
+  normalizeVisibleColumns,
+  saveColumnWidths,
+  saveVisibleColumns,
+  totalColumnWidth,
+  type ColumnKey,
+  type ColumnWidths,
+} from '@/utils/scheduleColumns';
 import { computeDepViolations } from '@/utils/tasks';
+import ColumnPicker from './ColumnPicker';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
 import { openMilestonePanel } from './milestonePanelStore';
@@ -30,16 +42,9 @@ interface Props {
   externalTasksForViolations?: Task[];
   allowExternalEdits?: boolean;
   onSelectProject?: (projectId: string) => void;
+  /** Name of the project being viewed, shown by the optional Project column */
+  projectName?: string;
 }
-
-export interface ColumnWidths {
-  task: number;
-  priority: number;
-  due: number;
-}
-
-const DEFAULT_WIDTHS: ColumnWidths = { task: 300, priority: 90, due: 78 };
-const MIN_WIDTHS: ColumnWidths = { task: 220, priority: 80, due: 70 };
 
 // Resize handle component
 function ResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
@@ -94,11 +99,31 @@ export default function GanttChart({
   externalTasksForViolations,
   allowExternalEdits = false,
   onSelectProject,
+  projectName,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
-  const [colWidths, setColWidths] = useState<ColumnWidths>(DEFAULT_WIDTHS);
+  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const ganttRef = useRef<HTMLDivElement>(null);
-  const baseWidthsRef = useRef<ColumnWidths>(DEFAULT_WIDTHS);
+  const baseWidthsRef = useRef<ColumnWidths>(colWidths);
+  /** Mirrors colWidths for the resize handlers, which persist on mouseup */
+  const liveWidthsRef = useRef<ColumnWidths>(colWidths);
+  liveWidthsRef.current = colWidths;
+
+  // Right-clicking any header toggles the picker, so a second right-click closes it
+  const togglePickerFromContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setPickerOpen((open) => !open);
+  }, []);
+
+  const changeVisibleColumns = useCallback((next: ColumnKey[]) => {
+    // Normalize up front so showing a column slots it into the canonical order
+    // immediately, rather than appending until the next reload
+    const normalized = normalizeVisibleColumns(next);
+    setVisibleColumns(normalized);
+    saveVisibleColumns(normalized);
+  }, []);
 
   // Milestone drag — live pixel offset for the flag + line, committed on mouseup
   const [milestoneDrag, setMilestoneDrag] = useState<{ id: string; delta: number } | null>(null);
@@ -224,23 +249,27 @@ export default function GanttChart({
 
   // Column resize handlers — store base on first drag, apply delta
   const makeResizeHandler = useCallback(
-    (col: keyof ColumnWidths) => {
+    (col: ColumnKey) => {
       let baseSet = false;
       return (delta: number) => {
         if (!baseSet) {
           baseWidthsRef.current = { ...colWidths };
           baseSet = true;
-          // Reset on mouseup
+          // Reset on mouseup, and persist the width the drag settled on. The live
+          // widths come from a ref: saving inside a state updater would run twice
+          // under StrictMode.
           const resetBase = () => {
             baseSet = false;
             document.removeEventListener('mouseup', resetBase);
+            saveColumnWidths(liveWidthsRef.current);
           };
           document.addEventListener('mouseup', resetBase);
         }
-        setColWidths((prev) => ({
-          ...prev,
-          [col]: Math.max(baseWidthsRef.current[col] + delta, MIN_WIDTHS[col]),
-        }));
+        setColWidths((prev) => {
+          const next = { ...prev, [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth) };
+          liveWidthsRef.current = next;
+          return next;
+        });
       };
     },
     [colWidths],
@@ -311,7 +340,7 @@ export default function GanttChart({
 
     const dataDays = daysBetween(chartStart, chartEnd);
 
-    const fixedCols = colWidths.task + colWidths.priority + colWidths.due;
+    const fixedCols = totalColumnWidth(visibleColumns, colWidths);
     const viewportWidth = typeof window !== 'undefined' ? window.innerWidth - 80 : 1200;
     const minDaysToFill = Math.ceil(Math.max(viewportWidth - fixedCols, 0) / dayWidth);
     let totalDays = Math.max(dataDays, minDaysToFill);
@@ -329,7 +358,7 @@ export default function GanttChart({
     }
 
     return { chartStart, totalDays };
-  }, [tasks, milestones, today, colWidths, dayWidth, dateFrom, dateTo, timeScale]);
+  }, [tasks, milestones, today, visibleColumns, colWidths, dayWidth, dateFrom, dateTo, timeScale]);
 
   // Calendar header (memoized): a top row of coarse groups (months, or years at month
   // scale) and a bottom row of cells matching the current time scale.
@@ -469,7 +498,7 @@ export default function GanttChart({
     [milestoneDrag, dayWidth],
   );
 
-  const fixedColsWidth = colWidths.task + colWidths.priority + colWidths.due;
+  const fixedColsWidth = totalColumnWidth(visibleColumns, colWidths);
 
   // Early returns — after all hooks
   if (loading) {
@@ -598,19 +627,33 @@ export default function GanttChart({
         <table className="border-collapse" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
           <thead ref={theadRef}>
             <tr>
-              <th className={`${thBase} px-[18px]`} style={{ width: colWidths.task, minWidth: MIN_WIDTHS.task }}>
-                Task
-                <ResizeHandle onResize={makeResizeHandler('task')} />
-              </th>
-              <th className={`${thBase} px-3`} style={{ width: colWidths.priority, minWidth: MIN_WIDTHS.priority }}>
-                Priority
-                <ResizeHandle onResize={makeResizeHandler('priority')} />
-              </th>
-              <th className={`${thBase} px-3`} style={{ width: colWidths.due, minWidth: MIN_WIDTHS.due }}>
-                Due
-                <ResizeHandle onResize={makeResizeHandler('due')} />
-              </th>
-              <th className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5">
+              {visibleColumns.map((key, i) => (
+                <th
+                  key={key}
+                  className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'}`}
+                  style={{ width: colWidths[key], minWidth: getColumnDef(key).minWidth }}
+                  onContextMenu={togglePickerFromContextMenu}
+                  title={i === 0 ? 'Right-click any column header to choose columns' : undefined}
+                >
+                  <span className="inline-flex items-center gap-1.5 max-w-full">
+                    <span className="truncate">{getColumnDef(key).label}</span>
+                    {/* Keyboard- and touch-reachable way to the same picker */}
+                    {i === 0 && (
+                      <ColumnPicker
+                        open={pickerOpen}
+                        onOpenChange={setPickerOpen}
+                        visible={visibleColumns}
+                        onChange={changeVisibleColumns}
+                      />
+                    )}
+                  </span>
+                  <ResizeHandle onResize={makeResizeHandler(key)} />
+                </th>
+              ))}
+              <th
+                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5"
+                onContextMenu={togglePickerFromContextMenu}
+              >
                 {/* Milestone band — flags sit above the calendar and act as drag handles */}
                 {milestonesInRange.length > 0 && (
                   <div className="relative h-[24px] border-b border-border-primary/50">
@@ -706,7 +749,9 @@ export default function GanttChart({
                 today={today}
                 dayWidth={dayWidth}
                 timeScale={timeScale}
+                visibleColumns={visibleColumns}
                 colWidths={colWidths}
+                projectName={projectName}
                 onReschedule={onReschedule}
                 onRescheduleStart={onRescheduleStart}
                 onCycleStatus={onCycleStatus}
