@@ -3005,13 +3005,51 @@ test.describe('GanttSmart GCP app', () => {
     const topHeaderRow = timelineHeader.locator('> div').first();
     await expect(topHeaderRow).toContainText(/^\s*\d{4}(\s*\d{4})*\s*$/);
 
+    // At minimum zoom, the floating narrow-bar label sits clear of the 20px-floor bar
+    const minZoomBar1 = (await bar1.boundingBox())!;
+    const minZoomLabel = page.locator('tr[data-task-id="ENG-101"] td:last-child > div > span.pointer-events-none');
+    await expect(minZoomLabel).toBeVisible();
+    const minZoomLabelBox = (await minZoomLabel.boundingBox())!;
+    expect(minZoomLabelBox.x).toBeGreaterThanOrEqual(minZoomBar1.x + minZoomBar1.width);
+
     // Zoom back in with '+' keyboard shortcut to return to day scale
     for (let i = 0; i < 12; i++) {
       await page.keyboard.press('+');
     }
     await expect(timelineHeader).toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
 
-    // 4. Dragging a task bar still reschedules it instead of panning
+    // 4. Ctrl+wheel over the fixed Task column does not jump scrollLeft, and clamping at max zoom leaves no stale anchor
+    await scroller.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    const taskCell = page.locator('tr[data-task-id="ENG-101"] td').first();
+    const taskBox = (await taskCell.boundingBox())!;
+    await page.mouse.move(taskBox.x + 80, taskBox.y + taskBox.height / 2);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -180);
+    await page.keyboard.up('Control');
+    expect(await scroller.evaluate((el) => el.scrollLeft)).toBe(0);
+
+    // Reach max zoom, fire another zoom-in wheel, then resize a column — scrollLeft stays 0
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press('+');
+    }
+    await page.mouse.move(anchorX, anchorY);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -240);
+    await page.keyboard.up('Control');
+    const firstHeader = page.locator('#gantt-export-target thead th').first();
+    const hBox = (await firstHeader.boundingBox())!;
+    await page.mouse.move(hBox.x + hBox.width - 2, hBox.y + hBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hBox.x + hBox.width + 20, hBox.y + hBox.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect(await scroller.evaluate((el) => el.scrollLeft)).toBe(0);
+
+    // Return near default zoom and verify dragging a task bar still reschedules instead of panning
+    for (let i = 0; i < 4; i++) {
+      await page.keyboard.press('-');
+    }
     await scroller.evaluate((el) => {
       el.scrollLeft = 0;
     });

@@ -53,7 +53,11 @@ export default function SharedView() {
   // Keyboard zoom
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if (e.defaultPrevented) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[role="dialog"]') || document.querySelector('[role="dialog"]')) return;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
       if (e.key === '+' || e.key === '=') zoomIn();
       if (e.key === '-' || e.key === '_') zoomOut();
     };

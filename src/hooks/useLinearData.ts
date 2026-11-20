@@ -64,8 +64,12 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   const [error, setError] = useState('');
   const [lastSynced, setLastSynced] = useState('');
   const [dayWidth, setDayWidthState] = useState<number>(() => {
-    const stored = Number(localStorage.getItem('gantt_day_width'));
-    return stored ? clampDayWidth(stored) : DEFAULT_DAY_WIDTH;
+    try {
+      const stored = Number(localStorage.getItem('gantt_day_width'));
+      return Number.isFinite(stored) && stored > 0 ? clampDayWidth(stored) : DEFAULT_DAY_WIDTH;
+    } catch {
+      return DEFAULT_DAY_WIDTH;
+    }
   });
   const [filters, setFilters] = useState<Filters>({
     assignee: '',

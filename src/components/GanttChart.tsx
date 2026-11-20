@@ -285,17 +285,24 @@ export default function GanttChart({
       e.preventDefault();
 
       const { dayWidth: currentDayWidth, fixedColsWidth: cols, chartStartMs } = geometryRef.current;
+      const nextDayWidth = zoomDayWidth(currentDayWidth, wheelZoomFactor(e.deltaY, e.deltaMode));
+      if (nextDayWidth === currentDayWidth) return;
+
       const pointerOffsetX = e.clientX - el.getBoundingClientRect().left;
-      const offsetDays = anchorDayOffset({
-        pointerOffsetX,
-        scrollLeft: el.scrollLeft,
-        fixedColsWidth: cols,
-        dayWidth: currentDayWidth,
-      });
-      // Anchor on the date rather than the offset: changing granularity can move the
-      // chart start, and the date under the pointer should still be the date under it
-      zoomAnchorRef.current = { anchorMs: dayOffsetToMs(chartStartMs, offsetDays), pointerOffsetX };
-      change((w) => zoomDayWidth(w, wheelZoomFactor(e.deltaY, e.deltaMode)));
+      // Only anchor when the pointer is over the timeline itself — zooming while
+      // hovering the left schedule columns shouldn't jump scrollLeft to pin day 0
+      if (el.scrollLeft + pointerOffsetX > cols) {
+        const offsetDays = anchorDayOffset({
+          pointerOffsetX,
+          scrollLeft: el.scrollLeft,
+          fixedColsWidth: cols,
+          dayWidth: currentDayWidth,
+        });
+        // Anchor on the date rather than the offset: changing granularity can move the
+        // chart start, and the date under the pointer should still be the date under it
+        zoomAnchorRef.current = { anchorMs: dayOffsetToMs(chartStartMs, offsetDays), pointerOffsetX };
+      }
+      change(() => nextDayWidth);
     };
 
     el.addEventListener('wheel', onWheel, { passive: false });

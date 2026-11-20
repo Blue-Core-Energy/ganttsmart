@@ -757,10 +757,10 @@ export default function GanttRow({
             />
           )}
 
-          {/* Bar wrapper — groups bar + connector dot for shared hover state */}
+          {/* Bar wrapper — sized to the 28px bar height so the vertical margin pans */}
           <div
-            className="group/bar absolute top-0 h-full"
-            style={{ left: displayBarLeft, width: displayBarWidth + 20 }}
+            className="group/bar absolute top-1/2 -translate-y-1/2 h-[28px]"
+            style={{ left: displayBarLeft, width: Math.max(displayBarWidth, 20) + 20 }}
           >
             {/* Main bar */}
             <div
@@ -857,7 +857,7 @@ export default function GanttRow({
               <div
                 className="absolute w-[12px] h-[12px] rounded-full bg-accent border-2 border-bg-card opacity-0 group-hover/bar:opacity-100 cursor-crosshair z-[5] transition-opacity hover:scale-125 top-1/2 -translate-y-1/2"
                 style={{
-                  left: displayBarWidth + 4,
+                  left: Math.max(displayBarWidth, 20) + 4,
                 }}
                 onMouseDown={(e) => {
                   e.preventDefault();
@@ -870,12 +870,12 @@ export default function GanttRow({
             )}
           </div>
 
-          {/* Floating label for narrow bars — positioned to the right of the bar */}
+          {/* Floating label for narrow bars — positioned to the right of the visual bar (min 20px) */}
           {barIsNarrow && !isAnyDrag && (
             <span
               className="absolute top-1/2 -translate-y-1/2 z-[3] text-[10px] font-semibold whitespace-nowrap pointer-events-none"
               style={{
-                left: displayBarLeft + displayBarWidth + 6,
+                left: displayBarLeft + Math.max(displayBarWidth, 20) + 6,
                 color: isDone ? 'var(--color-success)' : overdue ? 'var(--color-urgent)' : 'var(--color-text-muted)',
               }}
             >
