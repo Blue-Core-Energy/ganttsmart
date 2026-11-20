@@ -11,6 +11,7 @@ vi.mock('@/backend', () => ({
 }));
 
 import {
+  FEEDBACK_TARGET_QUERY,
   GANTT_LINK_LABEL,
   createFeedbackIssue,
   createProjectExternalLink,
@@ -633,6 +634,124 @@ describe('fetchIssues', () => {
   });
 });
 
+/**
+ * Estimate static GraphQL query complexity using Linear's documented rules:
+ * - scalar field: 0.1
+ * - object field: 1 + children
+ * - paginated connection (has `nodes { ... }`): `first` (default 50) * node cost
+ */
+function estimateLinearQueryComplexity(query: string): number {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < query.length) {
+    const ch = query[i];
+    if (/\s|,/.test(ch)) {
+      i++;
+      continue;
+    }
+    if (ch === '#') {
+      while (i < query.length && query[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '"') {
+      i++;
+      while (i < query.length && query[i] !== '"') {
+        if (query[i] === '\\') i++;
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (ch === '{' || ch === '}' || ch === '(' || ch === ')') {
+      tokens.push(ch);
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j < query.length && !/[\s,{}()#"]/.test(query[j])) j++;
+    tokens.push(query.slice(i, j));
+    i = j;
+  }
+
+  let pos = 0;
+  if (tokens[pos] === 'query' || tokens[pos] === 'mutation') {
+    pos++;
+    if (tokens[pos] && tokens[pos] !== '{' && tokens[pos] !== '(') pos++;
+    if (tokens[pos] === '(') {
+      let depth = 1;
+      pos++;
+      while (pos < tokens.length && depth > 0) {
+        if (tokens[pos] === '(') depth++;
+        else if (tokens[pos] === ')') depth--;
+        pos++;
+      }
+    }
+  }
+
+  function parseSelectionSet(): { cost: number; hasNodes: boolean; nodesCost: number } {
+    pos++; // consume '{'
+    let cost = 0;
+    let hasNodes = false;
+    let nodesCost = 0;
+
+    while (pos < tokens.length && tokens[pos] !== '}') {
+      const name = tokens[pos++];
+      // Skip alias if present (`alias: field`)
+      const fieldName = name.endsWith(':') ? tokens[pos++] : name;
+      let firstArg: number | null = null;
+
+      if (tokens[pos] === '(') {
+        let depth = 1;
+        pos++;
+        const argTokens: string[] = [];
+        while (pos < tokens.length && depth > 0) {
+          const t = tokens[pos++];
+          if (t === '(') depth++;
+          else if (t === ')') {
+            depth--;
+            if (depth === 0) break;
+          }
+          argTokens.push(t);
+        }
+        const firstMatch = /\bfirst:\s*(\d+)\b/.exec(argTokens.join(' '));
+        if (firstMatch) {
+          firstArg = Number(firstMatch[1]);
+        }
+      }
+
+      if (tokens[pos] === '{') {
+        const sub = parseSelectionSet();
+        if (fieldName === 'nodes') {
+          hasNodes = true;
+          nodesCost = 1 + sub.cost;
+        } else if (sub.hasNodes) {
+          cost += 1 + (firstArg ?? 50) * sub.nodesCost;
+        } else {
+          cost += 1 + sub.cost;
+        }
+      } else {
+        cost += 0.1;
+      }
+    }
+    pos++; // consume '}'
+    return { cost, hasNodes, nodesCost };
+  }
+
+  return Math.ceil(parseSelectionSet().cost);
+}
+
+describe('FEEDBACK_TARGET_QUERY complexity', () => {
+  it('stays well below Linear 10,000 single-query complexity limit without nested label connections', () => {
+    expect(FEEDBACK_TARGET_QUERY).not.toMatch(/\blabels\s*\(/);
+    expect(FEEDBACK_TARGET_QUERY).toContain('eqIgnoreCase: "feature"');
+    expect(FEEDBACK_TARGET_QUERY).toContain('eqIgnoreCase: "bug"');
+
+    const complexity = estimateLinearQueryComplexity(FEEDBACK_TARGET_QUERY);
+    expect(complexity).toBeLessThan(4000);
+    expect(complexity).toBeLessThan(10000);
+  });
+});
+
 describe('resolveFeedbackTarget', () => {
   beforeEach(() => {
     linearRequestMock.mockReset();
@@ -654,12 +773,6 @@ describe('resolveFeedbackTarget', () => {
                     id: '2e7232fc-d509-4471-9922-e5f8c89459d3',
                     key: 'IT',
                     name: 'IT',
-                    labels: {
-                      nodes: [
-                        { id: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013', name: 'Feature' },
-                        { id: '79878471-e70d-405d-83b7-a50dd8a853fe', name: 'Bug' },
-                      ],
-                    },
                   },
                 ],
               },
@@ -667,7 +780,22 @@ describe('resolveFeedbackTarget', () => {
           ],
         },
         teams: { nodes: [] },
-        issueLabels: { nodes: [] },
+        issueLabels: {
+          nodes: [
+            {
+              id: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013',
+              name: 'Feature',
+              isGroup: false,
+              team: { id: '2e7232fc-d509-4471-9922-e5f8c89459d3' },
+            },
+            {
+              id: '79878471-e70d-405d-83b7-a50dd8a853fe',
+              name: 'Bug',
+              isGroup: false,
+              team: { id: '2e7232fc-d509-4471-9922-e5f8c89459d3' },
+            },
+          ],
+        },
       }),
     );
 
@@ -686,7 +814,7 @@ describe('resolveFeedbackTarget', () => {
     });
   });
 
-  it('falls back to top-level IT team and workspace issueLabels when project teams lack labels', async () => {
+  it('falls back to top-level IT team and workspace issueLabels, ignoring groups and preferring team labels', async () => {
     linearRequestMock.mockResolvedValueOnce(
       jsonResponse({
         projects: {
@@ -702,15 +830,17 @@ describe('resolveFeedbackTarget', () => {
         },
         teams: {
           nodes: [
-            { id: 'team-eng', key: 'ENG', name: 'Engineering', labels: { nodes: [] } },
-            { id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } },
+            { id: 'team-eng', key: 'ENG', name: 'Engineering' },
+            { id: 'team-it', key: 'IT', name: 'IT' },
           ],
         },
         issueLabels: {
           nodes: [
-            { id: 'lbl-feat-ws', name: 'feature', team: null },
-            { id: 'lbl-bug-other', name: 'Bug', team: { id: 'team-eng' } },
-            { id: 'lbl-bug-it', name: 'Bug', team: { id: 'team-it' } },
+            { id: 'lbl-feat-group', name: 'Feature', isGroup: true, team: { id: 'team-it' } },
+            { id: 'lbl-feat-ws', name: 'feature', isGroup: false, team: null },
+            { id: 'lbl-bug-ws', name: 'Bug', isGroup: false, team: null },
+            { id: 'lbl-bug-other', name: 'Bug', isGroup: false, team: { id: 'team-eng' } },
+            { id: 'lbl-bug-it', name: 'Bug', isGroup: false, team: { id: 'team-it' } },
           ],
         },
       }),
@@ -741,9 +871,6 @@ describe('resolveFeedbackTarget', () => {
                     id: 'team-ops',
                     key: 'OPS',
                     name: 'Operations',
-                    labels: {
-                      nodes: [{ id: 'lbl-bug-ops', name: 'Bug' }],
-                    },
                   },
                 ],
               },
@@ -751,7 +878,9 @@ describe('resolveFeedbackTarget', () => {
           ],
         },
         teams: { nodes: [] },
-        issueLabels: { nodes: [] },
+        issueLabels: {
+          nodes: [{ id: 'lbl-bug-ops', name: 'Bug', isGroup: false, team: { id: 'team-ops' } }],
+        },
       }),
     );
 
@@ -773,7 +902,7 @@ describe('resolveFeedbackTarget', () => {
           nodes: [{ id: 'proj-other', name: 'Completely Different Project', teams: { nodes: [] } }],
         },
         teams: {
-          nodes: [{ id: 'team-eng', key: 'ENG', name: 'Engineering', labels: { nodes: [] } }],
+          nodes: [{ id: 'team-eng', key: 'ENG', name: 'Engineering' }],
         },
         issueLabels: { nodes: [] },
       }),
@@ -809,12 +938,6 @@ describe('createFeedbackIssue', () => {
                         id: 'team-it',
                         key: 'IT',
                         name: 'IT',
-                        labels: {
-                          nodes: [
-                            { id: 'lbl-feature', name: 'Feature' },
-                            { id: 'lbl-bug', name: 'Bug' },
-                          ],
-                        },
                       },
                     ],
                   },
@@ -822,7 +945,12 @@ describe('createFeedbackIssue', () => {
               ],
             },
             teams: { nodes: [] },
-            issueLabels: { nodes: [] },
+            issueLabels: {
+              nodes: [
+                { id: 'lbl-feature', name: 'Feature', isGroup: false, team: { id: 'team-it' } },
+                { id: 'lbl-bug', name: 'Bug', isGroup: false, team: { id: 'team-it' } },
+              ],
+            },
           });
         }
 
@@ -884,7 +1012,7 @@ describe('createFeedbackIssue', () => {
                   id: 'proj-gs',
                   name: 'GanttSmart',
                   teams: {
-                    nodes: [{ id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } }],
+                    nodes: [{ id: 'team-it', key: 'IT', name: 'IT' }],
                   },
                 },
               ],
@@ -941,7 +1069,7 @@ describe('createFeedbackIssue', () => {
             {
               id: 'proj-gs',
               name: 'GanttSmart',
-              teams: { nodes: [{ id: 'team-it', key: 'IT', name: 'IT', labels: { nodes: [] } }] },
+              teams: { nodes: [{ id: 'team-it', key: 'IT', name: 'IT' }] },
             },
           ],
         },

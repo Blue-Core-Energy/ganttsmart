@@ -875,7 +875,7 @@ function normalizeUrl(url: string | null | undefined): string {
   return (url || '').trim().replace(/\/+$/, '').toLowerCase();
 }
 
-const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
+export const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
   projects(first: 100) {
     nodes {
       id
@@ -887,13 +887,6 @@ const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
           id
           key
           name
-          labels(first: 100) {
-            nodes {
-              id
-              name
-              isGroup
-            }
-          }
         }
       }
     }
@@ -903,16 +896,17 @@ const FEEDBACK_TARGET_QUERY = `query FeedbackTarget {
       id
       key
       name
-      labels(first: 100) {
-        nodes {
-          id
-          name
-          isGroup
-        }
-      }
     }
   }
-  issueLabels(first: 100) {
+  issueLabels(
+    first: 100
+    filter: {
+      or: [
+        { name: { eqIgnoreCase: "feature" } }
+        { name: { eqIgnoreCase: "bug" } }
+      ]
+    }
+  ) {
     nodes {
       id
       name
@@ -973,12 +967,13 @@ export async function resolveFeedbackTarget(apiKey: string, env?: FeedbackEnv): 
     throw new FeedbackTargetNotFoundError(`Could not find team "${config.teamKey}" for project "${project.name}".`);
   }
 
-  // Merge labels from the top-level team list if the project-nested team omitted them, excluding label groups
+  // Prefer team-scoped labels over workspace-wide labels, excluding label groups
   const fullTeam = allTeams.find((t) => t.id === team.id);
   const teamLabels = [
     ...(team.labels?.nodes ?? []),
     ...(fullTeam?.labels?.nodes ?? []),
-    ...issueLabels.filter((l) => !l.team || l.team.id === team.id),
+    ...issueLabels.filter((l) => l.team?.id === team.id),
+    ...issueLabels.filter((l) => !l.team),
   ].filter((l) => !l.isGroup);
 
   const findLabelId = (name: string): string | undefined =>
