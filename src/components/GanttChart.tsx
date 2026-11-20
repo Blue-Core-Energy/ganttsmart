@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { GroupBy, Milestone, Task, TimeScale } from '@/types';
+import type { Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
-import { computeDepViolations, groupTasks } from '@/utils/tasks';
+import { computeDepViolations } from '@/utils/tasks';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
 import { openMilestonePanel } from './milestonePanelStore';
@@ -16,7 +16,6 @@ interface Props {
   error: string;
   dayWidth: number;
   timeScale?: TimeScale;
-  groupBy: GroupBy;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
   onCycleStatus?: (taskUuid: string) => Promise<void>;
@@ -82,7 +81,6 @@ export default function GanttChart({
   error,
   dayWidth,
   timeScale = 'day',
-  groupBy,
   onReschedule,
   onRescheduleStart,
   onCycleStatus,
@@ -96,7 +94,6 @@ export default function GanttChart({
   allowExternalEdits = false,
   onSelectProject,
 }: Props) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [colWidths, setColWidths] = useState<ColumnWidths>(DEFAULT_WIDTHS);
   const ganttRef = useRef<HTMLDivElement>(null);
@@ -228,15 +225,6 @@ export default function GanttChart({
 
   // Disconnect the header observer on unmount
   useEffect(() => () => headerObserverRef.current?.disconnect(), []);
-
-  const toggleCollapse = (key: string) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
 
   // Column resize handlers — store base on first drag, apply delta
   const makeResizeHandler = useCallback(
@@ -486,7 +474,6 @@ export default function GanttChart({
   );
 
   const fixedColsWidth = colWidths.task + colWidths.priority + colWidths.due;
-  const groups = useMemo(() => groupTasks(tasks, groupBy), [tasks, groupBy]);
 
   // Early returns — after all hooks
   if (loading) {
@@ -714,14 +701,10 @@ export default function GanttChart({
             </tr>
           </thead>
           <tbody>
-            {groups.map((group) => (
-              <GroupRows
-                key={group.key}
-                group={group}
-                groupBy={groupBy}
-                showHeader={groupBy !== 'none'}
-                isCollapsed={collapsed.has(group.key)}
-                onToggle={() => toggleCollapse(group.key)}
+            {tasks.map((task) => (
+              <GanttRow
+                key={task.id}
+                task={task}
                 chartStart={chartStart}
                 totalDays={totalDays}
                 today={today}
@@ -733,10 +716,10 @@ export default function GanttChart({
                 onCycleStatus={onCycleStatus}
                 onConnectStart={onCreateRelation ? handleConnectStart : undefined}
                 isConnecting={isConnecting}
-                depViolations={depViolations}
-                baselines={baselines}
+                depViolation={depViolations.get(task.id)}
+                baseline={baselines?.get(task.id)}
                 onReorder={onReorder}
-                allowExternalEdits={allowExternalEdits}
+                isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
               />
             ))}
@@ -763,7 +746,7 @@ export default function GanttChart({
           );
         })}
 
-        {groupBy === 'none' && <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations} />}
+        <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations} />
 
         {/* Connection line overlay — updated imperatively during drag for performance */}
         <svg
@@ -949,108 +932,5 @@ function UnscheduledRow({
         </button>
       </div>
     </div>
-  );
-}
-
-// Sub-component for group rows
-function GroupRows({
-  group,
-  groupBy,
-  showHeader,
-  isCollapsed,
-  onToggle,
-  chartStart,
-  totalDays,
-  today,
-  dayWidth,
-  timeScale,
-  colWidths,
-  onReschedule,
-  onRescheduleStart,
-  onCycleStatus,
-  onConnectStart,
-  isConnecting,
-  depViolations,
-  baselines,
-  onReorder,
-  allowExternalEdits,
-  onSelectProject,
-}: {
-  group: { key: string; label: string; tasks: Task[] };
-  groupBy: GroupBy;
-  showHeader: boolean;
-  isCollapsed: boolean;
-  onToggle: () => void;
-  chartStart: Date;
-  totalDays: number;
-  today: Date;
-  dayWidth: number;
-  timeScale: TimeScale;
-  colWidths: ColumnWidths;
-  onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
-  onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
-  onCycleStatus?: (taskUuid: string) => Promise<void>;
-  onConnectStart?: (taskId: string, e: React.MouseEvent) => void;
-  isConnecting?: boolean;
-  depViolations?: Map<string, string[]>;
-  baselines?: Map<string, TaskBaseline>;
-  onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
-  allowExternalEdits?: boolean;
-  onSelectProject?: (projectId: string) => void;
-}) {
-  return (
-    <>
-      {showHeader && (
-        <tr className="cursor-pointer hover:bg-accent/[0.04] transition-colors" onClick={onToggle}>
-          <td
-            colSpan={4}
-            className="py-2.5 px-4 border-b border-border-primary bg-bg-header/50 text-xs font-semibold text-text-secondary"
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{ transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              {groupBy === 'assignee' && <Avatar name={group.label} size="sm" />}
-              {group.label}
-              <span className="text-text-muted font-normal">({group.tasks.length})</span>
-            </div>
-          </td>
-        </tr>
-      )}
-      {!isCollapsed &&
-        group.tasks.map((task) => (
-          <GanttRow
-            key={task.id}
-            task={task}
-            chartStart={chartStart}
-            totalDays={totalDays}
-            today={today}
-            dayWidth={dayWidth}
-            timeScale={timeScale}
-            colWidths={colWidths}
-            onReschedule={onReschedule}
-            onRescheduleStart={onRescheduleStart}
-            onCycleStatus={onCycleStatus}
-            onConnectStart={onConnectStart}
-            isConnecting={isConnecting}
-            depViolation={depViolations?.get(task.id)}
-            baseline={baselines?.get(task.id)}
-            onReorder={onReorder}
-            isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
-            onSelectProject={onSelectProject}
-          />
-        ))}
-    </>
   );
 }

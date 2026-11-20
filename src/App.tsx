@@ -84,10 +84,8 @@ function GanttView({
     effectiveDayWidth,
     timeScale,
     setTimeScale,
-    groupBy,
     filters,
     setFilters,
-    setGroupBy,
     selectProject,
     refresh,
     zoomIn,
@@ -251,8 +249,6 @@ function GanttView({
         onFiltersChange={setFilters}
         totalCount={tasks.length}
         filteredCount={filteredTasks.length}
-        groupBy={groupBy}
-        onGroupByChange={setGroupBy}
         showBaselines={showBaselines}
         onShowBaselinesChange={handleShowBaselinesChange}
         externalCount={externalTasks.length}
@@ -273,7 +269,6 @@ function GanttView({
           error={error}
           dayWidth={effectiveDayWidth}
           timeScale={timeScale}
-          groupBy={groupBy}
           onReschedule={rescheduleWithHistory}
           onRescheduleStart={rescheduleStartWithHistory}
           onCycleStatus={cycleStatusWithHistory}

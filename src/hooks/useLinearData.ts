@@ -17,13 +17,12 @@ import {
 } from '@/api/linear';
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
 import { DEFAULT_DAY_WIDTH, MAX_DAY_WIDTH, MIN_DAY_WIDTH, TIME_SCALE_FACTORS } from '@/types';
-import type { Filters, GroupBy, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
+import type { Filters, Milestone, Project, Task, TimeScale, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
 import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
-const DEFAULT_PRIORITIES = new Set([0, 1, 2, 3, 4]);
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
 const customOrderKey = (projectId: string) => `linear_custom_order_${projectId}`;
@@ -69,11 +68,9 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     const s = localStorage.getItem('gantt_time_scale');
     return s === 'week' || s === 'month' ? s : 'day';
   });
-  const [groupBy, setGroupBy] = useState<GroupBy>('none');
   const [filters, setFilters] = useState<Filters>({
     assignee: '',
     status: '',
-    priorities: new Set(DEFAULT_PRIORITIES),
     search: '',
     dateFrom: '',
     dateTo: '',
@@ -332,7 +329,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
       setFilters({
         assignee: '',
         status: '',
-        priorities: new Set(DEFAULT_PRIORITIES),
         search: '',
         dateFrom: '',
         dateTo: '',
@@ -832,10 +828,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     effectiveDayWidth,
     timeScale,
     setTimeScale,
-    groupBy,
     filters,
     setFilters,
-    setGroupBy,
     selectProject,
     refresh,
     zoomIn,

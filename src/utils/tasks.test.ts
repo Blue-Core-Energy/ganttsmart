@@ -5,7 +5,6 @@ import {
   computeDepViolations,
   computeTaskStats,
   filterTasks,
-  groupTasks,
   isTaskDone,
   mergeUnifiedTasks,
   sortTasks,
@@ -39,7 +38,6 @@ function defaultFilters(overrides: Partial<Filters> = {}): Filters {
   return {
     assignee: '',
     status: '',
-    priorities: new Set([0, 1, 2, 3, 4]),
     search: '',
     dateFrom: '',
     dateTo: '',
@@ -150,50 +148,10 @@ describe('filterTasks', () => {
     expect(filterTasks([active, done], defaultFilters({ showCompleted: false })).map((t) => t.id)).toEqual(['ENG-1']);
   });
 
-  it('filters completed tasks by status, assignee, priority, and search', () => {
+  it('filters completed tasks by status, assignee, and search', () => {
     expect(filterTasks([active, done], defaultFilters({ status: 'Done' })).map((t) => t.id)).toEqual(['ENG-2']);
     expect(filterTasks([active, done], defaultFilters({ assignee: 'Bob' })).map((t) => t.id)).toEqual(['ENG-2']);
-    expect(filterTasks([active, done], defaultFilters({ priorities: new Set([3]) })).map((t) => t.id)).toEqual([
-      'ENG-2',
-    ]);
     expect(filterTasks([active, done], defaultFilters({ search: 'setup' })).map((t) => t.id)).toEqual(['ENG-2']);
-  });
-});
-
-describe('groupTasks', () => {
-  const active = makeTask({ id: 'ENG-1', assignee: 'Alice', priority: 'High', status: 'In Progress' });
-  const doneSameAssignee = makeTask({
-    id: 'ENG-2',
-    assignee: 'Alice',
-    priority: 'High',
-    status: 'Done',
-    statusType: 'completed',
-  });
-
-  it('returns one unified section when groupBy is none', () => {
-    const groups = groupTasks([active, doneSameAssignee], 'none');
-    expect(groups).toHaveLength(1);
-    expect(groups[0].key).toBe('__all');
-    expect(groups[0].tasks.map((t) => t.id)).toEqual(['ENG-1', 'ENG-2']);
-  });
-
-  it('groups active and completed tasks together by assignee and priority', () => {
-    const byAssignee = groupTasks([active, doneSameAssignee], 'assignee');
-    expect(byAssignee).toHaveLength(1);
-    expect(byAssignee[0].label).toBe('Alice');
-    expect(byAssignee[0].tasks.map((t) => t.id)).toEqual(['ENG-1', 'ENG-2']);
-
-    const byPriority = groupTasks([active, doneSameAssignee], 'priority');
-    expect(byPriority).toHaveLength(1);
-    expect(byPriority[0].label).toBe('High');
-    expect(byPriority[0].tasks.map((t) => t.id)).toEqual(['ENG-1', 'ENG-2']);
-  });
-
-  it('places completed tasks into their status group when groupBy is status', () => {
-    const byStatus = groupTasks([active, doneSameAssignee], 'status');
-    expect(byStatus.map((g) => g.label)).toEqual(['Done', 'In Progress']);
-    expect(byStatus[0].tasks.map((t) => t.id)).toEqual(['ENG-2']);
-    expect(byStatus[1].tasks.map((t) => t.id)).toEqual(['ENG-1']);
   });
 });
 

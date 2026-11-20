@@ -234,6 +234,26 @@ test.describe('GanttSmart GCP app', () => {
     await search.fill('');
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
+    // Assignee and date range live in the single Filter dropdown
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Date range' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Any assignee' }).click();
+    await page.getByRole('option', { name: /Nate Jones/ }).click();
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible();
+    await expect(filterButton).toHaveAttribute('title', '1 active filter');
+
+    // Escape closes the panel; the active chip row clears the filter
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
+    await page.getByRole('button', { name: 'Clear all' }).click();
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(filterButton).toHaveAttribute('title', 'Filter tasks');
+
     // Time scale toggle updates aria-pressed
     const weekBtn = page.getByRole('button', { name: 'week', exact: true });
     const dayBtn = page.getByRole('button', { name: 'day', exact: true });
@@ -446,12 +466,12 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('button', { name: 'Valve Actuator' })).toBeVisible();
     await expect(page.locator('[data-task-bar="VLV-501"]')).toBeVisible();
 
-    // Tab from the search input closes the dropdown and moves focus to the next control (Assignee)
+    // Tab from the search input closes the dropdown and moves focus to the next control (Filter)
     await page.getByRole('button', { name: 'Valve Actuator' }).click();
     await expect(projectSearch).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(projectSearch).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Assignee' })).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
 
     expect(errors).toEqual([]);
   });
@@ -711,13 +731,18 @@ test.describe('GanttSmart GCP app', () => {
     // FilterBar count pill reflects only the 2 active scheduled tasks
     await expect(page.getByText('2/2', { exact: true })).toBeVisible();
 
-    // Status filter excludes Duplicate / Rejected
-    await page.getByRole('button', { name: 'Status', exact: true }).click();
+    // Status filter, inside the Filter dropdown, excludes Duplicate / Rejected
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
+    const statusTrigger = page.getByRole('button', { name: 'Any status', exact: true });
+    await statusTrigger.click();
     await expect(page.getByRole('option', { name: 'In Progress', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Todo', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Duplicate', exact: true })).toHaveCount(0);
     await expect(page.getByRole('option', { name: 'Rejected', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Status', exact: true }).first().click();
+    await statusTrigger.click();
+    await filterButton.click();
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
 
     // DetailPanel excludes dependencies to ignored duplicate issues and excludes duplicate sub-issues
     await page.locator('[data-task-bar="ENG-101"]').click();
@@ -929,18 +954,9 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('(Completed)')).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // Grouping by status places completed task in its own status group inside the same table
-    await page.getByRole('button', { name: 'No grouping' }).click();
-    await page.getByRole('option', { name: 'Group by status' }).click();
-    await expect(exportTarget.locator('table')).toHaveCount(1);
-    await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
-    await expect(exportTarget.getByText('Done').first()).toBeVisible();
-
-    // Reset grouping to none
-    await page.getByRole('button', { name: 'Group by status' }).click();
-    await page.getByRole('option', { name: 'No grouping' }).click();
-
-    // Completed filter toggle hides and restores completed tasks without a separate section
+    // Completed toggle, inside the Filter dropdown, hides and restores completed tasks
+    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
+    await filterButton.click();
     const completedToggle = page.getByRole('button', { name: 'Completed', exact: true });
     await expect(completedToggle).toHaveAttribute('aria-pressed', 'true');
     await completedToggle.click();
@@ -950,9 +966,21 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('2/3')).toBeVisible();
     await expect(page.getByText('Completed hidden')).toBeVisible();
 
+    // The Filter button surfaces the active filter count while the panel is open
+    await expect(filterButton).toHaveAttribute('title', '1 active filter');
+
     await completedToggle.click();
     await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
     await expect(page.getByText('3/3')).toBeVisible();
+
+    // Escape closes the panel and the bar no longer offers a grouping control
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'No grouping' })).toHaveCount(0);
+
+    // Arrows render with no grouping control able to suppress them
+    await expect(exportTarget.locator('table')).toHaveCount(1);
+    await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
 
     expect(errors).toEqual([]);
   });

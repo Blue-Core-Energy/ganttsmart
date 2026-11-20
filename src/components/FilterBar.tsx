@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import type { Filters, GroupBy, Project } from '@/types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Filters, Project } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import CustomDropdown from './CustomDropdown';
 import type { DropdownOption } from './CustomDropdown';
@@ -15,8 +15,6 @@ interface Props {
   onFiltersChange: (f: Filters) => void;
   totalCount: number;
   filteredCount: number;
-  groupBy: GroupBy;
-  onGroupByChange: (g: GroupBy) => void;
   hideProjectSelector?: boolean;
   showBaselines?: boolean;
   onShowBaselinesChange?: (show: boolean) => void;
@@ -26,22 +24,6 @@ interface Props {
   allowExternalEdits?: boolean;
   onAllowExternalEditsChange?: (allow: boolean) => void;
 }
-
-const PRIORITY_CHIPS = [
-  { val: 1, label: 'Urgent', cls: 'urgent' },
-  { val: 2, label: 'High', cls: 'high' },
-  { val: 3, label: 'Medium', cls: 'medium' },
-  { val: 4, label: 'Low', cls: 'low' },
-  { val: 0, label: 'None', cls: 'none' },
-];
-
-const chipActiveColors: Record<string, string> = {
-  urgent: 'border-urgent/60 text-urgent bg-urgent/10',
-  high: 'border-high/60 text-high bg-high/10',
-  medium: 'border-medium/60 text-medium bg-medium/10',
-  low: 'border-low/60 text-low bg-low/15',
-  none: 'border-accent/60 text-accent bg-accent/10',
-};
 
 // Icons
 function SearchIcon() {
@@ -121,7 +103,7 @@ function StatusIcon() {
   );
 }
 
-function GroupIcon() {
+function FilterIcon() {
   return (
     <svg
       width="13"
@@ -132,14 +114,9 @@ function GroupIcon() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-text-muted shrink-0"
+      className="shrink-0"
     >
-      <line x1="8" y1="6" x2="21" y2="6" />
-      <line x1="8" y1="12" x2="21" y2="12" />
-      <line x1="8" y1="18" x2="21" y2="18" />
-      <line x1="3" y1="6" x2="3.01" y2="6" />
-      <line x1="3" y1="12" x2="3.01" y2="12" />
-      <line x1="3" y1="18" x2="3.01" y2="18" />
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
     </svg>
   );
 }
@@ -250,8 +227,6 @@ export default function FilterBar({
   onFiltersChange,
   totalCount,
   filteredCount,
-  groupBy,
-  onGroupByChange,
   hideProjectSelector,
   showBaselines,
   onShowBaselinesChange,
@@ -261,21 +236,17 @@ export default function FilterBar({
   allowExternalEdits = false,
   onAllowExternalEditsChange,
 }: Props) {
-  const togglePriority = (val: number) => {
-    const next = new Set(filters.priorities);
-    if (next.has(val)) next.delete(val);
-    else next.add(val);
-    onFiltersChange({ ...filters, priorities: next });
-  };
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
 
   const hasSearch = !!filters.search;
   const hasAssignee = !!filters.assignee;
   const hasStatus = !!filters.status;
   const hasDateRange = !!filters.dateFrom || !!filters.dateTo;
-  const prioritiesFiltered = filters.priorities.size > 0 && filters.priorities.size < 5;
   const hasHiddenCompleted = !filters.showCompleted;
-  const anyActiveChip =
-    hasSearch || hasAssignee || hasStatus || hasDateRange || prioritiesFiltered || hasHiddenCompleted;
+  // Search has its own box in the bar, so it isn't counted on the Filter button
+  const activeFilterCount = [hasAssignee, hasStatus, hasDateRange, hasHiddenCompleted].filter(Boolean).length;
+  const anyActiveChip = hasSearch || activeFilterCount > 0;
 
   const clearAll = () => {
     onFiltersChange({
@@ -285,10 +256,30 @@ export default function FilterBar({
       status: '',
       dateFrom: '',
       dateTo: '',
-      priorities: new Set([0, 1, 2, 3, 4]),
       showCompleted: true,
     });
   };
+
+  // Close the filter panel on outside click or Escape. Nested popovers (the
+  // dropdowns and the date picker) live inside the panel, so clicks within them
+  // never count as "outside", and Escape closes them before the panel itself.
+  useEffect(() => {
+    if (!filterOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) setFilterOpen(false);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (filterRef.current?.querySelector('[role="listbox"], [data-popover="date-range"]')) return;
+      setFilterOpen(false);
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [filterOpen]);
 
   // Build dropdown options
   const projectOptions: DropdownOption[] = useMemo(
@@ -304,16 +295,6 @@ export default function FilterBar({
   const statusOptions: DropdownOption[] = useMemo(
     () => statuses.map((s) => ({ value: s, label: s, icon: <StatusIcon /> })),
     [statuses],
-  );
-
-  const groupOptions: DropdownOption[] = useMemo(
-    () => [
-      { value: 'none', label: 'No grouping', icon: <GroupIcon /> },
-      { value: 'assignee', label: 'Group by assignee', icon: <GroupIcon /> },
-      { value: 'priority', label: 'Group by priority', icon: <GroupIcon /> },
-      { value: 'status', label: 'Group by status', icon: <GroupIcon /> },
-    ],
-    [],
   );
 
   return (
@@ -350,79 +331,91 @@ export default function FilterBar({
           />
         )}
 
-        {/* Assignee */}
-        <CustomDropdown
-          value={filters.assignee}
-          options={assigneeOptions}
-          placeholder="Assignee"
-          placeholderIcon={<UsersIcon />}
-          onChange={(v) => onFiltersChange({ ...filters, assignee: v })}
-        />
+        {/* Filters — assignee, status, date range and completed visibility */}
+        <div className="relative shrink-0" ref={filterRef}>
+          <button
+            type="button"
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-haspopup="dialog"
+            aria-expanded={filterOpen}
+            title={
+              activeFilterCount > 0
+                ? `${activeFilterCount} active ${activeFilterCount === 1 ? 'filter' : 'filters'}`
+                : 'Filter tasks'
+            }
+            className={`inline-flex items-center gap-1.5 py-[7px] px-3 bg-bg-card border rounded-md text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted ${
+              activeFilterCount > 0 || filterOpen
+                ? 'border-accent text-accent'
+                : 'border-border-secondary text-text-secondary'
+            }`}
+          >
+            <FilterIcon />
+            Filter
+            {activeFilterCount > 0 && (
+              <span
+                aria-hidden="true"
+                className="ml-0.5 min-w-[16px] h-4 px-1 rounded-full bg-accent text-white text-[10px] font-bold font-mono tabular-nums flex items-center justify-center"
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
 
-        {/* Status */}
-        <CustomDropdown
-          value={filters.status}
-          options={statusOptions}
-          placeholder="Status"
-          placeholderIcon={<StatusIcon />}
-          onChange={(v) => onFiltersChange({ ...filters, status: v })}
-        />
+          {filterOpen && (
+            <div
+              role="dialog"
+              aria-label="Filters"
+              className="absolute top-full left-0 mt-1 z-50 w-[224px] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 flex flex-col gap-3"
+            >
+              <FilterField label="Assignee">
+                <CustomDropdown
+                  value={filters.assignee}
+                  options={assigneeOptions}
+                  placeholder="Any assignee"
+                  placeholderIcon={<UsersIcon />}
+                  onChange={(v) => onFiltersChange({ ...filters, assignee: v })}
+                  className="w-full"
+                  ariaLabel="Assignee"
+                />
+              </FilterField>
 
-        <div className="w-px h-5 bg-border-primary shrink-0" />
+              <FilterField label="Status">
+                <CustomDropdown
+                  value={filters.status}
+                  options={statusOptions}
+                  placeholder="Any status"
+                  placeholderIcon={<StatusIcon />}
+                  onChange={(v) => onFiltersChange({ ...filters, status: v })}
+                  className="w-full"
+                  ariaLabel="Status"
+                />
+              </FilterField>
 
-        {/* Priority chips */}
-        <div className="flex gap-1 items-center shrink-0">
-          {PRIORITY_CHIPS.map((c) => {
-            const active = filters.priorities.has(c.val);
-            return (
+              <FilterField label="Date range">
+                <DateRangePicker
+                  from={filters.dateFrom}
+                  to={filters.dateTo}
+                  onChange={(dateFrom, dateTo) => onFiltersChange({ ...filters, dateFrom, dateTo })}
+                />
+              </FilterField>
+
               <button
-                key={c.val}
-                onClick={() => togglePriority(c.val)}
-                className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 ${
-                  active
-                    ? chipActiveColors[c.cls]
+                type="button"
+                onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
+                aria-pressed={filters.showCompleted}
+                title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
+                className={`h-7 px-2.5 self-start rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 ${
+                  filters.showCompleted
+                    ? 'border-low/60 text-low bg-low/10'
                     : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
                 }`}
               >
-                {c.label}
+                <CheckIcon />
+                Completed
               </button>
-            );
-          })}
+            </div>
+          )}
         </div>
-
-        <div className="w-px h-5 bg-border-primary shrink-0" />
-
-        {/* Group by */}
-        <CustomDropdown
-          value={groupBy === 'none' ? '' : groupBy}
-          options={groupOptions}
-          placeholder="No grouping"
-          placeholderIcon={<GroupIcon />}
-          onChange={(v) => onGroupByChange((v || 'none') as GroupBy)}
-          required
-        />
-
-        {/* Date range */}
-        <DateRangePicker
-          from={filters.dateFrom}
-          to={filters.dateTo}
-          onChange={(dateFrom, dateTo) => onFiltersChange({ ...filters, dateFrom, dateTo })}
-        />
-
-        {/* Completed tasks visibility toggle — shown inline by default */}
-        <button
-          onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
-          aria-pressed={filters.showCompleted}
-          title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
-          className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
-            filters.showCompleted
-              ? 'border-low/60 text-low bg-low/10'
-              : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
-          }`}
-        >
-          <CheckIcon />
-          Completed
-        </button>
 
         {/* Plan vs Actual — toggles the dashed baseline ghost bars */}
         {onShowBaselinesChange && (
@@ -509,12 +502,6 @@ export default function FilterBar({
           {hasStatus && (
             <ActiveChip label={filters.status} onClear={() => onFiltersChange({ ...filters, status: '' })} />
           )}
-          {prioritiesFiltered && (
-            <ActiveChip
-              label={`${filters.priorities.size} priorit${filters.priorities.size === 1 ? 'y' : 'ies'}`}
-              onClear={() => onFiltersChange({ ...filters, priorities: new Set([0, 1, 2, 3, 4]) })}
-            />
-          )}
           {hasDateRange && (
             <ActiveChip
               label={`${filters.dateFrom || '…'} → ${filters.dateTo || '…'}`}
@@ -532,6 +519,15 @@ export default function FilterBar({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10.5px] uppercase tracking-wider text-text-muted font-semibold">{label}</span>
+      {children}
     </div>
   );
 }

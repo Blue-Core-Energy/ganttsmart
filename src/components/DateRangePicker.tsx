@@ -81,7 +81,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
     : 'Select start date';
 
   return (
-    <div ref={ref} className="relative hidden lg:flex items-center gap-1.5">
+    <div ref={ref} className="relative flex items-center gap-1.5">
       <button
         onClick={() => setOpen(!open)}
         className={`inline-flex items-center gap-1.5 py-[7px] px-3 bg-bg-card border rounded-md text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted ${
@@ -132,7 +132,10 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
       )}
 
       {open && (
-        <div className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3">
+        <div
+          data-popover="date-range"
+          className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 max-w-[calc(100vw-1.5rem)] overflow-x-auto"
+        >
           <DayPicker
             mode="range"
             selected={draft}
