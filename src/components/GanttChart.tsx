@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
 import { buildArrowPath } from '@/utils/dependencyArrows';
+import {
+  anchorDayOffset,
+  anchoredScrollLeft,
+  dayOffsetToMs,
+  msToDayOffset,
+  wheelZoomFactor,
+  zoomDayWidth,
+} from '@/utils/timelineZoom';
 import {
   getColumnDef,
   loadColumnWidths,
@@ -29,6 +37,8 @@ interface Props {
   error: string;
   dayWidth: number;
   timeScale?: TimeScale;
+  /** Omit to render the timeline at a fixed zoom — e.g. exports and tests */
+  onDayWidthChange?: (next: (current: number) => number) => void;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
   onCycleStatus?: (taskUuid: string) => Promise<void>;
@@ -87,6 +97,7 @@ export default function GanttChart({
   error,
   dayWidth,
   timeScale = 'day',
+  onDayWidthChange,
   onReschedule,
   onRescheduleStart,
   onCycleStatus,
@@ -106,6 +117,14 @@ export default function GanttChart({
   const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const ganttRef = useRef<HTMLDivElement>(null);
+  /** Date and pointer position to restore after a zoom, set by the wheel handler */
+  const zoomAnchorRef = useRef<{ anchorMs: number; pointerOffsetX: number } | null>(null);
+  /** Live geometry for the imperative wheel listener, which must not be re-bound per render */
+  const geometryRef = useRef({ dayWidth, fixedColsWidth: 0, chartStartMs: 0 });
+  const onDayWidthChangeRef = useRef(onDayWidthChange);
+  onDayWidthChangeRef.current = onDayWidthChange;
+  const panCleanupRef = useRef<(() => void) | null>(null);
+  const wheelCleanupRef = useRef<(() => void) | null>(null);
   const baseWidthsRef = useRef<ColumnWidths>(colWidths);
   /** Mirrors colWidths for the resize handlers, which persist on mouseup */
   const liveWidthsRef = useRef<ColumnWidths>(colWidths);
@@ -246,6 +265,83 @@ export default function GanttChart({
 
   // Disconnect the header observer on unmount
   useEffect(() => () => headerObserverRef.current?.disconnect(), []);
+
+  /**
+   * Scroll container ref that also binds Ctrl/Cmd + wheel zoom. The listener has to
+   * be non-passive to stop the browser zooming the whole page, which React's own
+   * wheel handling can't do, and it reads geometry from a ref so it is bound once.
+   */
+  const scrollContainerRef = useCallback((el: HTMLDivElement | null) => {
+    wheelCleanupRef.current?.();
+    wheelCleanupRef.current = null;
+    ganttRef.current = el;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      // Ctrl is also what a trackpad pinch reports; Cmd covers macOS
+      if (!e.ctrlKey && !e.metaKey) return;
+      const change = onDayWidthChangeRef.current;
+      if (!change) return;
+      e.preventDefault();
+
+      const { dayWidth: currentDayWidth, fixedColsWidth: cols, chartStartMs } = geometryRef.current;
+      const pointerOffsetX = e.clientX - el.getBoundingClientRect().left;
+      const offsetDays = anchorDayOffset({
+        pointerOffsetX,
+        scrollLeft: el.scrollLeft,
+        fixedColsWidth: cols,
+        dayWidth: currentDayWidth,
+      });
+      // Anchor on the date rather than the offset: changing granularity can move the
+      // chart start, and the date under the pointer should still be the date under it
+      zoomAnchorRef.current = { anchorMs: dayOffsetToMs(chartStartMs, offsetDays), pointerOffsetX };
+      change((w) => zoomDayWidth(w, wheelZoomFactor(e.deltaY, e.deltaMode)));
+    };
+
+    el.addEventListener('wheel', onWheel, { passive: false });
+    wheelCleanupRef.current = () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  useEffect(() => () => wheelCleanupRef.current?.(), []);
+
+  /**
+   * Drag the empty timeline background to pan. Bars, handles, milestone flags and
+   * connector dots sit above the background and are matched out, so this never
+   * swallows a reschedule, a resize or a dependency drag.
+   */
+  const handleBackgroundPan = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest('[data-timeline-background]')) return;
+
+    const el = ganttRef.current;
+    if (!el) return;
+    e.preventDefault();
+
+    const startX = e.clientX;
+    const startScrollLeft = el.scrollLeft;
+    const previousCursor = document.body.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.cursor = 'grabbing';
+    document.body.style.userSelect = 'none';
+
+    const onMove = (ev: MouseEvent) => {
+      el.scrollLeft = startScrollLeft - (ev.clientX - startX);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.cursor = previousCursor;
+      document.body.style.userSelect = previousUserSelect;
+      panCleanupRef.current = null;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    panCleanupRef.current = onUp;
+  }, []);
+
+  // Don't leave a grabbing cursor behind if the chart unmounts mid-drag
+  useEffect(() => () => panCleanupRef.current?.(), []);
 
   // Column resize handlers — store base on first drag, apply delta
   const makeResizeHandler = useCallback(
@@ -499,6 +595,22 @@ export default function GanttChart({
   );
 
   const fixedColsWidth = totalColumnWidth(visibleColumns, colWidths);
+  geometryRef.current = { dayWidth, fixedColsWidth, chartStartMs: chartStart.getTime() };
+
+  // Put the anchored date back under the pointer once the new zoom has been laid out
+  useLayoutEffect(() => {
+    const anchor = zoomAnchorRef.current;
+    if (!anchor) return;
+    zoomAnchorRef.current = null;
+    const el = ganttRef.current;
+    if (!el) return;
+    el.scrollLeft = anchoredScrollLeft({
+      anchorDayOffset: msToDayOffset(chartStart.getTime(), anchor.anchorMs),
+      pointerOffsetX: anchor.pointerOffsetX,
+      fixedColsWidth,
+      dayWidth,
+    });
+  }, [dayWidth, chartStart, fixedColsWidth]);
 
   // Early returns — after all hooks
   if (loading) {
@@ -619,7 +731,8 @@ export default function GanttChart({
 
   return (
     <div
-      ref={ganttRef}
+      ref={scrollContainerRef}
+      onMouseDown={handleBackgroundPan}
       id="gantt-export-target"
       className="h-full w-full bg-bg-primary overflow-auto print:overflow-visible print:border-0"
     >
@@ -656,7 +769,10 @@ export default function GanttChart({
               >
                 {/* Milestone band — flags sit above the calendar and act as drag handles */}
                 {milestonesInRange.length > 0 && (
-                  <div className="relative h-[24px] border-b border-border-primary/50">
+                  <div
+                    data-timeline-background
+                    className="relative h-[24px] border-b border-border-primary/50 cursor-grab"
+                  >
                     {milestonesInRange.map((m) => {
                       const dragging = milestoneDrag?.id === m.id;
                       const dateLabel = draggedDateLabel(m);
@@ -691,7 +807,7 @@ export default function GanttChart({
                     })}
                   </div>
                 )}
-                <div className="flex border-b border-border-primary">
+                <div data-timeline-background className="flex border-b border-border-primary cursor-grab">
                   {topCells.map((m, i) => (
                     <div
                       key={i}
@@ -702,7 +818,8 @@ export default function GanttChart({
                     </div>
                   ))}
                 </div>
-                <div className="flex relative">
+                {/* The date ruler doubles as a drag surface for panning */}
+                <div data-timeline-background className="flex relative cursor-grab">
                   {bottomCells.map((d, i) => (
                     <div
                       key={i}
@@ -787,7 +904,13 @@ export default function GanttChart({
           );
         })}
 
-        <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations} />
+        <DependencyArrows
+          tasks={tasks}
+          containerRef={innerRef}
+          depViolations={depViolations}
+          dayWidth={dayWidth}
+          fixedColsWidth={fixedColsWidth}
+        />
 
         {/* Connection line overlay — updated imperatively during drag for performance.
             Unlike committed arrows this stays above the bars (z-[4]): it follows the

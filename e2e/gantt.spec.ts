@@ -265,13 +265,16 @@ test.describe('GanttSmart GCP app', () => {
     await expect(panel).toHaveCount(0);
     await expect(filterButton).toBeFocused();
 
-    // Time scale toggle updates aria-pressed
-    const weekBtn = page.getByRole('button', { name: 'week', exact: true });
-    const dayBtn = page.getByRole('button', { name: 'day', exact: true });
-    await weekBtn.click();
-    await expect(weekBtn).toHaveAttribute('aria-pressed', 'true');
-    await dayBtn.click();
-    await expect(dayBtn).toHaveAttribute('aria-pressed', 'true');
+    // Header has no time-scale or zoom buttons; keyboard + / - still zooms
+    await expect(page.getByRole('button', { name: 'week', exact: true })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'day', exact: true })).toHaveCount(0);
+    await expect(page.locator('button[title^="Zoom "]')).toHaveCount(0);
+    const barBeforeKeyZoom = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width;
+    await page.keyboard.press('+');
+    const barAfterKeyZoom = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width;
+    expect(barAfterKeyZoom).toBeGreaterThan(barBeforeKeyZoom);
+    await page.keyboard.press('-');
+    expect((await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width).toBeCloseTo(barBeforeKeyZoom, 0);
 
     // Clicking a task bar opens DetailPanel and Escape closes it
     await page.locator('[data-task-bar="ENG-101"]').click();
@@ -1276,13 +1279,12 @@ test.describe('GanttSmart GCP app', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
 
     // 3. Clicking non-focusable dialog heading and pressing global shortcut keys must not trigger background zoom/refresh
-    const zoomLabel = page.locator('header span.font-mono', { hasText: /^\d+$/ }).first();
-    const zoomBefore = await zoomLabel.textContent();
+    const barBefore = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width;
     await page.getByRole('button', { name: 'Bug Report' }).click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('heading', { name: 'Send Feedback' }).click();
     await page.keyboard.press('+');
-    await expect(zoomLabel).toHaveText(zoomBefore!);
+    expect((await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width).toBe(barBefore);
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
 
@@ -2788,6 +2790,240 @@ test.describe('GanttSmart GCP app', () => {
     await page.getByRole('button', { name: 'Choose columns' }).click();
     await page.getByRole('button', { name: 'Reset to defaults' }).click();
     expect(await headerLabels()).toEqual(['TASK', 'ASSIGNEE', 'STATUS', 'DUE']);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('zooms anchored under pointer via Ctrl+wheel, switches granularity, and pans by dragging background', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const updatedDates: string[] = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { input?: { dueDate?: string } };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(60),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Early design',
+                      description: `${startTagOffsetDays(-5)}\nDesign`,
+                      dueDate: isoOffsetDays(2),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Long integration',
+                      description: `${startTagOffsetDays(6)}\nIntegration`,
+                      dueDate: isoOffsetDays(26),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  { id: 'uuid-1', identifier: 'ENG-101', relations: { nodes: [] }, children: { nodes: [] } },
+                  { id: 'uuid-2', identifier: 'ENG-102', relations: { nodes: [] }, children: { nodes: [] } },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issue(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issue: { description: `${startTagOffsetDays(-5)}\nDesign` } } }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        updatedDates.push(payload?.variables?.input?.dueDate ?? '');
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { issueUpdate: { success: true, issue: { id: 'uuid-1', dueDate: isoOffsetDays(4) } } },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    const bar1 = page.locator('[data-task-bar="ENG-101"]');
+    await expect(bar1).toBeVisible();
+
+    const scroller = page.locator('#gantt-export-target');
+
+    // 1. Background drag pans the timeline horizontally (click empty area to the right of ENG-101's bar, inside viewport)
+    const bgCell = page.locator('tr[data-task-id="ENG-101"] [data-timeline-background]').first();
+    const bgBox = (await bgCell.boundingBox())!;
+    const b1Init = (await bar1.boundingBox())!;
+    const panStartX = Math.min(b1Init.x + b1Init.width + 220, 1180);
+    const panY = bgBox.y + bgBox.height / 2;
+
+    const initialScroll = await scroller.evaluate((el) => el.scrollLeft);
+    await page.mouse.move(panStartX, panY);
+    await page.mouse.down();
+    await page.mouse.move(panStartX - 240, panY, { steps: 8 });
+    await page.mouse.up();
+    const pannedScroll = await scroller.evaluate((el) => el.scrollLeft);
+    expect(pannedScroll).toBeGreaterThan(initialScroll + 150);
+
+    // 2. Ctrl+wheel zooms anchored under the pointer (pick a visible point inside ENG-102)
+    const bar2 = page.locator('[data-task-bar="ENG-102"]');
+    const bar2Before = (await bar2.boundingBox())!;
+    const anchorX = Math.min(Math.max(bar2Before.x + 80, 680), 1180);
+    const anchorY = bar2Before.y + bar2Before.height / 2;
+    const ratioBefore = (anchorX - bar2Before.x) / bar2Before.width;
+
+    await page.mouse.move(anchorX, anchorY);
+    await page.keyboard.down('Control');
+    await page.mouse.wheel(0, -180);
+    await page.keyboard.up('Control');
+
+    const bar2AfterZoomIn = (await bar2.boundingBox())!;
+    expect(bar2AfterZoomIn.width).toBeGreaterThan(bar2Before.width * 1.15);
+    // The same fractional point inside ENG-102 stays right under the pointer
+    const ratioAfter = (anchorX - bar2AfterZoomIn.x) / bar2AfterZoomIn.width;
+    expect(ratioAfter).toBeCloseTo(ratioBefore, 1);
+
+    // 3. Zooming out smoothly switches header granularity day -> week -> month
+    const timelineHeader = page.locator('#gantt-export-target thead th').last();
+    // Day scale shows weekday abbreviations beneath each day number
+    await expect(timelineHeader).toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
+
+    await page.keyboard.down('Control');
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, 220);
+    }
+    await page.keyboard.up('Control');
+
+    // Now in week or month scale: day-of-week sub-labels disappear
+    await expect(timelineHeader).not.toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
+
+    // Zoom out further to month scale (top header becomes 4-digit year only)
+    await page.keyboard.down('Control');
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, 250);
+    }
+    await page.keyboard.up('Control');
+    const topHeaderRow = timelineHeader.locator('> div').first();
+    await expect(topHeaderRow).toContainText(/^\s*\d{4}(\s*\d{4})*\s*$/);
+
+    // Zoom back in with '+' keyboard shortcut to return to day scale
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press('+');
+    }
+    await expect(timelineHeader).toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
+
+    // 4. Dragging a task bar still reschedules it instead of panning
+    await scroller.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    const b1 = (await bar1.boundingBox())!;
+    const scrollBeforeBarDrag = await scroller.evaluate((el) => el.scrollLeft);
+    await page.mouse.move(b1.x + b1.width / 2, b1.y + b1.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b1.x + b1.width / 2 + 56, b1.y + b1.height / 2, { steps: 6 });
+    await page.mouse.up();
+    const scrollAfterBarDrag = await scroller.evaluate((el) => el.scrollLeft);
+    expect(scrollAfterBarDrag).toBe(scrollBeforeBarDrag);
+    await expect.poll(() => updatedDates.length).toBeGreaterThan(0);
 
     expect(errors).toEqual([]);
   });

@@ -8,7 +8,6 @@ import StatsRow from '@/components/StatsRow';
 import Tooltip from '@/components/Tooltip';
 import { useSharedData } from '@/hooks/useSharedData';
 import { useTheme } from '@/hooks/useTheme';
-import { TIME_SCALES } from '@/types';
 import { formatDate } from '@/utils/date';
 
 function timeAgo(dateStr: string): string {
@@ -40,9 +39,9 @@ export default function SharedView() {
     needsPassword,
     passwordError,
     submitPassword,
-    effectiveDayWidth,
+    dayWidth,
+    setDayWidth,
     timeScale,
-    setTimeScale,
     filters,
     setFilters,
     zoomIn,
@@ -173,71 +172,6 @@ export default function SharedView() {
           {cachedAt && <p className="text-xs text-text-muted mt-1">Last updated {timeAgo(cachedAt)}</p>}
         </div>
 
-        {/* Minimal toolbar: time scale + zoom */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="flex items-center gap-0.5 bg-bg-hover/50 rounded-lg p-1">
-            {TIME_SCALES.map((s) => (
-              <button
-                key={s}
-                onClick={() => setTimeScale(s)}
-                className={`px-3 py-[6px] rounded-md text-xs font-medium capitalize transition-all cursor-pointer ${
-                  timeScale === s
-                    ? 'bg-bg-card text-text-primary shadow-sm border border-border-secondary'
-                    : 'text-text-secondary hover:text-text-primary'
-                }`}
-                title={`${s.charAt(0).toUpperCase() + s.slice(1)} view`}
-                aria-pressed={timeScale === s}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 bg-bg-hover/50 rounded-lg px-1.5 py-0.5">
-            <button
-              onClick={zoomOut}
-              className="flex items-center gap-1.5 px-3 py-[7px] bg-bg-hover border border-border-secondary rounded-md text-text-secondary text-xs font-medium cursor-pointer transition-all hover:bg-border-secondary hover:text-text-primary"
-              title="Zoom out"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                <line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-            </button>
-            <span className="text-[11px] text-text-muted w-8 text-center font-mono">
-              {Math.round(effectiveDayWidth)}
-            </span>
-            <button
-              onClick={zoomIn}
-              className="flex items-center gap-1.5 px-3 py-[7px] bg-bg-hover border border-border-secondary rounded-md text-text-secondary text-xs font-medium cursor-pointer transition-all hover:bg-border-secondary hover:text-text-primary"
-              title="Zoom in"
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                <line x1="11" y1="8" x2="11" y2="14" />
-                <line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
         {/* Filters (no project selector) */}
         <FilterBar
           projects={[]}
@@ -261,7 +195,8 @@ export default function SharedView() {
           milestones={milestones}
           loading={false}
           error=""
-          dayWidth={effectiveDayWidth}
+          dayWidth={dayWidth}
+          onDayWidthChange={setDayWidth}
           timeScale={timeScale}
           projectName={projectName}
         />

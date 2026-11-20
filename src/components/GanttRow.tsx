@@ -725,8 +725,8 @@ export default function GanttRow({
       {/* Chart */}
       <td className="h-[56px] p-0 relative border-b border-border-primary align-middle">
         <div className="relative h-full flex items-center" style={{ width: totalDays * dayWidth }}>
-          {/* Background grid */}
-          <div className="absolute inset-0 flex">
+          {/* Background grid — also the drag surface for panning the timeline */}
+          <div data-timeline-background className="absolute inset-0 flex cursor-grab">
             {bgCells.map((d, i) => (
               <div
                 key={i}
