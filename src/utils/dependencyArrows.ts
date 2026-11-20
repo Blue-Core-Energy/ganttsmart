@@ -1,8 +1,12 @@
 /** Horizontal run leaving a source bar and entering a target bar */
 export const ARROW_STUB = 12;
 
-/** Smallest horizontal gap that fits a direct elbow: two stubs plus the arrowhead */
-export const ARROW_DIRECT_MIN_GAP = 24;
+/**
+ * Smallest horizontal gap that fits a centred elbow — one stub either side of the
+ * turn. Below this the turn is pushed up against the target instead, and below a
+ * single stub there is no room to enter the target at all.
+ */
+export const ARROW_DIRECT_MIN_GAP = 2 * ARROW_STUB;
 
 /**
  * Vertical offset of the lane a backwards dependency travels along. Bars are 28px
@@ -33,19 +37,23 @@ const round = (n: number) => Math.round(n * 10) / 10;
  */
 export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints): string {
   const dx = toX - fromX;
-  const sameRow = Math.abs(toY - fromY) < 1;
+  // Below a tenth of a pixel the two rows round to the same coordinate anyway
+  const sameRow = Math.abs(toY - fromY) < 0.05;
 
-  if (dx >= ARROW_DIRECT_MIN_GAP) {
-    // Room to turn once between the bars
+  if (dx >= ARROW_STUB) {
+    // Enough room ahead of the target to turn and still approach it horizontally
     if (sameRow) return `M ${round(fromX)} ${round(fromY)} H ${round(toX)}`;
-    const midX = fromX + dx / 2;
+    // Turn halfway between the bars where there is room, otherwise as late as a
+    // full-length final approach allows. Never turns behind the source.
+    const midX = dx >= ARROW_DIRECT_MIN_GAP ? fromX + dx / 2 : toX - ARROW_STUB;
     return `M ${round(fromX)} ${round(fromY)} H ${round(midX)} V ${round(toY)} H ${round(toX)}`;
   }
 
-  // The target starts before the source ends, or the gap is too tight to turn in:
-  // leave the source to the right, drop into the lane beside its row, run back,
-  // and enter the target from its left. The lane sits on the side the target is
-  // on, so the return run stays in a row gap instead of crossing a row of bars.
+  // The target starts before the source ends, or the bars are so close that there
+  // is no room to enter the target: leave the source to the right, drop into the
+  // lane beside its row, run back, and enter the target from its left. The lane
+  // sits on the side the target is on, so the return run stays in a row gap
+  // instead of crossing a row of bars.
   const laneY = fromY + (toY < fromY ? -ARROW_LANE_OFFSET : ARROW_LANE_OFFSET);
   return [
     `M ${round(fromX)} ${round(fromY)}`,

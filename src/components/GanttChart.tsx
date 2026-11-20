@@ -3,6 +3,7 @@ import type { Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
+import { buildArrowPath } from '@/utils/dependencyArrows';
 import { computeDepViolations } from '@/utils/tasks';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
@@ -153,13 +154,8 @@ export default function GanttChart({
         const mx = ev.clientX - rect.left;
         const my = ev.clientY - rect.top;
 
-        const dx = mx - src.x;
-        const cx = Math.min(Math.max(Math.abs(dx) * 0.4, 20), 60);
-        const d =
-          dx > 30
-            ? `M ${src.x} ${src.y} C ${src.x + cx} ${src.y}, ${mx - cx} ${my}, ${mx} ${my}`
-            : `M ${src.x} ${src.y} C ${src.x + 40} ${src.y}, ${src.x + 40} ${(src.y + my) / 2}, ${(src.x + mx) / 2} ${(src.y + my) / 2} S ${mx - 40} ${my}, ${mx} ${my}`;
-        path.setAttribute('d', d);
+        // Same routing as a committed arrow, so the preview predicts the result
+        path.setAttribute('d', buildArrowPath({ fromX: src.x, fromY: src.y, toX: mx, toY: my }));
 
         // Highlight target bar under cursor
         const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
@@ -748,14 +744,24 @@ export default function GanttChart({
 
         <DependencyArrows tasks={tasks} containerRef={innerRef} depViolations={depViolations} />
 
-        {/* Connection line overlay — updated imperatively during drag for performance */}
+        {/* Connection line overlay — updated imperatively during drag for performance.
+            Unlike committed arrows this stays above the bars (z-[4]): it follows the
+            cursor across them and has to stay visible while you aim. */}
         <svg
           ref={connectionSvgRef}
           className="absolute top-0 left-0 pointer-events-none z-[4]"
           style={{ display: 'none', overflow: 'visible' }}
         >
           <defs>
-            <marker id="dep-arrow-temp" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <marker
+              id="dep-arrow-temp"
+              markerUnits="userSpaceOnUse"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
               <polygon points="0 0, 8 3, 0 6" fill="#7c5cfc" opacity="0.9" />
             </marker>
           </defs>

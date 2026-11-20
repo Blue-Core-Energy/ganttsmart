@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { ARROW_LANE_OFFSET, ARROW_STUB, buildArrowPath, type ArrowEndpoints } from './dependencyArrows';
+import {
+  ARROW_DIRECT_MIN_GAP,
+  ARROW_LANE_OFFSET,
+  ARROW_STUB,
+  buildArrowPath,
+  type ArrowEndpoints,
+} from './dependencyArrows';
+
+/** Mirrors the Tailwind sizes in GanttRow.tsx: `h-[28px]` bars in `h-[56px]` rows */
+const BAR_HEIGHT = 28;
+const ROW_HEIGHT = 56;
+
+/** Longest arrowhead, in px — `markerWidth` 8 at userSpaceOnUse in DependencyArrows.tsx */
+const ARROW_HEAD = 8;
 
 /** Every x and y coordinate referenced by a path, in order */
 function points(path: string): { x: number; y: number }[] {
@@ -63,10 +76,46 @@ describe('buildArrowPath', () => {
     expect(isOrthogonal(path)).toBe(true);
   });
 
-  it('routes around rather than squeezing an elbow into a gap too small for the arrowhead', () => {
-    const path = buildArrowPath({ fromX: 100, fromY: 50, toX: 110, toY: 94 });
-    expect(points(path)).toHaveLength(6);
-    expect(isOrthogonal(path)).toBe(true);
+  it('keeps a forward dependency moving forwards as the gap narrows', () => {
+    // Just too narrow to centre the turn: it moves up against the target instead,
+    // which keeps a full-length final approach without ever doubling back
+    expect(buildArrowPath({ fromX: 100, fromY: 50, toX: 100 + ARROW_DIRECT_MIN_GAP, toY: 94 })).toBe(
+      'M 100 50 H 112 V 94 H 124',
+    );
+    expect(buildArrowPath({ fromX: 100, fromY: 50, toX: 123, toY: 94 })).toBe('M 100 50 H 111 V 94 H 123');
+    expect(buildArrowPath({ fromX: 100, fromY: 50, toX: 100 + ARROW_STUB, toY: 94 })).toBe('M 100 50 H 100 V 94 H 112');
+
+    for (let gap = ARROW_STUB; gap <= 40; gap++) {
+      const xs = points(buildArrowPath({ fromX: 100, fromY: 50, toX: 100 + gap, toY: 94 })).map((p) => p.x);
+      // Never travels left of the source, and always approaches over a full stub
+      expect(Math.min(...xs)).toBe(100);
+      expect(100 + gap - xs[xs.length - 2]).toBeGreaterThanOrEqual(ARROW_STUB);
+    }
+  });
+
+  it('routes around only when there is no room to enter the target at all', () => {
+    // Below one stub, an elbow would bury the arrowhead behind the source bar
+    expect(points(buildArrowPath({ fromX: 100, fromY: 50, toX: 100 + ARROW_STUB - 1, toY: 94 }))).toHaveLength(6);
+    expect(points(buildArrowPath({ fromX: 100, fromY: 50, toX: 100 + ARROW_STUB, toY: 94 }))).toHaveLength(4);
+  });
+
+  it('leaves room for the arrowhead on the final approach of every route', () => {
+    const cases: ArrowEndpoints[] = [
+      { fromX: 100, fromY: 50, toX: 400, toY: 94 },
+      { fromX: 100, fromY: 50, toX: 112, toY: 94 },
+      { fromX: 300, fromY: 50, toX: 100, toY: 94 },
+      { fromX: 100, fromY: 50, toX: 105, toY: 50 },
+    ];
+    for (const endpoints of cases) {
+      const pts = points(buildArrowPath(endpoints));
+      const approach = Math.abs(pts[pts.length - 1].x - pts[pts.length - 2].x);
+      expect(approach).toBeGreaterThanOrEqual(ARROW_HEAD);
+    }
+  });
+
+  it('runs its lane clear of the source bar but inside the row gap', () => {
+    expect(ARROW_LANE_OFFSET).toBeGreaterThan(BAR_HEIGHT / 2);
+    expect(ARROW_LANE_OFFSET).toBeLessThan(ROW_HEIGHT - BAR_HEIGHT / 2);
   });
 
   it('never overshoots either endpoint by more than one stub', () => {
@@ -80,14 +129,18 @@ describe('buildArrowPath', () => {
     ];
 
     for (const endpoints of cases) {
+      const { fromX, fromY, toX, toY } = endpoints;
       const path = buildArrowPath(endpoints);
-      const xs = points(path).map((p) => p.x);
-      const ys = points(path).map((p) => p.y);
+      const pts = points(path);
+      const xs = pts.map((p) => p.x);
       expect(isOrthogonal(path)).toBe(true);
-      expect(Math.max(...xs)).toBeLessThanOrEqual(Math.max(endpoints.fromX, endpoints.toX) + ARROW_STUB);
-      expect(Math.min(...xs)).toBeGreaterThanOrEqual(Math.min(endpoints.fromX, endpoints.toX) - ARROW_STUB);
-      expect(Math.max(...ys)).toBeLessThanOrEqual(Math.max(endpoints.fromY, endpoints.toY) + ARROW_LANE_OFFSET);
-      expect(Math.min(...ys)).toBeGreaterThanOrEqual(Math.min(endpoints.fromY, endpoints.toY) - ARROW_LANE_OFFSET);
+      expect(Math.max(...xs)).toBeLessThanOrEqual(Math.max(fromX, toX) + ARROW_STUB);
+      expect(Math.min(...xs)).toBeGreaterThanOrEqual(Math.min(fromX, toX) - ARROW_STUB);
+
+      // Vertically a path only ever sits on one of the two rows, or on the single
+      // lane beside the source row — never anywhere else
+      const allowedY = [fromY, toY, fromY + ARROW_LANE_OFFSET, fromY - ARROW_LANE_OFFSET];
+      for (const p of pts) expect(allowedY).toContain(p.y);
     }
   });
 

@@ -956,7 +956,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(arrow).toHaveCount(1);
 
     // ...routed with right angles only, and painted beneath the task bars
-    await expect(arrow).toHaveAttribute('d', /^M[\d\s.HV]+$/);
+    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
     const arrowLayers = await page.evaluate(() => {
       const svg = document.querySelector('#gantt-export-target svg path[data-arrow-source]')?.closest('svg');
       const bar = document.querySelector('[data-task-bar="ENG-101"]');
@@ -968,6 +968,22 @@ test.describe('GanttSmart GCP app', () => {
     expect(arrowLayers.svg).not.toBeNull();
     expect(arrowLayers.bar).not.toBeNull();
     expect(arrowLayers.svg!).toBeLessThan(arrowLayers.bar!);
+
+    // ...and re-measured when zooming moves the bars, so it keeps landing on its target
+    const arrowEndsOnTarget = async () => {
+      const d = await arrow.getAttribute('d');
+      const endX = Number(d!.trim().split(/\s+/).at(-1));
+      const barBox = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!;
+      const innerBox = (await exportTarget.locator('> div').boundingBox())!;
+      return { endX, barLeft: barBox.x - innerBox.x, d };
+    };
+    const beforeZoom = await arrowEndsOnTarget();
+    expect(beforeZoom.endX).toBeCloseTo(beforeZoom.barLeft, 0);
+    await page.keyboard.press('+');
+    await expect.poll(async () => (await arrow.getAttribute('d')) !== beforeZoom.d, { timeout: 5000 }).toBe(true);
+    const afterZoom = await arrowEndsOnTarget();
+    expect(afterZoom.endX).toBeCloseTo(afterZoom.barLeft, 0);
+    await page.keyboard.press('-');
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
     const countBox = await page.getByText('3/3').boundingBox();
@@ -2123,7 +2139,7 @@ test.describe('GanttSmart GCP app', () => {
     // Violated cross-project arrows keep their own color and marker, and route with right angles
     await expect(crossArrow).toHaveAttribute('stroke', '#f97316');
     await expect(crossArrow).toHaveAttribute('marker-end', 'url(#dep-arrow-warn)');
-    await expect(crossArrow).toHaveAttribute('d', /^M[\d\s.HV]+$/);
+    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
 
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);
