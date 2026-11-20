@@ -1057,6 +1057,7 @@ test.describe('GanttSmart GCP app', () => {
       const query = payload?.query ?? '';
 
       if (query.includes('FeedbackTarget')) {
+        expect(query).not.toMatch(/\blabels\s*\(/);
         await route.fulfill({
           status: 200,
           contentType: 'application/json',
@@ -1075,12 +1076,6 @@ test.describe('GanttSmart GCP app', () => {
                           id: '2e7232fc-d509-4471-9922-e5f8c89459d3',
                           key: 'IT',
                           name: 'IT',
-                          labels: {
-                            nodes: [
-                              { id: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013', name: 'Feature' },
-                              { id: '79878471-e70d-405d-83b7-a50dd8a853fe', name: 'Bug' },
-                            ],
-                          },
                         },
                       ],
                     },
@@ -1088,7 +1083,22 @@ test.describe('GanttSmart GCP app', () => {
                 ],
               },
               teams: { nodes: [] },
-              issueLabels: { nodes: [] },
+              issueLabels: {
+                nodes: [
+                  {
+                    id: '6ef1fd41-af6d-48ec-ae08-2a529cfc0013',
+                    name: 'Feature',
+                    isGroup: false,
+                    team: { id: '2e7232fc-d509-4471-9922-e5f8c89459d3' },
+                  },
+                  {
+                    id: '79878471-e70d-405d-83b7-a50dd8a853fe',
+                    name: 'Bug',
+                    isGroup: false,
+                    team: { id: '2e7232fc-d509-4471-9922-e5f8c89459d3' },
+                  },
+                ],
+              },
             },
           }),
         });
@@ -1339,7 +1349,7 @@ test.describe('GanttSmart GCP app', () => {
                 nodes: [{ id: 'proj-external', name: 'Other Workspace Project', teams: { nodes: [] } }],
               },
               teams: {
-                nodes: [{ id: 'team-ext', key: 'EXT', name: 'External', labels: { nodes: [] } }],
+                nodes: [{ id: 'team-ext', key: 'EXT', name: 'External' }],
               },
               issueLabels: { nodes: [] },
             },
