@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
@@ -20,9 +20,14 @@ function formatDisplay(d: Date): string {
 /** Shared height for the caption row and the nav pinned over it */
 const NAV_ROW_HEIGHT = 'h-7';
 
+/** Minimum gap kept between the popover and the viewport edge, in px */
+const VIEWPORT_MARGIN = 8;
+
 export default function DateRangePicker({ from, to, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [popoverLeft, setPopoverLeft] = useState(0);
 
   // Two months need ~620px; show one on narrow screens so the popover fits
   const [wideEnough, setWideEnough] = useState(
@@ -36,6 +41,23 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
+
+  // The popover is anchored to its field, which can sit anywhere along the filter bar, so
+  // shift it left when it would otherwise run off the right edge of the viewport
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const popover = popoverRef.current;
+      const host = ref.current;
+      if (!popover || !host) return;
+      const hostLeft = host.getBoundingClientRect().left;
+      const maxLeft = document.documentElement.clientWidth - popover.offsetWidth - VIEWPORT_MARGIN;
+      setPopoverLeft(Math.round(Math.max(VIEWPORT_MARGIN, Math.min(hostLeft, maxLeft)) - hostLeft));
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
+  }, [open, wideEnough]);
 
   // Draft state — only committed on Apply
   const [draft, setDraft] = useState<DateRange | undefined>(undefined);
@@ -149,7 +171,9 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
 
       {open && (
         <div
+          ref={popoverRef}
           data-popover="date-range"
+          style={{ left: popoverLeft }}
           className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-4rem)]"
         >
           <DayPicker
