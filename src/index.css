@@ -216,6 +216,27 @@ tr:focus-visible {
 }
 
 /* Toast slide-in animation */
+/* Company holidays/shutdowns (rose) and per-person PTO (teal): hatched so they read apart from weekends */
+.nonwork-company {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(244, 114, 182, 0.2) 0,
+    rgba(244, 114, 182, 0.2) 4px,
+    rgba(244, 114, 182, 0.07) 4px,
+    rgba(244, 114, 182, 0.07) 8px
+  );
+}
+
+.nonwork-pto {
+  background-image: repeating-linear-gradient(
+    135deg,
+    rgba(20, 184, 166, 0.22) 0,
+    rgba(20, 184, 166, 0.22) 4px,
+    rgba(20, 184, 166, 0.08) 4px,
+    rgba(20, 184, 166, 0.08) 8px
+  );
+}
+
 @keyframes slide-in {
   from {
     transform: translateX(100%);

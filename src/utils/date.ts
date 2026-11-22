@@ -29,17 +29,71 @@ export function isWeekend(date: Date): boolean {
   return d === 0 || d === 6;
 }
 
-/** Snap a weekend date to the next (direction = 1) or previous (direction = -1) weekday. */
-export function snapToWorkday(date: Date, direction: 1 | -1): Date {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  while (isWeekend(d)) {
+/** A custom non-work day or range (inclusive, `YYYY-MM-DD`). Without `assigneeName` it applies to everyone. */
+export interface NonWorkDayRange {
+  startDate: string;
+  endDate: string;
+  assigneeName?: string | null;
+}
+
+/**
+ * Which custom non-work days apply to a calculation: every company-wide entry plus the PTO entries
+ * whose `assigneeName` equals `assignee`. Omit the calendar (or pass no entries) for plain
+ * Monday–Friday math.
+ */
+export interface WorkCalendar {
+  entries: readonly NonWorkDayRange[];
+  assignee?: string | null;
+}
+
+/**
+ * Upper bound on how far the workday helpers walk looking for a workday. An absurd run of
+ * consecutive non-work days (e.g. a range covering decades) then falls back to Monday–Friday
+ * instead of looping for ages.
+ */
+export const MAX_NON_WORK_SCAN_DAYS = 3660;
+
+/** Whether a custom entry (not the weekend) takes `isoDate` off for a person. */
+export function entryAppliesTo(entry: NonWorkDayRange, isoDate: string, assignee?: string | null): boolean {
+  if (isoDate < entry.startDate || isoDate > entry.endDate) return false;
+  if (!entry.assigneeName) return true;
+  return entry.assigneeName.trim().toLowerCase() === (assignee ?? '').trim().toLowerCase();
+}
+
+/** Whether `date` is a weekend or falls in a company-wide / matching per-assignee non-work entry. */
+export function isNonWorkDay(date: Date, calendar?: WorkCalendar): boolean {
+  if (isWeekend(date)) return true;
+  if (!calendar || calendar.entries.length === 0) return false;
+  const iso = formatIsoDate(date);
+  return calendar.entries.some((e) => entryAppliesTo(e, iso, calendar.assignee));
+}
+
+/**
+ * Walks `d` (mutated) by `direction` until it is a workday. If the custom calendar blocks more
+ * than MAX_NON_WORK_SCAN_DAYS in a row, it settles for the next Monday–Friday instead.
+ */
+function seekWorkday(d: Date, direction: 1 | -1, calendar?: WorkCalendar): void {
+  const origin = new Date(d);
+  for (let i = 0; i <= MAX_NON_WORK_SCAN_DAYS; i++) {
+    if (!isNonWorkDay(d, calendar)) return;
     d.setDate(d.getDate() + direction);
   }
+  d.setTime(origin.getTime());
+  while (isWeekend(d)) d.setDate(d.getDate() + direction);
+}
+
+/**
+ * Snap a non-work date (weekend, holiday or the assignee's PTO) to the next (direction = 1) or
+ * previous (direction = -1) workday.
+ */
+export function snapToWorkday(date: Date, direction: 1 | -1, calendar?: WorkCalendar): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  seekWorkday(d, direction, calendar);
   return d;
 }
 
-/** Count Monday–Friday workdays between `start` and `end` inclusive. Returns 0 if `end < start`. */
-export function countWorkdaysInclusive(start: Date, end: Date): number {
+/** Count workdays between `start` and `end` inclusive. Returns 0 if `end < start`. */
+export function countWorkdaysInclusive(start: Date, end: Date, calendar?: WorkCalendar): number {
   const s = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const e = new Date(end.getFullYear(), end.getMonth(), end.getDate());
   if (e < s) return 0;
@@ -47,7 +101,7 @@ export function countWorkdaysInclusive(start: Date, end: Date): number {
   let count = 0;
   const cursor = new Date(s);
   while (cursor <= e) {
-    if (!isWeekend(cursor)) count++;
+    if (!isNonWorkDay(cursor, calendar)) count++;
     cursor.setDate(cursor.getDate() + 1);
   }
   return count;
@@ -55,21 +109,28 @@ export function countWorkdaysInclusive(start: Date, end: Date): number {
 
 /**
  * Given a start date and a workday count (`>= 1`, inclusive of the first workday),
- * return the resulting end date skipping Saturdays and Sundays.
+ * return the resulting end date skipping weekends and any non-work days in `calendar`.
  */
-export function addWorkdaysInclusive(start: Date, workdays: number): Date {
-  const cursor = snapToWorkday(start, 1);
+export function addWorkdaysInclusive(start: Date, workdays: number, calendar?: WorkCalendar): Date {
+  const cursor = snapToWorkday(start, 1, calendar);
   let remaining = Math.max(0, workdays - 1);
+  let blockedRun = 0;
   while (remaining > 0) {
     cursor.setDate(cursor.getDate() + 1);
-    if (!isWeekend(cursor)) remaining--;
+    if (isNonWorkDay(cursor, calendar)) {
+      // An absurd run of blocked days: redo the count with Monday–Friday only
+      if (++blockedRun > MAX_NON_WORK_SCAN_DAYS) return addWorkdaysInclusive(start, workdays);
+    } else {
+      blockedRun = 0;
+      remaining--;
+    }
   }
   return cursor;
 }
 
 /**
  * Shift a task's `[start, due]` schedule by `calendarDeltaDays` while preserving
- * the task's Monday–Friday workday duration and skipping weekends.
+ * the task's workday duration and skipping weekends (and holidays / PTO in `calendar`).
  *
  * Example: Mon→Fri (5 workdays) moved +2 days starts on Wed and finishes on Tue
  * (Wed, Thu, Fri, Mon, Tue = 5 workdays) instead of landing on Sunday.
@@ -78,16 +139,17 @@ export function moveTaskDatesPreservingWorkdays(
   start: Date,
   due: Date,
   calendarDeltaDays: number,
+  calendar?: WorkCalendar,
 ): { start: Date; due: Date; workdays: number } {
   const baseStart = new Date(start.getFullYear(), start.getMonth(), start.getDate());
   const baseDue = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const workdays = countWorkdaysInclusive(baseStart, baseDue);
+  const workdays = countWorkdaysInclusive(baseStart, baseDue, calendar);
 
   if (calendarDeltaDays === 0) {
     return { start: baseStart, due: baseDue, workdays };
   }
 
-  // Inverted dates or weekend-only tasks keep calendar-day offset
+  // Inverted dates or tasks made only of non-work days keep calendar-day offset
   if (baseDue < baseStart || workdays === 0) {
     return {
       start: addDays(baseStart, calendarDeltaDays),
@@ -97,8 +159,8 @@ export function moveTaskDatesPreservingWorkdays(
   }
 
   const rawStart = addDays(baseStart, calendarDeltaDays);
-  const newStart = snapToWorkday(rawStart, calendarDeltaDays > 0 ? 1 : -1);
-  const newDue = addWorkdaysInclusive(newStart, workdays);
+  const newStart = snapToWorkday(rawStart, calendarDeltaDays > 0 ? 1 : -1, calendar);
+  const newDue = addWorkdaysInclusive(newStart, workdays, calendar);
   return { start: newStart, due: newDue, workdays };
 }
 

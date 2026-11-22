@@ -1,11 +1,12 @@
 import type { Backend } from '../types';
 import { apiFetch } from './api';
 import { history } from './history';
+import { nonWorkDays } from './nonWorkDays';
 import { useGcpAuth } from './useGcpAuth';
 
 export const backend: Backend = {
   kind: 'gcp',
-  capabilities: { sharing: false, passwordLogin: false, marketingPages: false, signOut: true },
+  capabilities: { sharing: false, passwordLogin: false, marketingPages: false, sharedNonWorkDays: true, signOut: true },
   useAuth: useGcpAuth,
   // The server holds the Linear token and relays the request; the token argument is unused.
   linearRequest(_token, body) {
@@ -16,4 +17,5 @@ export const backend: Backend = {
     });
   },
   history,
+  nonWorkDays,
 };

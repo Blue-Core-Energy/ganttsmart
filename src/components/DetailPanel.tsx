@@ -5,11 +5,13 @@ import { isSafeUrl } from '@/utils/url';
 import { priorityColors, statusDotColors } from '@/utils/colors';
 import { countWorkdaysInclusive, formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
+import { calendarFor } from '@/utils/nonWorkDays';
 import { isTaskDone } from '@/utils/tasks';
 import {
   closeDetailPanel,
   getDetailPanelBaselines,
   getDetailPanelExternalEditState,
+  getDetailPanelNonWorkDays,
   getDetailPanelProjectSelectHandler,
   getDetailPanelTask,
   getRemoveRelationHandler,
@@ -284,12 +286,19 @@ export default function DetailPanel() {
               {currentTask.startDate &&
                 !currentTask.isUnscheduledExternal &&
                 (() => {
-                  const workdays = countWorkdaysInclusive(new Date(currentTask.startDate + 'T00:00:00'), dueDate);
+                  const workdays = countWorkdaysInclusive(
+                    new Date(currentTask.startDate + 'T00:00:00'),
+                    dueDate,
+                    calendarFor(getDetailPanelNonWorkDays(), currentTask.assignee),
+                  );
                   if (workdays <= 0) return null;
                   return (
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-text-muted">Duration</span>
-                      <span className="text-xs font-medium text-text-primary tabular-nums">
+                      <span
+                        className="text-xs font-medium text-text-primary tabular-nums"
+                        title="Weekends, holidays and this assignee's PTO are not counted"
+                      >
                         {workdays} {workdays === 1 ? 'workday' : 'workdays'}
                       </span>
                     </div>

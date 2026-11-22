@@ -9,23 +9,26 @@ import Onboarding from '@/components/Onboarding';
 import StatsRow from '@/components/StatsRow';
 import SessionExpired from '@/components/SessionExpired';
 import ToastContainer from '@/components/Toast';
-import { toastError } from '@/components/toastStore';
+import { toastError, toastSuccess } from '@/components/toastStore';
 import DetailPanel from '@/components/DetailPanel';
 import {
   setBaselinesForPanel,
   setDetailPanelExternalEditState,
+  setDetailPanelNonWorkDays,
   setDetailPanelProjectSelectHandler,
   setDetailPanelTaskMap,
   setRemoveRelationHandler,
 } from '@/components/detailPanelStore';
 import MilestonePanel from '@/components/MilestonePanel';
+import NonWorkDaysDialog from '@/components/NonWorkDaysDialog';
 import { setMilestoneDateHandler } from '@/components/milestonePanelStore';
 import { backend } from '@/backend';
 import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
+import { useNonWorkDays } from '@/hooks/useNonWorkDays';
 import { usePlanningHistory } from '@/hooks/usePlanningHistory';
 import { useTheme } from '@/hooks/useTheme';
-import type { InlineEditHandlers } from '@/types';
+import type { InlineEditHandlers, NewNonWorkDay } from '@/types';
 import {
   clearPendingOAuthProject,
   peekPendingOAuthProject,
@@ -94,6 +97,7 @@ function GanttView({
     zoomOut,
     reschedule,
     rescheduleStart,
+    snapTasksToNonWorkDays,
     updateMilestoneDate,
     cycleStatus,
     loadTeamWorkflowStates,
@@ -150,6 +154,32 @@ function GanttView({
     },
     [rescheduleStart, tasks, logChange],
   );
+
+  // Shared holidays / PTO calendar. Adding an entry snaps affected tasks off the new days.
+  const nonWorkDays = useNonWorkDays();
+  const [showNonWorkDays, setShowNonWorkDays] = useState(false);
+  const closeNonWorkDays = useCallback(() => setShowNonWorkDays(false), []);
+
+  const handleAddNonWorkDay = useCallback(
+    async (input: NewNonWorkDay) => {
+      const added = await nonWorkDays.add(input);
+      void snapTasksToNonWorkDays([...nonWorkDays.entries, added], added)
+        .then((snapped) => {
+          if (snapped.length === 0) toastSuccess(`Added ${added.label}`);
+          for (const { task, startDate, due } of snapped) {
+            if (due) logChange(task.id, 'due_date', task.due, due);
+            if (startDate) logChange(task.id, 'start_date', task.startDate, startDate);
+          }
+        })
+        .catch(() => {});
+    },
+    [nonWorkDays, snapTasksToNonWorkDays, logChange],
+  );
+
+  useEffect(() => {
+    setDetailPanelNonWorkDays(nonWorkDays.entries);
+    return () => setDetailPanelNonWorkDays([]);
+  }, [nonWorkDays.entries]);
 
   // Wrap cycleStatus to log status transitions
   const cycleStatusWithHistory = useCallback(
@@ -294,6 +324,8 @@ function GanttView({
         onShowExternalChange={setShowExternal}
         allowExternalEdits={allowExternalEdits}
         onAllowExternalEditsChange={setAllowExternalEdits}
+        onOpenNonWorkDays={() => setShowNonWorkDays(true)}
+        nonWorkDayCount={nonWorkDays.entries.length}
       />
 
       <StatsRow tasks={filteredTasks} />
@@ -323,11 +355,23 @@ function GanttView({
           onSelectProject={selectProject}
           projectName={projectName}
           ignoreCollapsed={hasActiveRowFilters(filters)}
+          nonWorkDays={nonWorkDays.entries}
         />
       </div>
 
       <DetailPanel />
       <MilestonePanel />
+      {showNonWorkDays && (
+        <NonWorkDaysDialog
+          entries={nonWorkDays.entries}
+          assignees={assignees}
+          loaded={nonWorkDays.loaded}
+          shared={backend.capabilities.sharedNonWorkDays}
+          onAdd={handleAddNonWorkDay}
+          onRemove={nonWorkDays.remove}
+          onClose={closeNonWorkDays}
+        />
+      )}
       <ToastContainer />
     </div>
   );

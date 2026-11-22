@@ -36,6 +36,20 @@ export interface Task {
   isUnscheduledExternal?: boolean;
 }
 
+/**
+ * A holiday, shutdown or vacation: one date or an inclusive range (`YYYY-MM-DD`).
+ * Without `assigneeName` it is company-wide; with it, only that person's tasks skip the days.
+ */
+export interface NonWorkDay {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  assigneeName: string | null;
+}
+
+export type NewNonWorkDay = Omit<NonWorkDay, 'id'>;
+
 export interface Project {
   id: string;
   name: string;
