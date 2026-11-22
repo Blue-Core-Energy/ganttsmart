@@ -623,7 +623,11 @@ export default function GanttRow({
             >
               {showTreeGutter && treeGutter}
               <div className="min-w-0 flex-1 flex items-center gap-1.5">
-                {task.isExternal &&
+                {/* The badge and warning are purely informational: they step aside while renaming to give the input room.
+                    The badge is capped at 40% of the line and never shrinks, so a short title beside a long project name
+                    keeps its whole text instead of splitting the squeeze by natural width (the tooltip has the full name). */}
+                {!isEditingTitle &&
+                  task.isExternal &&
                   !showsColumn('project') &&
                   (task.projectId && onSelectProject ? (
                     <button
@@ -634,20 +638,20 @@ export default function GanttRow({
                         e.stopPropagation();
                         onSelectProject(task.projectId!);
                       }}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink-0 min-w-0 max-w-[min(110px,40%)] truncate cursor-pointer"
                       title={`From ${task.projectName || 'External project'} — click to open project`}
                     >
                       <span className="truncate">{task.projectName || 'External'}</span>
                     </button>
                   ) : (
                     <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
+                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink-0 min-w-0 max-w-[min(110px,40%)] truncate"
                       title={`External issue · ${task.projectName || 'No Project'}`}
                     >
                       {task.projectName || 'External'}
                     </span>
                   ))}
-                {depViolation && depViolation.length > 0 && (
+                {!isEditingTitle && depViolation && depViolation.length > 0 && (
                   <span
                     className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
                     title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}

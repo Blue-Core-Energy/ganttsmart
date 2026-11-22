@@ -16,6 +16,7 @@ export const CELL_CONTROL_HEIGHT = 20;
  * The row's 1px bottom border is outside the content box, so it is subtracted first.
  *
  * Sized for the tallest control across both cells (the assignee's avatar). The status cell's
- * tallest item is its ~17px text line, so it ends up slightly over-padded, which is harmless.
+ * tallest item is its ~17px text line, so it is slightly under-filled (about 36px of the 39px
+ * content box), which is harmless.
  */
 export const CELL_HIT_PAD = (ROW_HEIGHT - 1 - CELL_CONTROL_HEIGHT) / 2;

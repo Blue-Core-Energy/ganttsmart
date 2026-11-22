@@ -4359,6 +4359,9 @@ test.describe('GanttSmart GCP app', () => {
       project: { id: 'proj-2', name: 'Controls and Instrumentation Rollout', targetDate: isoOffsetDays(20) },
     };
 
+    // A two-letter title beside that same long project name: the title's natural width is tiny
+    const shortExternalIssue = { ...externalIssue, id: 'uuid-ctrl-43', identifier: 'CTRL-43', title: 'QA' };
+
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as {
         query?: string;
@@ -4399,6 +4402,7 @@ test.describe('GanttSmart GCP app', () => {
                 issue(303, 'Depth three with a long enough title to truncate', 14, -2, 302),
                 issue(304, 'Depth four with a long enough title to truncate', 13, -2, 303),
                 issue(305, 'Depth five with a long enough title to truncate', 12, -2, 304),
+                issue(306, 'Depth five with a warning and a long title to truncate', 11, -2, 304),
                 issue(310, 'Blocker due late', 25, -4, null),
               ],
             },
@@ -4422,14 +4426,18 @@ test.describe('GanttSmart GCP app', () => {
               // LOC-303 and the external CTRL-42 both start before LOC-310 is due, so both carry a warning
               relationsOf(303, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [304]),
               // LOC-304 also warns (depth four with a warning); LOC-305 is the deepest row, with only the dot
-              relationsOf(304, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [305]),
+              relationsOf(304, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [305, 306]),
               relationsOf(305, [], []),
+              // LOC-306 is a depth-five sibling that also warns, the tightest row a rename can happen on
+              relationsOf(306, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], []),
               relationsOf(
                 310,
                 [
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-303' } },
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-304' } },
+                  { type: 'blocks', relatedIssue: { identifier: 'LOC-306' } },
                   { type: 'blocks', relatedIssue: externalIssue },
+                  { type: 'blocks', relatedIssue: shortExternalIssue },
                 ],
                 [],
               ),
@@ -4467,11 +4475,16 @@ test.describe('GanttSmart GCP app', () => {
     // The widest lines the Issue cell can hold at 200px: deep indents (3 and 4 with a warning, 5 with just the
     // dot, which is the only status control on a phone) and an external row (always top level) with its project
     // badge and a warning
-    for (const { id, warns } of [
-      { id: 'LOC-303', warns: true },
-      { id: 'LOC-304', warns: true },
-      { id: 'LOC-305', warns: false },
-      { id: 'CTRL-42', warns: true },
+    // `minTitle` is how much of the title must survive. Depth five with a warning is the tightest row: its
+    // 42px line holds the 10px warning, the 8px dot and two 6px gaps, which leaves about 12px, so the title is
+    // down to an ellipsis there by geometry rather than by layout choice
+    for (const { id, warns, minTitle } of [
+      { id: 'LOC-303', warns: true, minTitle: 16 },
+      { id: 'LOC-304', warns: true, minTitle: 16 },
+      { id: 'LOC-305', warns: false, minTitle: 16 },
+      { id: 'LOC-306', warns: true, minTitle: 10 },
+      { id: 'CTRL-42', warns: true, minTitle: 16 },
+      { id: 'CTRL-43', warns: true, minTitle: 16 },
     ]) {
       const row = page.locator(`tr[data-task-id="${id}"]`);
       const cell = row.locator('td[data-column-key="task"]');
@@ -4505,9 +4518,16 @@ test.describe('GanttSmart GCP app', () => {
         expect(warnBox.x + warnBox.width).toBeLessThanOrEqual(dotBox.x);
       }
 
-      // The title keeps some room: it truncates rather than vanishing
+      // The title keeps some room: it truncates rather than vanishing, even beside a long project badge
       const titleBox = (await cell.locator(`[data-task-title="${id}"]`).boundingBox())!;
-      expect(titleBox.width).toBeGreaterThanOrEqual(16);
+      expect(titleBox.width).toBeGreaterThanOrEqual(minTitle);
+      if (id === 'CTRL-43') {
+        // A two-letter title beside the longest project name is shown whole: the badge is capped, so it can't starve it
+        const truncated = await cell
+          .locator(`[data-task-title="${id}"]`)
+          .evaluate((el) => el.scrollWidth > el.clientWidth);
+        expect(truncated).toBe(false);
+      }
       expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(dotBox.x);
     }
 
@@ -4520,6 +4540,38 @@ test.describe('GanttSmart GCP app', () => {
       .locator('tr[data-task-id="CTRL-42"] td[data-column-key="task"] [data-external-project-jump]')
       .boundingBox())!;
     expect(badgeBox.width).toBeGreaterThan(20);
+
+    // Renaming hides the project badge and warning (both informational) so the input gets their room, keeps the
+    // dot, and the warning returns afterwards. Depth five is the tightest row: its 42px line holds the 8px dot and
+    // a 6px gap, so about 28px is the most any input can get there, which is enough for a couple of characters.
+    // The floors are what the layout delivers (63, 45 and 27px) less a pixel or two of slack
+    const warning = (id: string) =>
+      page.locator(`tr[data-task-id="${id}"] td[data-column-key="task"] span[title^="Starts before"]`);
+    const renameWidths: Record<string, number> = {};
+    for (const { id, minInput } of [
+      { id: 'LOC-303', minInput: 60 },
+      { id: 'LOC-304', minInput: 42 },
+      { id: 'LOC-305', minInput: 24 },
+      { id: 'LOC-306', minInput: 24 },
+    ]) {
+      const hasWarning = id !== 'LOC-305';
+      await expect(warning(id)).toHaveCount(hasWarning ? 1 : 0);
+      await page.locator(`[data-task-title="${id}"]`).dblclick();
+      const input = page.locator('input[data-inline-edit="title"]');
+      await expect(input).toBeFocused();
+      await expect(warning(id)).toHaveCount(0);
+      const inputBox = (await input.boundingBox())!;
+      const dotBox = (await page.locator(`[data-status-bubble="${id}"]`).boundingBox())!;
+      expect(inputBox.width).toBeGreaterThanOrEqual(minInput);
+      expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(dotBox.x);
+      renameWidths[id] = inputBox.width;
+      await page.keyboard.press('Escape');
+      await expect(input).toHaveCount(0);
+      await expect(warning(id)).toHaveCount(hasWarning ? 1 : 0);
+    }
+    // The warning costs a rename nothing: depth five with one gets the same width as depth five without
+    expect(Math.abs(renameWidths['LOC-306'] - renameWidths['LOC-305'])).toBeLessThanOrEqual(1);
+    expect(stateUpdates).toEqual([]);
 
     // Click-to-cycle still works from the deepest rows
     await page.locator('[data-status-bubble="LOC-303"]').click();
