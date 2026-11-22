@@ -24,6 +24,9 @@ interface Props {
   isLinkedInLinear?: boolean;
   linkingToLinear?: boolean;
   onAddToLinear?: () => void;
+  /** Opens the Holidays / PTO manager; the menu entry is hidden when omitted */
+  onOpenNonWorkDays?: () => void;
+  nonWorkDayCount?: number;
 }
 
 const iconBtn =
@@ -124,6 +127,28 @@ function ExternalLinkIcon({ className = 'shrink-0' }: { className?: string }) {
   );
 }
 
+function CalendarOffIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <path d="M9 15l6 4M15 15l-6 4" />
+    </svg>
+  );
+}
+
 function CheckCircleIcon() {
   return (
     <svg
@@ -157,6 +182,8 @@ export default memo(function Header({
   isLinkedInLinear,
   linkingToLinear,
   onAddToLinear,
+  onOpenNonWorkDays,
+  nonWorkDayCount = 0,
 }: Props) {
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
@@ -408,6 +435,30 @@ export default memo(function Header({
                       <span>{linkingToLinear ? 'Linking…' : 'Add to Linear'}</span>
                     </button>
                   )}
+                  <div className="border-t border-border-primary my-0.5" />
+                </>
+              )}
+
+              {/* Holidays / PTO calendar manager */}
+              {onOpenNonWorkDays && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      onOpenNonWorkDays();
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                    title="Manage company holidays, shutdowns and per-person PTO"
+                  >
+                    <span className="flex items-center gap-2">
+                      <CalendarOffIcon />
+                      <span>Holidays / PTO</span>
+                    </span>
+                    {nonWorkDayCount > 0 && (
+                      <span className="font-mono tabular-nums text-[11px] text-text-muted">{nonWorkDayCount}</span>
+                    )}
+                  </button>
                   <div className="border-t border-border-primary my-0.5" />
                 </>
               )}

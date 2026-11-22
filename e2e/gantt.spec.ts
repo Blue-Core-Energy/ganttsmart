@@ -319,12 +319,17 @@ async function mockLinearIssues(page: Page, issues: MockIssue[]) {
   return { dueUpdates, startUpdates };
 }
 
+async function openNonWorkDaysDialog(page: Page): Promise<void> {
+  await page.getByTitle('Account').click();
+  await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+}
+
 async function addNonWorkDayViaDialog(
   page: Page,
   entry: { label: string; start: string; end?: string; person?: string },
 ): Promise<void> {
   const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
-  await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+  await openNonWorkDaysDialog(page);
   await expect(dialog).toBeVisible();
   await dialog.getByLabel('Name', { exact: true }).fill(entry.label);
   await dialog.getByLabel('Start date', { exact: true }).fill(entry.start);
@@ -5632,7 +5637,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(dueUpdates[1]).toEqual({ id: 'uuid-211', dueDate: isoOffsetDays(wed) });
 
     // The manager lists both entries; removing one clears its shading
-    await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+    await openNonWorkDaysDialog(page);
     const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
     await expect(dialog.locator('[data-non-work-entry]')).toHaveCount(2);
     await expect(dialog.locator('[data-non-work-entry="Far Future"]')).toContainText(' – ');
@@ -5662,7 +5667,7 @@ test.describe('GanttSmart GCP app', () => {
 
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-221"]')).toBeVisible();
-    await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+    await openNonWorkDaysDialog(page);
     const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
     const add = dialog.getByRole('button', { name: 'Add', exact: true });
 
