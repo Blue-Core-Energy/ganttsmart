@@ -56,7 +56,14 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
     };
     place();
     window.addEventListener('resize', place);
-    return () => window.removeEventListener('resize', place);
+    // The popover's own width can change while it is open (e.g. the footer label grows
+    // as a range is picked), which a window resize alone would miss
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (popoverRef.current) observer?.observe(popoverRef.current);
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
   }, [open, wideEnough]);
 
   // Draft state — only committed on Apply

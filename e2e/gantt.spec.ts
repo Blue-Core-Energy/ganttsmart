@@ -5375,6 +5375,7 @@ test.describe('GanttSmart GCP app', () => {
           /previous|next/i.test(b.getAttribute('aria-label') ?? ''),
         );
         return {
+          popLeft: box(pop).left,
           popRight: box(pop).right,
           noHorizontalScroll: pop.scrollWidth <= pop.clientWidth,
           gridTop: firstDay.top,
@@ -5417,6 +5418,7 @@ test.describe('GanttSmart GCP app', () => {
     const mobile = await layout();
     expect(mobile.noHorizontalScroll).toBe(true);
     expect(mobile.navBottom).toBeLessThanOrEqual(mobile.gridTop);
+    expect(mobile.popLeft).toBeGreaterThanOrEqual(0);
     expect(mobile.popRight).toBeLessThanOrEqual(375);
 
     expect(errors).toEqual([]);
