@@ -1218,8 +1218,8 @@ test.describe('GanttSmart GCP app', () => {
     expect(headerBox).not.toBeNull();
     expect(headerBox!.height).toBeLessThanOrEqual(54);
 
-    // 1. Open Feature Request modal
-    await page.getByRole('button', { name: 'Feature Request' }).click();
+    // 1. Open Feedback modal
+    await page.getByRole('button', { name: 'Feedback' }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('tab', { name: 'Feature Request' })).toHaveAttribute('aria-selected', 'true');
@@ -1261,9 +1261,10 @@ test.describe('GanttSmart GCP app', () => {
     await dialog.getByRole('button', { name: 'Done' }).click();
     await expect(dialog).toHaveCount(0);
 
-    // 2. Open Bug Report modal from header button
-    await page.getByRole('button', { name: 'Bug Report' }).click();
+    // 2. Open Feedback modal and switch to Bug Report tab
+    await page.getByRole('button', { name: 'Feedback' }).click();
     await expect(dialog).toBeVisible();
+    await dialog.getByRole('tab', { name: 'Bug Report' }).click();
     await expect(dialog.getByRole('tab', { name: 'Bug Report' })).toHaveAttribute('aria-selected', 'true');
 
     await dialog.getByLabel(/Title/).fill('Zoom slider jumps on drag');
@@ -1294,7 +1295,7 @@ test.describe('GanttSmart GCP app', () => {
 
     // 3. Clicking non-focusable dialog heading and pressing global shortcut keys must not trigger background zoom/refresh
     const barBefore = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!.width;
-    await page.getByRole('button', { name: 'Bug Report' }).click();
+    await page.getByRole('button', { name: 'Feedback' }).click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('heading', { name: 'Send Feedback' }).click();
     await page.keyboard.press('+');
@@ -1302,7 +1303,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
 
-    // 4. Mobile viewport: header stays single-line without horizontal overflow and compact Feedback menu opens Bug Report
+    // 4. Mobile viewport: header stays single-line without horizontal overflow and unified Feedback button opens dialog
     await page.setViewportSize({ width: 375, height: 812 });
     const mobileHeaderBox = await page.locator('header').boundingBox();
     expect(mobileHeaderBox).not.toBeNull();
@@ -1310,9 +1311,9 @@ test.describe('GanttSmart GCP app', () => {
     const mobileOverflow = await page.locator('header').evaluate((el) => el.scrollWidth > el.clientWidth);
     expect(mobileOverflow).toBe(false);
 
-    await page.getByRole('button', { name: 'Send feedback' }).click();
-    await page.getByRole('button', { name: 'Bug Report' }).click();
+    await page.getByRole('button', { name: 'Feedback' }).click();
     await expect(dialog).toBeVisible();
+    await dialog.getByRole('tab', { name: 'Bug Report' }).click();
     await expect(dialog.getByRole('tab', { name: 'Bug Report' })).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
@@ -1406,7 +1407,7 @@ test.describe('GanttSmart GCP app', () => {
     });
 
     await page.goto('/app');
-    await page.getByRole('button', { name: 'Feature Request' }).click();
+    await page.getByRole('button', { name: 'Feedback' }).click();
 
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel(/Title/).fill('Keyboard shortcut cheat sheet');
