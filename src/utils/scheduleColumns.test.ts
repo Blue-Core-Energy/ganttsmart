@@ -187,6 +187,16 @@ describe('persistence', () => {
     });
   });
 
+  it('still returns a saved selection when storage can be read but not written', () => {
+    stubStorage({
+      getItem: (k: string) => (k === 'gantt_columns' ? JSON.stringify(['id', 'task', 'priority']) : null),
+      setItem: () => {
+        throw new Error('quota');
+      },
+    });
+    expect(loadVisibleColumns()).toEqual(['id', 'task', 'priority']);
+  });
+
   it('keeps working when storage is unavailable', () => {
     stubStorage({
       getItem: () => {
@@ -242,24 +252,19 @@ describe('narrow screens', () => {
     expect(visibleColumnsForViewport(selected)).toEqual(selected);
   });
 
-  it('is a display rule only: widening restores everything and storage is never written', () => {
-    stubStore();
-    saveVisibleColumns(selected);
-    saveColumnWidths({ ...DEFAULT_COLUMN_WIDTHS, task: 350 });
-    const stored = loadVisibleColumns();
-    const storedWidths = loadColumnWidths();
-    const writes = vi.spyOn(localStorage, 'setItem');
+  // That none of this writes to storage is proved by the E2E freeze test, which checks that
+  // gantt_columns and gantt_column_widths stay unset across a 375px -> 1280px round trip
+  it('widening restores the full saved selection and widths', () => {
+    const stored = ['id', 'task', 'assignee', 'status', 'start', 'due', 'priority'] as ColumnKey[];
+    const savedWidths = { ...DEFAULT_COLUMN_WIDTHS, task: 350 };
 
     expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['id', 'task']);
-    expect(columnWidthsForViewport(storedWidths, { viewportWidth: 375 }).task).toBe(NARROW_COLUMN_WIDTHS.task);
-    expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(selected);
-    expect(columnWidthsForViewport(storedWidths, { viewportWidth: 1280 }).task).toBe(350);
-
-    expect(writes).not.toHaveBeenCalled();
+    expect(columnWidthsForViewport(savedWidths, { viewportWidth: 375 }).task).toBe(NARROW_COLUMN_WIDTHS.task);
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(stored);
+    expect(columnWidthsForViewport(savedWidths, { viewportWidth: 1280 }).task).toBe(350);
+    // The inputs are left as they were
     expect(stored).toEqual(selected);
-    expect(storedWidths.task).toBe(350);
-    expect(loadVisibleColumns()).toEqual(selected);
-    expect(loadColumnWidths().task).toBe(350);
+    expect(savedWidths.task).toBe(350);
   });
 
   it('does not interact with the migration: a narrow first load still adds ID to storage', () => {

@@ -61,11 +61,19 @@ export function normalizeVisibleColumns(keys: unknown): ColumnKey[] {
   return ordered.length > 1 ? ordered : [...DEFAULT_VISIBLE_COLUMNS];
 }
 
+function markIdMigrated(): void {
+  try {
+    localStorage.setItem(ID_MIGRATED_KEY, '1');
+  } catch {
+    // Storage that can be read but not written must not hide a valid saved selection
+  }
+}
+
 export function loadVisibleColumns(): ColumnKey[] {
   try {
     const migrated = localStorage.getItem(ID_MIGRATED_KEY) === '1';
     // Set before anything else, so a fresh install never counts as needing the migration
-    if (!migrated) localStorage.setItem(ID_MIGRATED_KEY, '1');
+    if (!migrated) markIdMigrated();
     const raw = localStorage.getItem(VISIBLE_KEY);
     if (!raw) return [...DEFAULT_VISIBLE_COLUMNS];
     const stored = normalizeVisibleColumns(JSON.parse(raw));
@@ -81,11 +89,11 @@ export function loadVisibleColumns(): ColumnKey[] {
 export function saveVisibleColumns(keys: ColumnKey[]): void {
   try {
     localStorage.setItem(VISIBLE_KEY, JSON.stringify(normalizeVisibleColumns(keys)));
-    // A selection saved on purpose is already past the migration
-    localStorage.setItem(ID_MIGRATED_KEY, '1');
   } catch {
     // Storage unavailable (private mode, quota) — the session still works
   }
+  // A selection saved on purpose is already past the migration
+  markIdMigrated();
 }
 
 /** Merge stored widths over the defaults, dropping unknown keys and sub-minimum values. */
@@ -200,12 +208,9 @@ export function computeStickyColumnOffsets(
 ): StickyColumnOffsets {
   const isNarrow = resolveIsNarrow(options);
 
-  const totalWidth = totalColumnWidth(visibleColumns, colWidths);
-  const onlyTaskFrozen =
-    isNarrow ||
-    (options?.viewportWidth !== undefined &&
-      options.viewportWidth > 0 &&
-      totalWidth > options.viewportWidth * MAX_FROZEN_WIDTH_RATIO);
+  // No limit when the viewport width is unknown
+  const frozenLimit = options?.viewportWidth ? options.viewportWidth * MAX_FROZEN_WIDTH_RATIO : Infinity;
+  const onlyTaskFrozen = isNarrow || totalColumnWidth(visibleColumns, colWidths) > frozenLimit;
 
   const offsets: Partial<Record<ColumnKey, number>> = {};
 
@@ -214,8 +219,7 @@ export function computeStickyColumnOffsets(
     if (taskIndex >= 0) {
       const leading = visibleColumns.slice(0, taskIndex + 1);
       const leadingWidth = totalColumnWidth(leading, colWidths);
-      const leadingFits =
-        isNarrow || !options?.viewportWidth || leadingWidth <= options.viewportWidth * MAX_FROZEN_WIDTH_RATIO;
+      const leadingFits = isNarrow || leadingWidth <= frozenLimit;
       if (taskIndex === 0 || !leadingFits) {
         offsets.task = 0;
       } else {
