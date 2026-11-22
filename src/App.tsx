@@ -158,6 +158,7 @@ function GanttView({
   // Shared holidays / PTO calendar. Adding an entry snaps affected tasks off the new days.
   const nonWorkDays = useNonWorkDays();
   const [showNonWorkDays, setShowNonWorkDays] = useState(false);
+  const openNonWorkDays = useCallback(() => setShowNonWorkDays(true), []);
   const closeNonWorkDays = useCallback(() => setShowNonWorkDays(false), []);
 
   const handleAddNonWorkDay = useCallback(
@@ -305,7 +306,7 @@ function GanttView({
         isLinkedInLinear={isLinkedInLinear}
         linkingToLinear={linkingToLinear}
         onAddToLinear={addProjectLinkToLinear}
-        onOpenNonWorkDays={() => setShowNonWorkDays(true)}
+        onOpenNonWorkDays={openNonWorkDays}
         nonWorkDayCount={nonWorkDays.entries.length}
       />
 

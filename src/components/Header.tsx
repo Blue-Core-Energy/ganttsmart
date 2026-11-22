@@ -456,7 +456,7 @@ export default memo(function Header({
                       <span>Holidays / PTO</span>
                     </span>
                     {nonWorkDayCount > 0 && (
-                      <span className="font-mono text-[11px] text-text-muted">{nonWorkDayCount}</span>
+                      <span className="font-mono tabular-nums text-[11px] text-text-muted">{nonWorkDayCount}</span>
                     )}
                   </button>
                   <div className="border-t border-border-primary my-0.5" />
