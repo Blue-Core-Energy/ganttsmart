@@ -546,15 +546,6 @@ export default function GanttRow({
     </a>
   );
 
-  const subIssueProgress = task.totalChildren > 0 && (
-    <span
-      className="text-[9px] font-mono text-text-muted shrink-0 tabular-nums"
-      title={`${task.completedChildren} of ${task.totalChildren} subtasks complete`}
-    >
-      {task.completedChildren}/{task.totalChildren}
-    </span>
-  );
-
   /** Chevron for parents, an elbow connector for leaf sub-issues, empty space otherwise */
   const treeGutter =
     childCount > 0 ? (
@@ -634,7 +625,7 @@ export default function GanttRow({
               {showTreeGutter && treeGutter}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  {/* The ID and sub-issue counts move out when they have a column of their own */}
+                  {/* The ID moves out when it has a column of its own */}
                   {!showsColumn('id') && issueIdLink}
                   {task.isExternal &&
                     !showsColumn('project') &&
@@ -670,7 +661,6 @@ export default function GanttRow({
                       </svg>
                     </span>
                   )}
-                  {!showsColumn('progress') && subIssueProgress}
                   {/* Keep click-to-cycle reachable when the status column is hidden */}
                   {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
                 </div>
