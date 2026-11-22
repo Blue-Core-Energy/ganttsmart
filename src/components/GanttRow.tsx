@@ -33,6 +33,8 @@ interface Props {
   timeScale?: TimeScale;
   visibleColumns: ColumnKey[];
   colWidths: ColumnWidths;
+  stickyOffsets?: Partial<Record<ColumnKey, number>>;
+  lastFrozenColumn?: ColumnKey;
   /** Name of the project being viewed, used by the Project column for local tasks */
   projectName?: string;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
@@ -59,6 +61,8 @@ export default function GanttRow({
   timeScale = 'day',
   visibleColumns,
   colWidths,
+  stickyOffsets,
+  lastFrozenColumn,
   projectName,
   onReschedule,
   onRescheduleStart,
@@ -633,7 +637,7 @@ export default function GanttRow({
       data-task-done={isDone ? 'true' : undefined}
       data-external-task={task.isExternal ? 'true' : undefined}
       data-highlighted={isHighlighted ? 'true' : undefined}
-      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 ${isHighlighted ? '!bg-accent/[0.08] !border-l-accent' : task.isExternal ? 'border-l-accent/45 bg-bg-header/35' : 'border-l-transparent'} hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
+      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] ${isHighlighted ? '!bg-accent/[0.08]' : task.isExternal ? 'bg-bg-header/35' : ''} focus-within:bg-accent/[0.04] ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
       tabIndex={0}
       role="row"
       aria-label={`${task.id}: ${task.title}${task.isExternal ? `, from ${task.projectName || 'External project'}` : ''}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
@@ -714,17 +718,35 @@ export default function GanttRow({
         }
       }}
     >
-      {visibleColumns.map((key) => (
-        <td
-          key={key}
-          className={`h-[56px] border-b border-r border-border-primary align-middle overflow-hidden ${
-            key === 'task' ? 'px-[18px]' : 'px-3'
-          }`}
-          style={{ width: colWidths[key], minWidth: getColumnDef(key).minWidth, maxWidth: colWidths[key] }}
-        >
-          {renderCell(key)}
-        </td>
-      ))}
+      {visibleColumns.map((key, i) => {
+        const stickyLeft = stickyOffsets?.[key];
+        const isSticky = stickyLeft !== undefined;
+        const isLastFrozen = key === lastFrozenColumn;
+        const isFirstCol = i === 0;
+
+        return (
+          <td
+            key={key}
+            data-column-key={key}
+            data-frozen={isSticky ? 'true' : undefined}
+            className={`h-[56px] border-b border-r border-border-primary align-middle overflow-hidden gantt-sticky-cell ${
+              key === 'task' ? 'px-[18px]' : 'px-3'
+            } ${isSticky ? 'sticky z-[6]' : ''} ${
+              isFirstCol
+                ? `border-l-2 ${task.isExternal ? 'border-l-accent/45' : 'border-l-transparent'} group-hover:border-l-accent group-focus-within:border-l-accent`
+                : ''
+            } ${isLastFrozen ? 'border-r border-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
+            style={{
+              width: colWidths[key],
+              minWidth: getColumnDef(key).minWidth,
+              maxWidth: colWidths[key],
+              left: isSticky ? stickyLeft : undefined,
+            }}
+          >
+            {renderCell(key)}
+          </td>
+        );
+      })}
       {/* Chart */}
       <td className="h-[56px] p-0 relative border-b border-border-primary align-middle">
         <div className="relative h-full flex items-center" style={{ width: totalDays * dayWidth }}>

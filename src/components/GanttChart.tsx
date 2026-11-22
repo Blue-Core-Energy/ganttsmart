@@ -13,6 +13,7 @@ import {
   zoomDayWidth,
 } from '@/utils/timelineZoom';
 import {
+  computeStickyColumnOffsets,
   getColumnDef,
   loadColumnWidths,
   loadVisibleColumns,
@@ -165,6 +166,36 @@ export default function GanttChart({
     if (!activeSelectedArrow) return undefined;
     return new Set([activeSelectedArrow.sourceId, activeSelectedArrow.targetId]);
   }, [activeSelectedArrow]);
+
+  const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+  );
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1200));
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia('(min-width: 768px)');
+    const updateViewport = () => {
+      setIsNarrowViewport(!mq.matches);
+      setViewportWidth(window.innerWidth);
+    };
+    updateViewport();
+    mq.addEventListener('change', updateViewport);
+    window.addEventListener('resize', updateViewport);
+    return () => {
+      mq.removeEventListener('change', updateViewport);
+      window.removeEventListener('resize', updateViewport);
+    };
+  }, []);
+
+  const stickyColumnInfo = useMemo(
+    () =>
+      computeStickyColumnOffsets(visibleColumns, colWidths, {
+        isNarrow: isNarrowViewport,
+        viewportWidth,
+      }),
+    [visibleColumns, colWidths, isNarrowViewport, viewportWidth],
+  );
 
   const ganttRef = useRef<HTMLDivElement>(null);
   /** Date and pointer position to restore after a zoom, set by the wheel handler */
@@ -784,7 +815,7 @@ export default function GanttChart({
   }
 
   const thBase =
-    'h-[52px] text-[11px] font-bold uppercase tracking-[0.07em] text-text-muted text-left border-b-2 border-border-primary bg-bg-header sticky top-0 z-5 relative select-none border-r border-border-primary';
+    'h-[52px] text-[11px] font-bold uppercase tracking-[0.07em] text-text-muted text-left border-b-2 border-border-primary bg-bg-header relative select-none border-r border-border-primary';
 
   return (
     <div
@@ -794,34 +825,49 @@ export default function GanttChart({
       className="h-full w-full bg-bg-primary overflow-auto print:overflow-visible print:border-0"
     >
       <div ref={innerRef} className="relative" style={{ minWidth: '100%' }}>
-        <table className="border-collapse" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
+        <table className="border-separate border-spacing-0" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
           <thead ref={theadRef}>
             <tr>
-              {visibleColumns.map((key, i) => (
-                <th
-                  key={key}
-                  className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'}`}
-                  style={{ width: colWidths[key], minWidth: getColumnDef(key).minWidth }}
-                  onContextMenu={togglePickerFromContextMenu}
-                  title={i === 0 ? 'Right-click any column header to choose columns' : undefined}
-                >
-                  <span className="inline-flex items-center gap-1.5 max-w-full">
-                    <span className="truncate">{getColumnDef(key).label}</span>
-                    {/* Keyboard- and touch-reachable way to the same picker */}
-                    {i === 0 && (
-                      <ColumnPicker
-                        open={pickerOpen}
-                        onOpenChange={setPickerOpen}
-                        visible={visibleColumns}
-                        onChange={changeVisibleColumns}
-                      />
-                    )}
-                  </span>
-                  <ResizeHandle onResize={makeResizeHandler(key)} />
-                </th>
-              ))}
+              {visibleColumns.map((key, i) => {
+                const stickyLeft = stickyColumnInfo.offsets[key];
+                const isSticky = stickyLeft !== undefined;
+                const isLastFrozen = key === stickyColumnInfo.lastFrozenKey;
+
+                return (
+                  <th
+                    key={key}
+                    data-column-key={key}
+                    data-frozen={isSticky ? 'true' : undefined}
+                    className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
+                      isSticky ? 'sticky top-0 z-[10]' : 'sticky top-0 z-[5]'
+                    } ${isLastFrozen ? 'border-r border-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
+                    style={{
+                      width: colWidths[key],
+                      minWidth: getColumnDef(key).minWidth,
+                      maxWidth: colWidths[key],
+                      left: isSticky ? stickyLeft : undefined,
+                    }}
+                    onContextMenu={togglePickerFromContextMenu}
+                    title={i === 0 ? 'Right-click any column header to choose columns' : undefined}
+                  >
+                    <span className="inline-flex items-center gap-1.5 max-w-full">
+                      <span className="truncate">{getColumnDef(key).label}</span>
+                      {/* Keyboard- and touch-reachable way to the same picker */}
+                      {i === 0 && (
+                        <ColumnPicker
+                          open={pickerOpen}
+                          onOpenChange={setPickerOpen}
+                          visible={visibleColumns}
+                          onChange={changeVisibleColumns}
+                        />
+                      )}
+                    </span>
+                    <ResizeHandle onResize={makeResizeHandler(key)} />
+                  </th>
+                );
+              })}
               <th
-                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-5"
+                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-[5]"
                 onContextMenu={togglePickerFromContextMenu}
               >
                 {/* Milestone band — flags sit above the calendar and act as drag handles */}
@@ -925,6 +971,8 @@ export default function GanttChart({
                 timeScale={timeScale}
                 visibleColumns={visibleColumns}
                 colWidths={colWidths}
+                stickyOffsets={stickyColumnInfo.offsets}
+                lastFrozenColumn={stickyColumnInfo.lastFrozenKey}
                 projectName={projectName}
                 onReschedule={onReschedule}
                 onRescheduleStart={onRescheduleStart}

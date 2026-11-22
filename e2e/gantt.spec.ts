@@ -23,7 +23,7 @@ function startTagOffsetDays(days: number): string {
 
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
-  const isLocal = (url: string) => url.startsWith('http://127.0.0.1:4173');
+  const isLocal = (url: string) => url.startsWith('http://127.0.0.1:');
   page.on('pageerror', (err) => errors.push(`pageerror: ${err.message}`));
   page.on('console', (msg) => {
     if (msg.type() === 'error') errors.push(`console.error: ${msg.text()}`);
@@ -2994,6 +2994,219 @@ test.describe('GanttSmart GCP app', () => {
     await page.getByRole('button', { name: 'Choose columns' }).click();
     await page.getByRole('button', { name: 'Reset to defaults' }).click();
     expect(await headerLabels()).toEqual(['ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('freezes visible schedule columns on desktop and only task column on mobile during horizontal scroll', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(90),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Commissioning phase',
+                      description: `${startTagOffsetDays(40)}\nCommissioning`,
+                      dueDate: isoOffsetDays(60),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    // 1. On desktop, all visible schedule columns (task, assignee, status, due) are frozen
+    for (const col of ['task', 'assignee', 'status', 'due']) {
+      await expect(page.locator(`th[data-column-key="${col}"]`)).toHaveAttribute('data-frozen', 'true');
+      await expect(page.locator(`tr[data-task-id="ENG-101"] td[data-column-key="${col}"]`)).toHaveAttribute(
+        'data-frozen',
+        'true',
+      );
+    }
+
+    // Sticky body cells must have an opaque background so timeline elements do not bleed through
+    const cellBg = await page
+      .locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]')
+      .evaluate((el) => window.getComputedStyle(el).backgroundColor);
+    expect(cellBg).toMatch(/^rgb\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*\)$/);
+
+    // Z-index hierarchy: headers are higher than sticky body cells, which are higher than timeline bars/arrows
+    const headerZIndex = await page
+      .locator('th[data-column-key="task"]')
+      .evaluate((el) => window.getComputedStyle(el).zIndex);
+    const cellZIndex = await page
+      .locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]')
+      .evaluate((el) => window.getComputedStyle(el).zIndex);
+    expect(Number(headerZIndex)).toBe(10);
+    expect(Number(cellZIndex)).toBe(6);
+    expect(Number(headerZIndex)).toBeGreaterThan(Number(cellZIndex));
+    expect(Number(cellZIndex)).toBeGreaterThanOrEqual(3);
+
+    const scrollContainer = page.locator('#gantt-export-target');
+
+    // Record pre-scroll bounding boxes on desktop
+    const taskHeaderBefore = (await page.locator('th[data-column-key="task"]').boundingBox())!;
+    const assigneeHeaderBefore = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
+    const statusHeaderBefore = (await page.locator('th[data-column-key="status"]').boundingBox())!;
+    const dueHeaderBefore = (await page.locator('th[data-column-key="due"]').boundingBox())!;
+    const taskCellBefore = (await page.locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]').boundingBox())!;
+    const barBefore = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!;
+
+    // Scroll horizontally by 250px
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 250;
+    });
+    await expect.poll(async () => scrollContainer.evaluate((el) => el.scrollLeft)).toBe(250);
+
+    // Verify all frozen schedule column headers and cells stay pinned at their exact offsets
+    const taskHeaderAfter = (await page.locator('th[data-column-key="task"]').boundingBox())!;
+    const assigneeHeaderAfter = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
+    const statusHeaderAfter = (await page.locator('th[data-column-key="status"]').boundingBox())!;
+    const dueHeaderAfter = (await page.locator('th[data-column-key="due"]').boundingBox())!;
+    const taskCellAfter = (await page.locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]').boundingBox())!;
+    const barAfter = (await page.locator('[data-task-bar="ENG-101"]').boundingBox())!;
+
+    expect(taskHeaderAfter.x).toBeCloseTo(taskHeaderBefore.x, 1);
+    expect(assigneeHeaderAfter.x).toBeCloseTo(assigneeHeaderBefore.x, 1);
+    expect(statusHeaderAfter.x).toBeCloseTo(statusHeaderBefore.x, 1);
+    expect(dueHeaderAfter.x).toBeCloseTo(dueHeaderBefore.x, 1);
+    expect(taskCellAfter.x).toBeCloseTo(taskCellBefore.x, 1);
+
+    // Timeline bar must have scrolled left
+    expect(barAfter.x).toBeCloseTo(barBefore.x - 250, 1);
+
+    // 2. On mobile/narrow viewport (< 768px), ONLY the primary 'task' column stays frozen
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    await page.setViewportSize({ width: 640, height: 800 });
+
+    await expect(page.locator('th[data-column-key="task"]')).toHaveAttribute('data-frozen', 'true');
+    await expect(page.locator('th[data-column-key="assignee"]')).not.toHaveAttribute('data-frozen');
+    await expect(page.locator('th[data-column-key="status"]')).not.toHaveAttribute('data-frozen');
+    await expect(page.locator('th[data-column-key="due"]')).not.toHaveAttribute('data-frozen');
+
+    const taskMobileBefore = (await page.locator('th[data-column-key="task"]').boundingBox())!;
+    const assigneeMobileBefore = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
+
+    // Scroll horizontally on mobile
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 180;
+    });
+    await expect.poll(async () => scrollContainer.evaluate((el) => el.scrollLeft)).toBe(180);
+
+    const taskMobileAfter = (await page.locator('th[data-column-key="task"]').boundingBox())!;
+    const assigneeMobileAfter = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
+
+    // Primary task column remains pinned at left: 0
+    expect(taskMobileAfter.x).toBeCloseTo(taskMobileBefore.x, 1);
+
+    // Extra columns scroll off to the left so the timeline stays reachable and visible
+    expect(assigneeMobileAfter.x).toBeCloseTo(assigneeMobileBefore.x - 180, 1);
 
     expect(errors).toEqual([]);
   });
