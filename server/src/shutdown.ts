@@ -14,14 +14,20 @@ export function createShutdownHandler(
   const graceMs = opts?.graceMs ?? SHUTDOWN_GRACE_MS;
   const exit = opts?.exit ?? process.exit;
 
+  let shuttingDown = false;
+
   return function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
     log.info('shutting down', { signal });
     // Stop accepting connections and let in-flight requests finish, but never hang past the grace period.
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       log.error('Shutdown grace period expired; forcing exit', { signal });
       exit(1);
-    }, graceMs).unref();
+    }, graceMs);
+    timer.unref();
     server.close((err) => {
+      clearTimeout(timer);
       if (err) log.error('Error closing server', { error: describeError(err) });
       exit(err ? 1 : 0);
     });

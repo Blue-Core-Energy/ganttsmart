@@ -89,4 +89,36 @@ describe('shutdown handler', () => {
       ]),
     );
   });
+
+  it('ignores a second signal so the server is only closed once', () => {
+    const exit = vi.fn();
+    const server = { close: vi.fn((_cb: (err?: Error) => void) => {}) };
+
+    const shutdown = createShutdownHandler(server, { graceMs: 8000, exit });
+    shutdown('SIGTERM');
+    shutdown('SIGINT');
+
+    expect(server.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the grace timer once the server has closed', () => {
+    const exit = vi.fn();
+    let closeCb: (err?: Error) => void = () => {};
+    const server = {
+      close: vi.fn((cb: (err?: Error) => void) => {
+        closeCb = cb;
+      }),
+    };
+
+    const shutdown = createShutdownHandler(server, { graceMs: 8000, exit });
+    shutdown('SIGTERM');
+    expect(vi.getTimerCount()).toBe(1);
+
+    closeCb(undefined);
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(8000);
+
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
 });

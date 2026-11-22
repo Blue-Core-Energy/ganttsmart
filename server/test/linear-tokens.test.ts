@@ -280,4 +280,70 @@ describe('createTokenService.getAccessToken', () => {
     await expect(tokens.getAccessToken(SUB)).resolves.toBe('access-reconnected');
     await expect(store.getTokens(SUB)).resolves.toEqual(reconnected);
   });
+
+  it('refreshes when rejectedToken matches the stored token even without forceRefresh', async () => {
+    const { oauth, refreshTokensSeen } = stubLinear();
+    const store = await storeWith(old(60 * MINUTE));
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    await expect(tokens.getAccessToken(SUB, { rejectedToken: 'access-0' })).resolves.toBe('access-1');
+    expect(refreshTokensSeen).toEqual(['refresh-0']);
+  });
+
+  it('returns the stored token when rejectedToken differs from it', async () => {
+    const { oauth, refreshTokensSeen } = stubLinear();
+    const store = await storeWith(old(60 * MINUTE));
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    await expect(tokens.getAccessToken(SUB, { rejectedToken: 'something-else' })).resolves.toBe('access-0');
+    expect(refreshTokensSeen).toEqual([]);
+  });
+
+  it('retries only once for N callers joining a refresh that yields their rejected token', async () => {
+    let callCount = 0;
+    const { oauth } = stubLinear(() => {
+      callCount++;
+      return {
+        status: 200,
+        body: { access_token: `access-${callCount}`, refresh_token: `refresh-${callCount}`, expires_in: 86399 },
+      };
+    });
+    const store = await storeWith(old(4 * MINUTE));
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    const first = tokens.getAccessToken(SUB);
+    const waiters = Array.from({ length: 4 }, () =>
+      tokens.getAccessToken(SUB, { forceRefresh: true, rejectedToken: 'access-1' }),
+    );
+
+    const results = await Promise.all([first, ...waiters]);
+    expect(results[0]).toBe('access-1');
+    // One retry refresh is shared by every waiter instead of a chain of N refreshes.
+    for (const token of results.slice(1)) expect(token).toBe('access-2');
+    expect(callCount).toBe(2);
+  });
+
+  it('does not clear tokens saved by a concurrent reconnect when the store read finds none', async () => {
+    const { oauth } = stubLinear();
+    const base = createMemoryStore();
+    const reconnected: LinearTokens = { accessToken: 'access-r', refreshToken: 'refresh-r', expiresAt: null };
+    const clearSpy: string[] = [];
+    const store: Store = {
+      ...base,
+      async getTokens(sub) {
+        const result = await base.getTokens(sub);
+        await base.saveTokens(sub, EMAIL, reconnected);
+        return result;
+      },
+      async clearTokens(sub, expected) {
+        clearSpy.push(sub);
+        return base.clearTokens(sub, expected);
+      },
+    };
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    await expect(tokens.getAccessToken(SUB)).rejects.toBeInstanceOf(LinearReauthRequired);
+    expect(clearSpy).toEqual([]);
+    await expect(base.getTokens(SUB)).resolves.toEqual(reconnected);
+  });
 });

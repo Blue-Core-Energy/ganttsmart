@@ -5,7 +5,7 @@ import type { AppEnv } from '../app.js';
 import { LinearReauthRequired, type LinearOAuth } from '../linear/oauth.js';
 import type { TokenService } from '../linear/tokens.js';
 import { describeError, log } from '../log.js';
-import type { Store } from '../store/types.js';
+import type { LinearTokens, Store } from '../store/types.js';
 
 const GRAPHQL_URL = 'https://api.linear.app/graphql';
 const GRAPHQL_TIMEOUT_MS = 30_000;
@@ -31,7 +31,7 @@ export interface LinearRouteDeps {
   oauth: LinearOAuth;
   tokens: TokenService;
   fetch: typeof fetch;
-  isProduction?: boolean;
+  isProduction: boolean;
 }
 
 /** Constant-time string comparison; strings of different lengths never match. */
@@ -93,7 +93,7 @@ function parseGraphQLRequest(text: string): GraphQLRequest | null {
 }
 
 export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
-  const { store, oauth, tokens, fetch: doFetch, isProduction = false } = deps;
+  const { store, oauth, tokens, fetch: doFetch, isProduction } = deps;
   const routes = new Hono<AppEnv>();
 
   routes.get('/authorize', (c) => {
@@ -158,17 +158,19 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
     if (!code) return fail('exchange_failed');
 
     const { sub, email } = c.get('identity');
+    let oldTokens: LinearTokens | null;
     try {
       const linearTokens = await oauth.exchangeCode(code);
-      const oldTokens = await store.getTokens(sub);
-      if (oldTokens) {
-        // Best effort: revoke previous tokens so reconnecting doesn't leave orphaned grants at Linear.
-        await Promise.allSettled([
-          oauth.revoke(oldTokens.accessToken),
-          oldTokens.refreshToken !== null ? oauth.revoke(oldTokens.refreshToken) : undefined,
-        ]);
-      }
+      oldTokens = await store.getTokens(sub);
       await store.saveTokens(sub, email, linearTokens);
+      if (oldTokens) {
+        // Best effort, only once the new tokens are saved: revoke previous grants so reconnecting
+        // doesn't leave them orphaned at Linear. A revoke failure never fails the saved exchange.
+        const keep = new Set<string | null>([linearTokens.accessToken, linearTokens.refreshToken]);
+        const stale = new Set([oldTokens.accessToken, oldTokens.refreshToken]);
+        const toRevoke = [...stale].filter((t): t is string => t !== null && !keep.has(t));
+        await Promise.allSettled(toRevoke.map((t) => oauth.revoke(t)));
+      }
     } catch (err) {
       log.error('Linear code exchange failed', { error: describeError(err) });
       return fail('exchange_failed');

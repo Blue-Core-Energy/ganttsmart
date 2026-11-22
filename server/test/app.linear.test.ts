@@ -374,6 +374,54 @@ describe('GET /api/linear/callback', () => {
     });
   });
 
+  it('does not revoke old tokens when saving the new tokens fails', async () => {
+    const base = createMemoryStore();
+    const store: Store = {
+      ...base,
+      saveTokens: async () => {
+        throw new Error('store down');
+      },
+    };
+    await base.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const { app, oauth } = setup({ store });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.headers.get('location')).toBe('/app?linear_error=exchange_failed');
+    expect(oauth.revoked).toEqual([]);
+  });
+
+  it('does not revoke old tokens that match the newly issued ones', async () => {
+    const oauth = stubOAuth({
+      async exchangeCode() {
+        return { accessToken: 'kept-access', refreshToken: 'refresh-new', expiresAt: null };
+      },
+    });
+    const { app, store } = setup({ oauth });
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'kept-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.headers.get('location')).toBe('/app');
+    expect(oauth.revoked).toEqual(['old-refresh']);
+  });
+
+  it('revokes a duplicated old token only once', async () => {
+    const { app, store, oauth } = setup();
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-dup',
+      refreshToken: 'old-dup',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.status).toBe(302);
+    expect(oauth.revoked).toEqual(['old-dup']);
+  });
+
   it('preserves linear_oauth_project across callback success and error redirects and clears the cookie', async () => {
     const { app } = setup();
     const okRes = await app.request(`/api/linear/callback?code=the-code&state=${STATE}`, {

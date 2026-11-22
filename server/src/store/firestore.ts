@@ -33,10 +33,16 @@ const MAX_CONCURRENT_CREATES = 20;
 
 async function runWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
   let index = 0;
+  let failed = false;
   async function worker(): Promise<void> {
-    while (index < items.length) {
+    while (!failed && index < items.length) {
       const i = index++;
-      await fn(items[i]);
+      try {
+        await fn(items[i]);
+      } catch (err) {
+        failed = true;
+        throw err;
+      }
     }
   }
   const workers = Array.from({ length: Math.min(items.length, concurrency) }, () => worker());

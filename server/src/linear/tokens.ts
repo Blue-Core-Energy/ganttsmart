@@ -57,32 +57,42 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
     return saved.accessToken;
   }
 
+  /**
+   * Joins a refresh already in flight. If it yields the token the caller just had rejected, retries
+   * once without `rejectedToken` and with a forced refresh, so waiters don't cascade into repeated retries.
+   */
+  async function joinRefresh(
+    sub: string,
+    promise: Promise<string>,
+    opts?: { forceRefresh?: boolean; rejectedToken?: string },
+  ): Promise<string> {
+    const token = await promise;
+    if (opts?.rejectedToken && token === opts.rejectedToken) {
+      return service.getAccessToken(sub, { forceRefresh: true });
+    }
+    return token;
+  }
+
   const service: TokenService = {
     async getAccessToken(sub, opts) {
       const pending = inFlight.get(sub);
       if (pending) {
-        const token = await pending;
-        if (opts?.rejectedToken && token === opts.rejectedToken) {
-          return service.getAccessToken(sub, opts);
-        }
-        return token;
+        return joinRefresh(sub, pending, opts);
       }
 
       const tokens = await store.getTokens(sub);
-      if (!tokens) return reauth(sub);
+      // Not connected (or disconnected meanwhile): don't clear, a concurrent reconnect must survive.
+      if (!tokens) throw new LinearReauthRequired();
 
+      const rejected = opts?.rejectedToken !== undefined && tokens.accessToken === opts.rejectedToken;
       const expiring = tokens.expiresAt !== null && tokens.expiresAt - now() < REFRESH_MARGIN_MS;
-      if (!opts?.forceRefresh && !expiring) return tokens.accessToken;
+      if (!opts?.forceRefresh && !expiring && !rejected) return tokens.accessToken;
       if (tokens.refreshToken === null) return reauth(sub);
 
       // Re-check: another call may have started a refresh while we awaited the store.
       const raced = inFlight.get(sub);
       if (raced) {
-        const token = await raced;
-        if (opts?.rejectedToken && token === opts.rejectedToken) {
-          return service.getAccessToken(sub, opts);
-        }
-        return token;
+        return joinRefresh(sub, raced, opts);
       }
       const promise = refresh(sub, tokens.refreshToken).finally(() => inFlight.delete(sub));
       inFlight.set(sub, promise);
