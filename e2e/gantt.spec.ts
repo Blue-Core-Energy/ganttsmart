@@ -962,8 +962,8 @@ test.describe('GanttSmart GCP app', () => {
     const arrow = exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]');
     await expect(arrow).toHaveCount(1);
 
-    // ...routed with right angles only, and painted beneath the task bars
-    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
+    // ...routed with rounded elbows, and painted beneath the task bars
+    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HVQ,]+$/);
     const arrowLayers = await page.evaluate(() => {
       const svg = document.querySelector('#gantt-export-target svg path[data-arrow-source]')?.closest('svg');
       const bar = document.querySelector('[data-task-bar="ENG-101"]');
@@ -991,6 +991,56 @@ test.describe('GanttSmart GCP app', () => {
     const afterZoom = await arrowEndsOnTarget();
     expect(afterZoom.endX).toBeCloseTo(afterZoom.barLeft, 0);
     await page.keyboard.press('-');
+    await expect(arrow).toBeVisible();
+
+    // IT-105: Click arrow to highlight connected issues, Escape/background to clear, and drag-to-pan
+    const hitTarget = exportTarget.locator('svg path[data-arrow-hit-target="ENG-100->ENG-101"]');
+    await expect(hitTarget).toBeAttached();
+
+    // Dispatch click on the arrow's hit target
+    await hitTarget.dispatchEvent('click');
+
+    await expect(arrow).toHaveAttribute('data-selected', 'true');
+    const row100 = page.locator('tr[data-task-id="ENG-100"]');
+    const row101 = page.locator('tr[data-task-id="ENG-101"]');
+    const row102 = page.locator('tr[data-task-id="ENG-102"]');
+    const bar100 = page.locator('[data-task-bar="ENG-100"]');
+    const bar101 = page.locator('[data-task-bar="ENG-101"]');
+    const bar102 = page.locator('[data-task-bar="ENG-102"]');
+
+    await expect(row100).toHaveAttribute('data-highlighted', 'true');
+    await expect(row101).toHaveAttribute('data-highlighted', 'true');
+    await expect(bar100).toHaveAttribute('data-highlighted', 'true');
+    await expect(bar101).toHaveAttribute('data-highlighted', 'true');
+    await expect(row102).not.toHaveAttribute('data-highlighted', 'true');
+    await expect(bar102).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Pressing Escape clears arrow selection and unhighlights issues
+    await page.keyboard.press('Escape');
+    await expect(arrow).not.toHaveAttribute('data-selected', 'true');
+    await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
+    await expect(row101).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Clicking arrow again selects it; clicking empty timeline background clears selection
+    await hitTarget.dispatchEvent('click');
+    await expect(arrow).toHaveAttribute('data-selected', 'true');
+    await page
+      .locator('[data-timeline-background]')
+      .first()
+      .click({ position: { x: 50, y: 10 } });
+    await expect(arrow).not.toHaveAttribute('data-selected', 'true');
+    await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Drag-to-pan on timeline background still works
+    const initialScroll = await exportTarget.evaluate((el) => el.scrollLeft);
+    const bg = page.locator('[data-timeline-background]').first();
+    const bgBox = (await bg.boundingBox())!;
+    await page.mouse.move(bgBox.x + 200, bgBox.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(bgBox.x + 100, bgBox.y + 10, { steps: 5 });
+    await page.mouse.up();
+    const pannedScroll = await exportTarget.evaluate((el) => el.scrollLeft);
+    expect(pannedScroll).toBeGreaterThan(initialScroll);
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
     const countBox = await page.getByText('3/3').boundingBox();
@@ -2155,10 +2205,10 @@ test.describe('GanttSmart GCP app', () => {
     const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');
     await expect(crossArrow).toHaveCount(1);
     await expect(crossArrow).toHaveAttribute('data-cross-project', 'true');
-    // Violated cross-project arrows keep their own color and marker, and route with right angles
+    // Violated cross-project arrows keep their own color and marker, and route with rounded elbows
     await expect(crossArrow).toHaveAttribute('stroke', '#f97316');
     await expect(crossArrow).toHaveAttribute('marker-end', 'url(#dep-arrow-warn)');
-    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
+    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HVQ,]+$/);
 
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);

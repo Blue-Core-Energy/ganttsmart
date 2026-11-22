@@ -45,6 +45,7 @@ interface Props {
   onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
   isExternalReadOnly?: boolean;
   onSelectProject?: (projectId: string) => void;
+  isHighlighted?: boolean;
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
@@ -69,6 +70,7 @@ export default function GanttRow({
   onReorder,
   isExternalReadOnly = false,
   onSelectProject,
+  isHighlighted = false,
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
@@ -630,7 +632,8 @@ export default function GanttRow({
       data-task-uuid={task.uuid}
       data-task-done={isDone ? 'true' : undefined}
       data-external-task={task.isExternal ? 'true' : undefined}
-      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 ${task.isExternal ? 'border-l-accent/45 bg-bg-header/35' : 'border-l-transparent'} hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
+      data-highlighted={isHighlighted ? 'true' : undefined}
+      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] border-l-2 ${isHighlighted ? '!bg-accent/[0.08] !border-l-accent' : task.isExternal ? 'border-l-accent/45 bg-bg-header/35' : 'border-l-transparent'} hover:border-l-accent focus-within:bg-accent/[0.04] focus-within:border-l-accent ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
       tabIndex={0}
       role="row"
       aria-label={`${task.id}: ${task.title}${task.isExternal ? `, from ${task.projectName || 'External project'}` : ''}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
@@ -766,7 +769,8 @@ export default function GanttRow({
             <div
               data-task-bar={task.id}
               data-external-bar={task.isExternal ? 'true' : undefined}
-              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
+              data-highlighted={isHighlighted ? 'true' : undefined}
+              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg-card brightness-110 shadow-lg' : ''} ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
                 left: 0,
                 width: displayBarWidth,

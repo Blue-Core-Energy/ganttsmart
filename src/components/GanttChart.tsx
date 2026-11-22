@@ -116,6 +116,43 @@ export default function GanttChart({
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
   const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
+
+  const handleSelectArrow = useCallback((sourceId: string, targetId: string) => {
+    setSelectedArrow((prev) => {
+      if (prev && prev.sourceId === sourceId && prev.targetId === targetId) {
+        return null;
+      }
+      return { sourceId, targetId };
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedArrow(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedArrow) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-arrow-hit-target]')) return;
+      setSelectedArrow(null);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [selectedArrow]);
+
+  const highlightedTaskIds = useMemo(() => {
+    if (!selectedArrow) return undefined;
+    return new Set([selectedArrow.sourceId, selectedArrow.targetId]);
+  }, [selectedArrow]);
+
   const ganttRef = useRef<HTMLDivElement>(null);
   /** Date and pointer position to restore after a zoom, set by the wheel handler */
   const zoomAnchorRef = useRef<{ anchorMs: number; pointerOffsetX: number } | null>(null);
@@ -886,6 +923,7 @@ export default function GanttChart({
                 onReorder={onReorder}
                 isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
+                isHighlighted={highlightedTaskIds?.has(task.id)}
               />
             ))}
           </tbody>
@@ -917,6 +955,8 @@ export default function GanttChart({
           depViolations={depViolations}
           dayWidth={dayWidth}
           fixedColsWidth={fixedColsWidth}
+          selectedArrow={selectedArrow}
+          onSelectArrow={handleSelectArrow}
         />
 
         {/* Connection line overlay — updated imperatively during drag for performance.
