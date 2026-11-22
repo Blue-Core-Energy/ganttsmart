@@ -170,16 +170,211 @@ export async function fetchProjects(apiKey: string): Promise<Project[]> {
   return projects.nodes.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-/** Parse `start: DD-MM-YY` from issue description */
-function parseStartDate(description: string): string | null {
-  const match = description.match(/start:\s*(\d{2})-(\d{2})-(\d{2})/i);
-  if (!match) return null;
-  const [, dd, mm, yy] = match;
-  const year = 2000 + parseInt(yy);
-  const month = parseInt(mm);
-  const day = parseInt(dd);
+// ---- Schedule dates ----
+//
+// Linear issues have a native `dueDate` but no native start date and no custom fields, so GanttSmart
+// stores schedule dates in a dedicated comment on the issue:
+//
+//   **GanttSmart Schedule**
+//   start: YYYY-MM-DD
+//   end: YYYY-MM-DD
+//
+// Precedence when reading:
+//   start: schedule comment `start:` -> legacy `start: DD-MM-YY` / `start: YYYY-MM-DD` in the description.
+//   end:   schedule comment `end:` (or `due:`) -> issue.dueDate -> project.targetDate (implicit, caller-side).
+//          GanttSmart always writes the comment `end:` and the native `dueDate` together so they normally match.
+//          If they differ, someone changed one of them outside GanttSmart; the most recently updated of the
+//          schedule comment (`comment.updatedAt`) and the issue (`issue.updatedAt`) wins. This keeps edits made
+//          to the due date in Linear's own UI visible without ignoring a deliberately edited schedule comment.
+// The legacy description tag is never rewritten; the schedule comment simply takes precedence over it.
+
+/** Max issues per comments query. Keep batch * SCHEDULE_COMMENTS_PER_ISSUE far below Linear's 10,000 limit. */
+export const SCHEDULE_COMMENT_BATCH_SIZE = 25;
+export const SCHEDULE_COMMENTS_PER_ISSUE = 20;
+
+const SCHEDULE_COMMENT_FILTER = 'GanttSmart schedule';
+const SCHEDULE_HEADING_RE = /^\s*(?:\*\*\s*GanttSmart schedule\s*:?\s*\*\*|GanttSmart schedule\s*:)/i;
+const DATE_TOKEN = '(?:\\d{4}-\\d{2}-\\d{2}|\\d{2}-\\d{2}-\\d{2})(?!\\d)';
+
+export interface ScheduleCommentNode {
+  id: string;
+  body: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface ParsedScheduleComment {
+  id: string;
+  startDate: string | null;
+  endDate: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ResolvedSchedule {
+  startDate: string | null;
+  dueDate: string | null;
+}
+
+function toIsoDate(year: number, month: number, day: number): string | null {
   if (month < 1 || month > 12 || day < 1 || day > 31) return null;
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** Parse `YYYY-MM-DD` or legacy `DD-MM-YY` into `YYYY-MM-DD`. */
+function parseDateToken(raw: string): string | null {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (iso) return toIsoDate(parseInt(iso[1], 10), parseInt(iso[2], 10), parseInt(iso[3], 10));
+  const legacy = /^(\d{2})-(\d{2})-(\d{2})$/.exec(raw);
+  if (legacy) return toIsoDate(2000 + parseInt(legacy[3], 10), parseInt(legacy[2], 10), parseInt(legacy[1], 10));
+  return null;
+}
+
+/** Parse `start: YYYY-MM-DD` or legacy `start: DD-MM-YY` from an issue description. */
+export function parseStartDate(description: string): string | null {
+  const match = new RegExp(`start:\\s*(${DATE_TOKEN})`, 'i').exec(description);
+  return match ? parseDateToken(match[1]) : null;
+}
+
+/** Parse a GanttSmart schedule comment body. Returns null if it is not a schedule comment or has no valid date. */
+export function parseScheduleComment(body: string): { startDate: string | null; endDate: string | null } | null {
+  const text = body.replace(/\\(?=[-_*])/g, '');
+  if (!SCHEDULE_HEADING_RE.test(text)) return null;
+  const read = (key: string): string | null => {
+    const match = new RegExp(`^[ \\t>*-]*${key}[ \\t]*:[ \\t]*(${DATE_TOKEN})[ \\t*]*$`, 'im').exec(text);
+    return match ? parseDateToken(match[1]) : null;
+  };
+  const startDate = read('start');
+  const endDate = read('end') ?? read('due');
+  if (!startDate && !endDate) return null;
+  return { startDate, endDate };
+}
+
+export function formatScheduleComment(schedule: { startDate?: string | null; dueDate?: string | null }): string {
+  const lines = ['**GanttSmart Schedule**'];
+  if (schedule.startDate) lines.push(`start: ${schedule.startDate}`);
+  if (schedule.dueDate) lines.push(`end: ${schedule.dueDate}`);
+  return lines.join('\n');
+}
+
+function timeOf(iso: string | null | undefined): number {
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Latest valid schedule comment (by updatedAt, then createdAt, then position) among an issue's comments. */
+export function pickScheduleComment(comments: ScheduleCommentNode[]): ParsedScheduleComment | null {
+  let best: ParsedScheduleComment | null = null;
+  for (const c of comments) {
+    if (!c || typeof c.body !== 'string') continue;
+    const parsed = parseScheduleComment(c.body);
+    if (!parsed) continue;
+    const candidate: ParsedScheduleComment = {
+      id: c.id,
+      startDate: parsed.startDate,
+      endDate: parsed.endDate,
+      createdAt: c.createdAt ?? null,
+      updatedAt: c.updatedAt ?? null,
+    };
+    if (!best) {
+      best = candidate;
+      continue;
+    }
+    const bestKey = [timeOf(best.updatedAt || best.createdAt), timeOf(best.createdAt)];
+    const key = [timeOf(candidate.updatedAt || candidate.createdAt), timeOf(candidate.createdAt)];
+    if (key[0] > bestKey[0] || (key[0] === bestKey[0] && key[1] >= bestKey[1])) best = candidate;
+  }
+  return best;
+}
+
+/** Combine the schedule comment, native dueDate and legacy description tag into one schedule (see precedence above). */
+export function resolveIssueSchedule(input: {
+  description?: string | null;
+  dueDate?: string | null;
+  issueUpdatedAt?: string | null;
+  comment?: ParsedScheduleComment | null;
+}): ResolvedSchedule {
+  const { comment } = input;
+  const nativeDue = input.dueDate || null;
+  const startDate = comment?.startDate ?? parseStartDate(input.description || '');
+
+  let dueDate = nativeDue;
+  if (comment?.endDate) {
+    const commentStamp = comment.updatedAt || comment.createdAt;
+    const nativeIsNewer =
+      nativeDue !== null &&
+      nativeDue !== comment.endDate &&
+      Boolean(commentStamp) &&
+      Boolean(input.issueUpdatedAt) &&
+      timeOf(input.issueUpdatedAt) > timeOf(commentStamp);
+    dueDate = nativeIsNewer ? nativeDue : comment.endDate;
+  }
+  return { startDate, dueDate };
+}
+
+const SCHEDULE_COMMENTS_FIELDS = `comments(last: ${SCHEDULE_COMMENTS_PER_ISSUE}, filter: { body: { containsIgnoreCase: "${SCHEDULE_COMMENT_FILTER}" } }) {
+        nodes { id body createdAt updatedAt }
+      }`;
+
+export const SCHEDULE_COMMENTS_QUERY = `query ScheduleComments($ids: [ID!]!) {
+  issues(first: ${SCHEDULE_COMMENT_BATCH_SIZE}, filter: { id: { in: $ids } }) {
+    nodes {
+      id
+      updatedAt
+      ${SCHEDULE_COMMENTS_FIELDS}
+    }
+  }
+}`;
+
+export const ISSUE_SCHEDULE_QUERY = `query IssueSchedule($id: String!) {
+  issue(id: $id) {
+    description
+    dueDate
+    updatedAt
+    ${SCHEDULE_COMMENTS_FIELDS}
+  }
+}`;
+
+interface IssueScheduleSource {
+  comment: ParsedScheduleComment | null;
+  issueUpdatedAt: string | null;
+}
+
+/** Fetch schedule comments in small batches so each request stays far below Linear's 10,000 complexity limit. */
+async function fetchScheduleSources(apiKey: string, issueIds: string[]): Promise<Map<string, IssueScheduleSource>> {
+  const sources = new Map<string, IssueScheduleSource>();
+  const batches: string[][] = [];
+  for (let i = 0; i < issueIds.length; i += SCHEDULE_COMMENT_BATCH_SIZE) {
+    batches.push(issueIds.slice(i, i + SCHEDULE_COMMENT_BATCH_SIZE));
+  }
+  await Promise.all(
+    batches.map(async (ids) => {
+      try {
+        const data = await gql(apiKey, SCHEDULE_COMMENTS_QUERY, { ids });
+        const nodes =
+          (
+            data.issues as
+              | {
+                  nodes?: Array<{
+                    id: string;
+                    updatedAt?: string | null;
+                    comments?: { nodes?: ScheduleCommentNode[] } | null;
+                  }>;
+                }
+              | undefined
+          )?.nodes ?? [];
+        for (const node of nodes) {
+          sources.set(node.id, {
+            comment: pickScheduleComment(node.comments?.nodes ?? []),
+            issueUpdatedAt: node.updatedAt ?? null,
+          });
+        }
+      } catch {
+        console.warn('Failed to fetch schedule comments — falling back to descriptions and due dates');
+      }
+    }),
+  );
+  return sources;
 }
 
 export async function fetchIssues(
@@ -313,7 +508,8 @@ export async function fetchIssues(
   // Effective due date: explicit dueDate, falling back to project's targetDate.
   // Returns { date, isImplicit } or null if no date can be derived at all.
   function effectiveDue(n: IssueNode): { date: string; isImplicit: boolean } | null {
-    if (n.dueDate) return { date: n.dueDate, isImplicit: false };
+    const dueDate = scheduleOf(n).dueDate;
+    if (dueDate) return { date: dueDate, isImplicit: false };
     if (projectTargetDate) return { date: projectTargetDate, isImplicit: true };
     return null;
   }
@@ -527,6 +723,27 @@ export async function fetchIssues(
     }
   }
 
+  const scheduleIds = [
+    ...new Set([
+      ...issueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)).map((n) => n.id),
+      ...doneIssueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)).map((n) => n.id),
+      ...[...externalCandidates.values()]
+        .filter((e) => !ignoredIdentifiers.has(e.node.identifier))
+        .map((e) => e.node.id),
+    ]),
+  ];
+  const scheduleSources = scheduleIds.length > 0 ? await fetchScheduleSources(apiKey, scheduleIds) : new Map();
+
+  function scheduleOf(n: { id: string; description?: string | null; dueDate?: string | null }): ResolvedSchedule {
+    const source = scheduleSources.get(n.id);
+    return resolveIssueSchedule({
+      description: n.description,
+      dueDate: n.dueDate,
+      issueUpdatedAt: source?.issueUpdatedAt,
+      comment: source?.comment,
+    });
+  }
+
   const activeIssueNodes =
     ignoredIdentifiers.size > 0 ? issueNodes.filter((n) => !ignoredIdentifiers.has(n.identifier)) : issueNodes;
   const activeDoneIssueNodes =
@@ -543,7 +760,7 @@ export async function fetchIssues(
       title: n.title,
       description: n.description || '',
       due,
-      startDate: parseStartDate(n.description || ''),
+      startDate: scheduleOf(n).startDate,
       url: n.url,
       priorityVal: n.priority,
       priority: PRIORITY_MAP[n.priority] || 'None',
@@ -604,9 +821,10 @@ export async function fetchIssues(
     if (seenUuids.has(ext.id) || ignoredIdentifiers.has(ext.identifier)) continue;
 
     const extTargetDate = ext.project?.targetDate || null;
-    const due = ext.dueDate || extTargetDate || todayStr;
-    const isDueImplicit = !ext.dueDate;
-    const isUnscheduledExternal = !ext.dueDate && !extTargetDate;
+    const extSchedule = scheduleOf(ext);
+    const due = extSchedule.dueDate || extTargetDate || todayStr;
+    const isDueImplicit = !extSchedule.dueDate;
+    const isUnscheduledExternal = !extSchedule.dueDate && !extTargetDate;
     const priorityVal = typeof ext.priority === 'number' ? ext.priority : 0;
 
     const extTask: Task = {
@@ -615,7 +833,7 @@ export async function fetchIssues(
       title: ext.title,
       description: ext.description || '',
       due,
-      startDate: parseStartDate(ext.description || ''),
+      startDate: extSchedule.startDate,
       url: ext.url || '',
       priorityVal,
       priority: PRIORITY_MAP[priorityVal] || 'None',
@@ -677,51 +895,101 @@ export async function fetchIssues(
 
 // ---- Mutations (with debouncing for drag operations) ----
 
+// Schedule writes for the same issue are chained so concurrent updates (e.g. moving a bar changes both
+// start and due date) each read the comment written by the previous one instead of creating duplicates.
+const scheduleWriteQueues = new Map<string, Promise<unknown>>();
+
+function enqueueScheduleWrite<T>(issueId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = scheduleWriteQueues.get(issueId) ?? Promise.resolve();
+  const result = previous.then(fn, fn);
+  const tail = result.catch(() => {});
+  scheduleWriteQueues.set(issueId, tail);
+  void tail.then(() => {
+    if (scheduleWriteQueues.get(issueId) === tail) scheduleWriteQueues.delete(issueId);
+  });
+  return result;
+}
+
+/**
+ * Write schedule dates to the issue's GanttSmart schedule comment (updated in place when one exists,
+ * created otherwise). The date not being changed is preserved from the existing comment, native dueDate
+ * or legacy description tag. A new due date is also written to Linear's native `dueDate`.
+ */
+function writeIssueSchedule(
+  apiKey: string,
+  issueId: string,
+  patch: { startDate?: string; dueDate?: string },
+): Promise<void> {
+  return enqueueScheduleWrite(issueId, async () => {
+    const data = await gql(apiKey, ISSUE_SCHEDULE_QUERY, { id: issueId });
+    const issue = data.issue as {
+      description?: string | null;
+      dueDate?: string | null;
+      updatedAt?: string | null;
+      comments?: { nodes?: ScheduleCommentNode[] } | null;
+    } | null;
+    if (!issue) throw new Error('Linear issue not found.');
+
+    const existing = pickScheduleComment(issue.comments?.nodes ?? []);
+    const current = resolveIssueSchedule({
+      description: issue.description,
+      dueDate: issue.dueDate,
+      issueUpdatedAt: issue.updatedAt,
+      comment: existing,
+    });
+    const body = formatScheduleComment({
+      startDate: patch.startDate ?? current.startDate,
+      dueDate: patch.dueDate ?? current.dueDate,
+    });
+
+    if (existing) {
+      const res = await gql(
+        apiKey,
+        `mutation($commentId: String!, $body: String!) {
+          commentUpdate(id: $commentId, input: { body: $body }) {
+            success
+          }
+        }`,
+        { commentId: existing.id, body },
+      );
+      if ((res.commentUpdate as { success?: boolean } | undefined)?.success === false) {
+        throw new Error('Linear did not confirm schedule comment update.');
+      }
+    } else {
+      const res = await gql(
+        apiKey,
+        `mutation($issueId: String!, $body: String!) {
+          commentCreate(input: { issueId: $issueId, body: $body }) {
+            success
+          }
+        }`,
+        { issueId, body },
+      );
+      if ((res.commentCreate as { success?: boolean } | undefined)?.success === false) {
+        throw new Error('Linear did not confirm schedule comment creation.');
+      }
+    }
+
+    if (patch.dueDate) {
+      await gql(
+        apiKey,
+        `mutation($id: String!, $dueDate: TimelessDate!) {
+          issueUpdate(id: $id, input: { dueDate: $dueDate }) {
+            success
+          }
+        }`,
+        { id: issueId, dueDate: patch.dueDate },
+      );
+    }
+  });
+}
+
 export async function updateIssueDueDate(apiKey: string, issueId: string, dueDate: string): Promise<void> {
-  await debouncedApiCall(`due-${issueId}`, () =>
-    gql(
-      apiKey,
-      `mutation($id: String!, $dueDate: TimelessDate!) {
-        issueUpdate(id: $id, input: { dueDate: $dueDate }) {
-          success
-        }
-      }`,
-      { id: issueId, dueDate },
-    ),
-  );
+  await debouncedApiCall(`due-${issueId}`, () => writeIssueSchedule(apiKey, issueId, { dueDate }));
 }
 
 export async function updateIssueStartDate(apiKey: string, issueId: string, startDate: string): Promise<void> {
-  await debouncedApiCall(`start-${issueId}`, async () => {
-    // Fetch current description
-    const data = await gql(apiKey, `query($id: String!) { issue(id: $id) { description } }`, { id: issueId });
-    const issue = data.issue as { description: string | null };
-    const currentDesc: string = issue?.description || '';
-
-    // Format the new start tag: start: DD-MM-YY
-    const d = new Date(startDate + 'T00:00:00');
-    const dd = String(d.getDate()).padStart(2, '0');
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const yy = String(d.getFullYear()).slice(-2);
-    const newTag = `start: ${dd}-${mm}-${yy}`;
-
-    let newDesc: string;
-    if (/start:\s*\d{2}-\d{2}-\d{2}/i.test(currentDesc)) {
-      newDesc = currentDesc.replace(/start:\s*\d{2}-\d{2}-\d{2}/i, newTag);
-    } else {
-      newDesc = currentDesc.trim() ? `${currentDesc.trim()}\n${newTag}` : newTag;
-    }
-
-    await gql(
-      apiKey,
-      `mutation($id: String!, $description: String!) {
-        issueUpdate(id: $id, input: { description: $description }) {
-          success
-        }
-      }`,
-      { id: issueId, description: newDesc },
-    );
-  });
+  await debouncedApiCall(`start-${issueId}`, () => writeIssueSchedule(apiKey, issueId, { startDate }));
 }
 
 /** Move a project milestone's target date. Debounced — driven by dragging on the chart. */

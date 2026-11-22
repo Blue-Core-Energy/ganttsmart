@@ -13,6 +13,17 @@ vi.mock('@/backend', () => ({
 import {
   FEEDBACK_TARGET_QUERY,
   GANTT_LINK_LABEL,
+  ISSUE_SCHEDULE_QUERY,
+  SCHEDULE_COMMENTS_PER_ISSUE,
+  SCHEDULE_COMMENTS_QUERY,
+  SCHEDULE_COMMENT_BATCH_SIZE,
+  formatScheduleComment,
+  parseScheduleComment,
+  parseStartDate,
+  pickScheduleComment,
+  resolveIssueSchedule,
+  updateIssueDueDate,
+  updateIssueStartDate,
   createFeedbackIssue,
   createProjectExternalLink,
   FeedbackTargetNotFoundError,
@@ -468,6 +479,10 @@ describe('fetchIssues', () => {
         });
       }
 
+      if (body.query.includes('ScheduleComments')) {
+        return jsonResponse({ issues: { nodes: [] } });
+      }
+
       return jsonResponse({
         issues: {
           nodes: [
@@ -592,8 +607,10 @@ describe('fetchIssues', () => {
     });
 
     const result = await fetchIssues('tok', 'proj-1');
-    expect(linearRequestMock).toHaveBeenCalledTimes(2);
+    // project query, relations/children query, then one schedule-comments batch (local + external issues)
+    expect(linearRequestMock).toHaveBeenCalledTimes(3);
     expect(queries[1]).toContain('project {');
+    expect(queries[2]).toContain('ScheduleComments');
 
     expect(result.externalTasks).toHaveLength(2);
     expect(result.externalTasks[0]).toMatchObject({
@@ -713,7 +730,7 @@ function estimateLinearQueryComplexity(query: string): number {
           }
           argTokens.push(t);
         }
-        const firstMatch = /\bfirst:\s*(\d+)\b/.exec(argTokens.join(' '));
+        const firstMatch = /\b(?:first|last):\s*(\d+)\b/.exec(argTokens.join(' '));
         if (firstMatch) {
           firstArg = Number(firstMatch[1]);
         }
@@ -1495,5 +1512,529 @@ describe('gql retry behavior', () => {
     await failingAssertion;
 
     expect(linearRequestMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('schedule date parsing', () => {
+  it('parseStartDate reads YYYY-MM-DD and legacy DD-MM-YY and rejects invalid dates', () => {
+    expect(parseStartDate('Intro\nstart: 2026-05-04\nmore')).toBe('2026-05-04');
+    expect(parseStartDate('START:   2026-12-31')).toBe('2026-12-31');
+    expect(parseStartDate('start: 04-05-26')).toBe('2026-05-04');
+    expect(parseStartDate('start:04-05-26 trailing')).toBe('2026-05-04');
+    expect(parseStartDate('start: 32-05-26')).toBeNull();
+    expect(parseStartDate('start: 04-13-26')).toBeNull();
+    expect(parseStartDate('start: 2026-13-01')).toBeNull();
+    expect(parseStartDate('start: 04-05-2026')).toBeNull();
+    expect(parseStartDate('no tag here')).toBeNull();
+  });
+
+  it('parseScheduleComment reads start/end from the bold heading or the plain heading, case-insensitively', () => {
+    expect(parseScheduleComment('**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-08')).toEqual({
+      startDate: '2026-05-04',
+      endDate: '2026-05-08',
+    });
+    expect(parseScheduleComment('GanttSmart schedule:\nStart: 2026-05-04\nEND: 2026-05-08')).toEqual({
+      startDate: '2026-05-04',
+      endDate: '2026-05-08',
+    });
+    expect(parseScheduleComment('**ganttsmart schedule**\n\nstart: 2026-05-04\n\nend: 2026-05-08\n')).toEqual({
+      startDate: '2026-05-04',
+      endDate: '2026-05-08',
+    });
+  });
+
+  it('parseScheduleComment accepts partial schedules, due: as an alias for end:, and legacy DD-MM-YY', () => {
+    expect(parseScheduleComment('**GanttSmart Schedule**\nstart: 2026-05-04')).toEqual({
+      startDate: '2026-05-04',
+      endDate: null,
+    });
+    expect(parseScheduleComment('**GanttSmart Schedule**\nend: 2026-05-08')).toEqual({
+      startDate: null,
+      endDate: '2026-05-08',
+    });
+    expect(parseScheduleComment('**GanttSmart Schedule**\ndue: 2026-05-08')).toEqual({
+      startDate: null,
+      endDate: '2026-05-08',
+    });
+    expect(parseScheduleComment('**GanttSmart Schedule**\nstart: 04-05-26\nend: 08-05-26')).toEqual({
+      startDate: '2026-05-04',
+      endDate: '2026-05-08',
+    });
+    expect(parseScheduleComment('**GanttSmart Schedule**\nend: 2026-05-08\ndue: 2026-06-01')?.endDate).toBe(
+      '2026-05-08',
+    );
+  });
+
+  it('parseScheduleComment ignores unrelated comments and schedule comments without a valid date', () => {
+    expect(parseScheduleComment('start: 2026-05-04\nend: 2026-05-08')).toBeNull();
+    expect(parseScheduleComment('Please see the GanttSmart Schedule\nstart: 2026-05-04')).toBeNull();
+    expect(parseScheduleComment('**GanttSmart Schedule**\nstart: soon\nend: tomorrow')).toBeNull();
+    expect(parseScheduleComment('**GanttSmart Schedule**')).toBeNull();
+  });
+
+  it('formatScheduleComment round-trips and omits unset dates', () => {
+    const body = formatScheduleComment({ startDate: '2026-05-04', dueDate: '2026-05-08' });
+    expect(body).toBe('**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-08');
+    expect(parseScheduleComment(body)).toEqual({ startDate: '2026-05-04', endDate: '2026-05-08' });
+    expect(formatScheduleComment({ dueDate: '2026-05-08' })).toBe('**GanttSmart Schedule**\nend: 2026-05-08');
+    expect(formatScheduleComment({ startDate: '2026-05-04', dueDate: null })).toBe(
+      '**GanttSmart Schedule**\nstart: 2026-05-04',
+    );
+  });
+
+  it('pickScheduleComment takes the latest valid schedule comment, skipping unrelated or invalid ones', () => {
+    const picked = pickScheduleComment([
+      { id: 'old', body: '**GanttSmart Schedule**\nstart: 2026-05-01', createdAt: '2026-05-01T00:00:00Z' },
+      {
+        id: 'edited',
+        body: '**GanttSmart Schedule**\nstart: 2026-05-03\nend: 2026-05-09',
+        createdAt: '2026-05-02T00:00:00Z',
+        updatedAt: '2026-05-10T00:00:00Z',
+      },
+      { id: 'reply', body: '**GanttSmart Schedule**\nstart: 2026-05-02', createdAt: '2026-05-05T00:00:00Z' },
+      { id: 'chatter', body: 'looks good', createdAt: '2026-05-20T00:00:00Z' },
+      { id: 'invalid', body: '**GanttSmart Schedule**\nstart: nope', createdAt: '2026-05-21T00:00:00Z' },
+      { id: 'null-body', body: null, createdAt: '2026-05-22T00:00:00Z' },
+    ]);
+    expect(picked).toMatchObject({ id: 'edited', startDate: '2026-05-03', endDate: '2026-05-09' });
+    expect(pickScheduleComment([{ id: 'x', body: 'nothing' }])).toBeNull();
+    expect(pickScheduleComment([])).toBeNull();
+  });
+});
+
+describe('resolveIssueSchedule precedence', () => {
+  const comment = {
+    id: 'c1',
+    startDate: '2026-05-04',
+    endDate: '2026-05-08',
+    createdAt: '2026-05-01T00:00:00Z',
+    updatedAt: '2026-05-02T00:00:00Z',
+  };
+
+  it('prefers the comment start over a legacy description tag and falls back to it', () => {
+    expect(resolveIssueSchedule({ description: 'start: 01-05-26', comment })).toMatchObject({
+      startDate: '2026-05-04',
+    });
+    expect(resolveIssueSchedule({ description: 'start: 01-05-26' })).toEqual({
+      startDate: '2026-05-01',
+      dueDate: null,
+    });
+    expect(
+      resolveIssueSchedule({ description: 'start: 2026-05-02', comment: { ...comment, startDate: null } }),
+    ).toEqual({ startDate: '2026-05-02', dueDate: '2026-05-08' });
+  });
+
+  it('uses the comment end, falling back to the native dueDate when the comment has no end', () => {
+    expect(resolveIssueSchedule({ dueDate: '2026-05-08', comment }).dueDate).toBe('2026-05-08');
+    expect(resolveIssueSchedule({ dueDate: null, comment }).dueDate).toBe('2026-05-08');
+    expect(resolveIssueSchedule({ dueDate: '2026-05-20', comment: { ...comment, endDate: null } }).dueDate).toBe(
+      '2026-05-20',
+    );
+    expect(resolveIssueSchedule({ dueDate: '2026-05-20' }).dueDate).toBe('2026-05-20');
+  });
+
+  it('lets a newer native dueDate edit (made in Linear) win over a stale comment end', () => {
+    expect(
+      resolveIssueSchedule({ dueDate: '2026-05-15', issueUpdatedAt: '2026-05-03T00:00:00Z', comment }).dueDate,
+    ).toBe('2026-05-15');
+  });
+
+  it('keeps the comment end when it is newer than the issue or timestamps are unavailable', () => {
+    expect(
+      resolveIssueSchedule({ dueDate: '2026-05-15', issueUpdatedAt: '2026-05-01T00:00:00Z', comment }).dueDate,
+    ).toBe('2026-05-08');
+    expect(resolveIssueSchedule({ dueDate: '2026-05-15', comment }).dueDate).toBe('2026-05-08');
+  });
+});
+
+describe('fetchIssues schedule comments', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  function projectResponse(nodes: Array<Record<string, unknown>>) {
+    return jsonResponse({
+      project: {
+        name: 'Sched',
+        startDate: null,
+        targetDate: '2026-06-30',
+        projectMilestones: { nodes: [] },
+        issues: { nodes },
+        doneIssues: { nodes: [] },
+      },
+    });
+  }
+
+  it('prefers schedule comment dates, falling back to legacy description tags and native dueDate', async () => {
+    linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
+      if (body.query.includes('project(id:')) {
+        return projectResponse([
+          makeIssueNode({ id: 'u1', identifier: 'S-1', description: 'start: 01-05-26', dueDate: '2026-05-10' }),
+          makeIssueNode({
+            id: 'u2',
+            identifier: 'S-2',
+            description: 'start: 2026-05-03\nnotes',
+            dueDate: '2026-05-12',
+          }),
+          makeIssueNode({ id: 'u3', identifier: 'S-3', description: '', dueDate: null }),
+          makeIssueNode({ id: 'u4', identifier: 'S-4', description: 'start: 01-05-26', dueDate: '2026-05-30' }),
+        ]);
+      }
+      if (body.query.includes('ScheduleComments')) {
+        return jsonResponse({
+          issues: {
+            nodes: [
+              {
+                id: 'u1',
+                updatedAt: '2026-05-02T00:00:00Z',
+                comments: {
+                  nodes: [
+                    {
+                      id: 'c1',
+                      body: '**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-08',
+                      createdAt: '2026-05-01T00:00:00Z',
+                      updatedAt: '2026-05-02T00:00:00Z',
+                    },
+                  ],
+                },
+              },
+              { id: 'u2', updatedAt: '2026-05-02T00:00:00Z', comments: { nodes: [] } },
+              {
+                id: 'u3',
+                updatedAt: '2026-05-02T00:00:00Z',
+                comments: {
+                  nodes: [{ id: 'c3', body: '**GanttSmart Schedule**\nstart: 2026-05-05\nend: 2026-05-07' }],
+                },
+              },
+              {
+                // Native dueDate edited in Linear after the comment was last written
+                id: 'u4',
+                updatedAt: '2026-05-20T00:00:00Z',
+                comments: {
+                  nodes: [
+                    {
+                      id: 'c4',
+                      body: '**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-08',
+                      createdAt: '2026-05-01T00:00:00Z',
+                      updatedAt: '2026-05-02T00:00:00Z',
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        });
+      }
+      return jsonResponse({ issues: { nodes: [] } });
+    });
+
+    const result = await fetchIssues('tok', 'proj-1');
+    const byId = Object.fromEntries([...result.tasks, ...result.unscheduledTasks].map((t) => [t.id, t]));
+
+    expect(byId['S-1']).toMatchObject({ startDate: '2026-05-04', due: '2026-05-08' });
+    expect(byId['S-1'].isDueImplicit).toBeUndefined();
+    expect(byId['S-2']).toMatchObject({ startDate: '2026-05-03', due: '2026-05-12' });
+    // Schedule comment gives an otherwise unscheduled issue an explicit due date
+    expect(result.unscheduledTasks).toEqual([]);
+    expect(byId['S-3']).toMatchObject({ startDate: '2026-05-05', due: '2026-05-07' });
+    expect(byId['S-3'].isDueImplicit).toBeUndefined();
+    expect(byId['S-4']).toMatchObject({ startDate: '2026-05-04', due: '2026-05-30' });
+  });
+
+  it('applies schedule comments to cross-project external issues', async () => {
+    linearRequestMock.mockImplementation(
+      async (_t: string, body: { query: string; variables?: { ids?: string[] } }) => {
+        if (body.query.includes('project(id:')) {
+          return projectResponse([makeIssueNode({ id: 'u1', identifier: 'S-1' })]);
+        }
+        if (body.query.includes('ScheduleComments')) {
+          return jsonResponse({
+            issues: {
+              nodes: [
+                {
+                  id: 'ext-1',
+                  updatedAt: '2026-05-02T00:00:00Z',
+                  comments: {
+                    nodes: [{ id: 'c1', body: '**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-09' }],
+                  },
+                },
+              ],
+            },
+          });
+        }
+        return jsonResponse({
+          issues: {
+            nodes: [
+              {
+                id: 'u1',
+                identifier: 'S-1',
+                relations: {
+                  nodes: [
+                    {
+                      type: 'blocked_by',
+                      relatedIssue: {
+                        id: 'ext-1',
+                        identifier: 'X-1',
+                        title: 'External',
+                        description: 'start: 01-05-26',
+                        dueDate: null,
+                        state: { name: 'Todo', type: 'unstarted' },
+                        project: { id: 'proj-x', name: 'Other', targetDate: null },
+                      },
+                    },
+                  ],
+                },
+                children: { nodes: [] },
+              },
+            ],
+          },
+        });
+      },
+    );
+
+    const result = await fetchIssues('tok', 'proj-1');
+    expect(result.externalUnscheduledTasks).toEqual([]);
+    expect(result.externalTasks[0]).toMatchObject({
+      id: 'X-1',
+      startDate: '2026-05-04',
+      due: '2026-05-09',
+    });
+    const commentCall = linearRequestMock.mock.calls.find((c) => c[1].query.includes('ScheduleComments'));
+    expect(commentCall?.[1].variables.ids).toEqual(['u1', 'ext-1']);
+  });
+
+  it('fetches comments in batches that keep every request far below the 10,000 complexity limit', async () => {
+    const nodes = Array.from({ length: 260 }, (_, i) =>
+      makeIssueNode({ id: `u${i}`, identifier: `S-${i}`, title: `Task ${i}` }),
+    );
+    const commentBatches: string[][] = [];
+    linearRequestMock.mockImplementation(
+      async (_t: string, body: { query: string; variables?: { ids?: string[] } }) => {
+        if (body.query.includes('project(id:')) return projectResponse(nodes);
+        if (body.query.includes('ScheduleComments')) {
+          commentBatches.push(body.variables!.ids!);
+          return jsonResponse({
+            issues: {
+              nodes: body.variables!.ids!.map((id) => ({ id, updatedAt: null, comments: { nodes: [] } })),
+            },
+          });
+        }
+        return jsonResponse({ issues: { nodes: [] } });
+      },
+    );
+
+    const result = await fetchIssues('tok', 'proj-1');
+    expect(result.tasks).toHaveLength(260);
+    expect(commentBatches).toHaveLength(Math.ceil(260 / SCHEDULE_COMMENT_BATCH_SIZE));
+    for (const batch of commentBatches) expect(batch.length).toBeLessThanOrEqual(SCHEDULE_COMMENT_BATCH_SIZE);
+    expect(commentBatches.flat().sort()).toEqual(nodes.map((n) => n.id as string).sort());
+
+    // Each request: batch size issues * comments per issue, well under the limit
+    const perRequest = estimateLinearQueryComplexity(SCHEDULE_COMMENTS_QUERY);
+    expect(perRequest).toBeLessThan(1500);
+    expect(SCHEDULE_COMMENT_BATCH_SIZE * SCHEDULE_COMMENTS_PER_ISSUE).toBeLessThan(1000);
+    expect(estimateLinearQueryComplexity(ISSUE_SCHEDULE_QUERY)).toBeLessThan(500);
+
+    // Regression guard: nesting comments in the 250-issue project query would have blown the limit
+    const naive = `query { project(id: "p") { issues(first: 250) { nodes { id comments(first: 50) { nodes { id body createdAt updatedAt } } } } } }`;
+    expect(estimateLinearQueryComplexity(naive)).toBeGreaterThan(10_000);
+    const issuesQueryText = linearRequestMock.mock.calls.find((c) => c[1].query.includes('project(id:'))![1].query;
+    expect(issuesQueryText).not.toContain('comments');
+  });
+
+  it('keeps legacy and native dates when the schedule comments request fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
+      if (body.query.includes('project(id:')) {
+        return projectResponse([makeIssueNode({ id: 'u1', identifier: 'S-1', description: 'start: 01-05-26' })]);
+      }
+      if (body.query.includes('ScheduleComments')) throw new Error('boom');
+      return jsonResponse({ issues: { nodes: [] } });
+    });
+    const result = await fetchIssues('tok', 'proj-1');
+    expect(result.tasks[0]).toMatchObject({ startDate: '2026-05-01', due: '2026-11-20' });
+    warn.mockRestore();
+  });
+});
+
+describe('schedule mutations', () => {
+  interface MockComment {
+    id: string;
+    body: string;
+    createdAt: string;
+    updatedAt: string;
+  }
+
+  interface MockIssue {
+    description: string | null;
+    dueDate: string | null;
+    updatedAt: string;
+    comments: MockComment[];
+  }
+
+  let issue: MockIssue;
+  let calls: Array<{ kind: string; variables: Record<string, unknown> }>;
+
+  function installBackend() {
+    linearRequestMock.mockImplementation(
+      async (_t: string, body: { query: string; variables?: Record<string, string | undefined> }) => {
+        const variables = body.variables ?? {};
+        if (body.query.includes('IssueSchedule')) {
+          calls.push({ kind: 'read', variables });
+          return jsonResponse({ issue: { ...issue, comments: { nodes: issue.comments } } });
+        }
+        if (body.query.includes('commentCreate')) {
+          calls.push({ kind: 'commentCreate', variables });
+          issue.comments.push({
+            id: `comment-${issue.comments.length + 1}`,
+            body: variables.body ?? '',
+            createdAt: '2026-11-21T10:00:00Z',
+            updatedAt: '2026-11-21T10:00:00Z',
+          });
+          return jsonResponse({ commentCreate: { success: true } });
+        }
+        if (body.query.includes('commentUpdate')) {
+          calls.push({ kind: 'commentUpdate', variables });
+          const target = issue.comments.find((c) => c.id === variables.commentId)!;
+          target.body = variables.body ?? '';
+          target.updatedAt = '2026-11-21T11:00:00Z';
+          return jsonResponse({ commentUpdate: { success: true } });
+        }
+        if (body.query.includes('issueUpdate')) {
+          calls.push({ kind: 'issueUpdate', variables });
+          if (variables.dueDate) issue.dueDate = variables.dueDate as string;
+          return jsonResponse({ issueUpdate: { success: true } });
+        }
+        throw new Error(`Unexpected query: ${body.query}`);
+      },
+    );
+  }
+
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+    calls = [];
+    issue = { description: null, dueDate: null, updatedAt: '2026-11-01T00:00:00Z', comments: [] };
+    installBackend();
+  });
+
+  it('creates a schedule comment with both dates, preserving the native dueDate when only start changes', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.description = 'Plan\nstart: 01-12-26';
+
+    await updateIssueStartDate('tok', 'uuid-1', '2026-12-03');
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentCreate']);
+    expect(calls[1].variables).toEqual({
+      issueId: 'uuid-1',
+      body: '**GanttSmart Schedule**\nstart: 2026-12-03\nend: 2026-12-10',
+    });
+    // Description (with its legacy tag) is left untouched and no description mutation is sent
+    expect(issue.description).toBe('Plan\nstart: 01-12-26');
+    expect(calls.some((c) => 'description' in c.variables)).toBe(false);
+  });
+
+  it('creates a start-only comment when no dates exist, and preserves a legacy description start on due updates', async () => {
+    await updateIssueStartDate('tok', 'uuid-1', '2026-12-03');
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-03');
+
+    calls = [];
+    issue = { description: 'start: 01-12-26', dueDate: null, updatedAt: '2026-11-01T00:00:00Z', comments: [] };
+    await updateIssueDueDate('tok', 'uuid-2', '2026-12-09');
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentCreate', 'issueUpdate']);
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-09');
+  });
+
+  it('updates the existing schedule comment in place instead of creating another', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.comments = [
+      { id: 'chat', body: 'unrelated', createdAt: '2026-11-02T00:00:00Z', updatedAt: '2026-11-02T00:00:00Z' },
+      {
+        id: 'sched',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-10',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+    issue.updatedAt = '2026-11-03T00:00:00Z';
+
+    await updateIssueStartDate('tok', 'uuid-1', '2026-12-02');
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentUpdate']);
+    expect(calls[1].variables).toEqual({
+      commentId: 'sched',
+      body: '**GanttSmart Schedule**\nstart: 2026-12-02\nend: 2026-12-10',
+    });
+    expect(issue.comments).toHaveLength(2);
+  });
+
+  it('updateIssueDueDate updates the comment end and syncs the native dueDate', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.comments = [
+      {
+        id: 'sched',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-10',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+
+    await updateIssueDueDate('tok', 'uuid-1', '2026-12-15');
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentUpdate', 'issueUpdate']);
+    expect(calls[1].variables.body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-15');
+    expect(calls[2].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
+    expect(issue.dueDate).toBe('2026-12-15');
+  });
+
+  it('uses a newer native dueDate (edited in Linear) when preserving the end on a start update', async () => {
+    issue.dueDate = '2026-12-20';
+    issue.updatedAt = '2026-11-10T00:00:00Z';
+    issue.comments = [
+      {
+        id: 'sched',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-10',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+
+    await updateIssueStartDate('tok', 'uuid-1', '2026-12-02');
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-02\nend: 2026-12-20');
+  });
+
+  it('serializes concurrent start and due updates so moving a bar yields one comment containing both dates', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.description = 'start: 01-12-26';
+
+    await Promise.all([
+      updateIssueStartDate('tok', 'uuid-1', '2026-12-03'),
+      updateIssueDueDate('tok', 'uuid-1', '2026-12-12'),
+    ]);
+
+    expect(calls.filter((c) => c.kind === 'commentCreate')).toHaveLength(1);
+    expect(calls.filter((c) => c.kind === 'commentUpdate')).toHaveLength(1);
+    expect(issue.comments).toHaveLength(1);
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-03\nend: 2026-12-12');
+    expect(issue.dueDate).toBe('2026-12-12');
+    // No interleaving: each write completes (read -> comment write [-> issueUpdate]) before the next begins
+    const kinds = calls.map((c) => c.kind);
+    expect(kinds.indexOf('read', 1)).toBeGreaterThan(kinds.indexOf('commentCreate'));
+  });
+
+  it('keeps writing after a failed update for the same issue', async () => {
+    linearRequestMock.mockImplementationOnce(async () => {
+      throw new Error('Linear down');
+    });
+    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-03')).rejects.toThrow('Linear down');
+    await updateIssueStartDate('tok', 'uuid-1', '2026-12-04');
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-04');
+  });
+
+  it('throws when Linear does not confirm the comment write', async () => {
+    linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
+      if (body.query.includes('IssueSchedule')) return jsonResponse({ issue: { comments: { nodes: [] } } });
+      return jsonResponse({ commentCreate: { success: false } });
+    });
+    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-03')).rejects.toThrow(/schedule comment/);
   });
 });

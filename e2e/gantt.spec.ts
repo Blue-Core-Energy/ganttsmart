@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
 function localOffsetDate(days: number): Date {
   const d = new Date();
@@ -20,6 +20,82 @@ function startTagOffsetDays(days: number): string {
   const yy = String(d.getFullYear()).slice(-2);
   return `start: ${dd}-${mm}-${yy}`;
 }
+
+interface MockScheduleComment {
+  id: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Mocks the GanttSmart schedule-comment GraphQL operations: the batched `ScheduleComments` read,
+ * the per-issue `IssueSchedule` read, `commentCreate` and `commentUpdate`.
+ */
+function createScheduleMock(initial: { description?: string | null; dueDate?: string | null } = {}) {
+  const state = {
+    description: initial.description ?? null,
+    dueDate: initial.dueDate ?? null,
+    comments: [] as MockScheduleComment[],
+    creates: [] as string[],
+    updates: [] as string[],
+  };
+
+  const respond = (route: Route, data: unknown) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+  async function handle(
+    route: Route,
+    payload: { query?: string; variables?: Record<string, unknown> } | null,
+  ): Promise<boolean> {
+    const query = payload?.query ?? '';
+    const variables = payload?.variables ?? {};
+
+    if (query.includes('ScheduleComments')) {
+      await respond(route, { issues: { nodes: [] } });
+      return true;
+    }
+    if (query.includes('IssueSchedule')) {
+      await respond(route, {
+        issue: {
+          description: state.description,
+          dueDate: state.dueDate,
+          updatedAt: '2026-01-01T00:00:00Z',
+          comments: { nodes: state.comments },
+        },
+      });
+      return true;
+    }
+    if (query.includes('commentCreate')) {
+      const body = String(variables.body ?? '');
+      state.creates.push(body);
+      state.comments.push({
+        id: `comment-${state.comments.length + 1}`,
+        body,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+      await respond(route, { commentCreate: { success: true } });
+      return true;
+    }
+    if (query.includes('commentUpdate')) {
+      const body = String(variables.body ?? '');
+      state.updates.push(body);
+      const target = state.comments.find((c) => c.id === variables.commentId);
+      if (target) {
+        target.body = body;
+        target.updatedAt = new Date().toISOString();
+      }
+      await respond(route, { commentUpdate: { success: true } });
+      return true;
+    }
+    return false;
+  }
+
+  return { state, handle };
+}
+
+const defaultScheduleMock = createScheduleMock();
 
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -85,6 +161,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -333,6 +410,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { id?: string };
       } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -516,6 +594,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -792,6 +871,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -1246,6 +1326,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { input?: Record<string, unknown> };
       } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('FeedbackTarget')) {
         expect(query).not.toMatch(/\blabels\s*\(/);
@@ -1530,6 +1611,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('FeedbackTarget')) {
         await route.fulfill({
@@ -1684,6 +1766,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { id?: string; input?: { projectId: string; url: string; label: string } };
       } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -1903,6 +1986,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { id?: string; stateId?: string; teamId?: string };
       } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -2134,6 +2218,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { id?: string; stateId?: string; teamId?: string };
       } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -2410,6 +2495,7 @@ test.describe('GanttSmart GCP app', () => {
     const initialDescription = `${startTagOffsetDays(monOffset)}\nWeekly build`;
     const dueUpdates: string[] = [];
     const descUpdates: string[] = [];
+    const schedule = createScheduleMock({ description: initialDescription, dueDate: isoOffsetDays(friOffset) });
 
     await page.addInitScript(() => {
       localStorage.setItem('gantt_onboarding_done', '1');
@@ -2431,6 +2517,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { id?: string; dueDate?: string; description?: string };
       } | null;
       const query = payload?.query ?? '';
+      if (await schedule.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -2512,15 +2599,6 @@ test.describe('GanttSmart GCP app', () => {
         return;
       }
 
-      if (query.includes('issue(id:')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ data: { issue: { description: initialDescription } } }),
-        });
-        return;
-      }
-
       if (query.includes('issueUpdate')) {
         if (payload?.variables?.dueDate) dueUpdates.push(payload.variables.dueDate);
         if (payload?.variables?.description) descUpdates.push(payload.variables.description);
@@ -2551,10 +2629,15 @@ test.describe('GanttSmart GCP app', () => {
     await page.mouse.up();
 
     await expect.poll(() => dueUpdates.length).toBe(1);
-    await expect.poll(() => descUpdates.length).toBe(1);
+    await expect.poll(() => schedule.state.creates.length + schedule.state.updates.length).toBe(2);
 
     expect(dueUpdates[0]).toBe(isoOffsetDays(tueNextOffset));
-    expect(descUpdates[0]).toContain(startTagOffsetDays(wedOffset));
+    // Both dates land in one schedule comment (created once, then updated in place); the description is untouched
+    expect(schedule.state.comments).toHaveLength(1);
+    expect(schedule.state.comments[0].body).toBe(
+      `**GanttSmart Schedule**\nstart: ${isoOffsetDays(wedOffset)}\nend: ${isoOffsetDays(tueNextOffset)}`,
+    );
+    expect(descUpdates).toEqual([]);
 
     // DetailPanel reflects the preserved 5-workday duration
     await bar.click();
@@ -2584,6 +2667,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -2763,6 +2847,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -3400,6 +3485,7 @@ test.describe('GanttSmart GCP app', () => {
   }) => {
     const errors = trackErrors(page);
     const updatedDates: string[] = [];
+    const schedule = createScheduleMock({ description: `${startTagOffsetDays(-5)}\nDesign` });
 
     await page.addInitScript(() => {
       localStorage.setItem('gantt_onboarding_done', '1');
@@ -3421,6 +3507,7 @@ test.describe('GanttSmart GCP app', () => {
         variables?: { input?: { dueDate?: string } };
       } | null;
       const query = payload?.query ?? '';
+      if (await schedule.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
@@ -3516,15 +3603,6 @@ test.describe('GanttSmart GCP app', () => {
               },
             },
           }),
-        });
-        return;
-      }
-
-      if (query.includes('issue(id:')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({ data: { issue: { description: `${startTagOffsetDays(-5)}\nDesign` } } }),
         });
         return;
       }
@@ -3687,6 +3765,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
         await route.fulfill({
