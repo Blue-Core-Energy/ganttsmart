@@ -1218,7 +1218,7 @@ test.describe('GanttSmart GCP app', () => {
         .filter({ hasText: /^1Unscheduled$/ })
         .first(),
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: /Unscheduled\s*1/ })).toBeVisible();
+    await expect(page.getByRole('button', { name: /Unscheduled\s*1\s*—/ })).toBeVisible();
 
     // FilterBar count pill reflects only the 2 active scheduled tasks
     await expect(page.getByText('2/2', { exact: true })).toBeVisible();
@@ -1242,6 +1242,148 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Blocks ENG-103')).toHaveCount(0);
     await expect(page.getByText('1/2 (50%)')).toBeVisible();
     await page.keyboard.press('Escape');
+
+    expect(errors).toEqual([]);
+  });
+
+  test('shows only the Unscheduled summary card when no scheduled issues exist', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      const respond = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) {
+        await respond({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await respond({
+          project: {
+            name: 'Demo Project',
+            startDate: null,
+            targetDate: null,
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                {
+                  id: 'uuid-1',
+                  identifier: 'ENG-101',
+                  title: 'Unscheduled backlog task',
+                  description: '',
+                  dueDate: null,
+                  url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                  priority: 4,
+                  state: { name: 'Backlog', type: 'backlog' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  canceledAt: null,
+                  assignee: { name: 'Nate Jones' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                },
+                {
+                  id: 'uuid-2',
+                  identifier: 'ENG-102',
+                  title: 'Unscheduled todo task',
+                  description: '',
+                  dueDate: null,
+                  url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                  priority: 4,
+                  state: { name: 'Todo', type: 'unstarted' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  canceledAt: null,
+                  assignee: { name: 'Nate Jones' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                },
+                {
+                  id: 'uuid-3',
+                  identifier: 'ENG-103',
+                  title: 'Unscheduled duplicate task',
+                  description: '',
+                  dueDate: null,
+                  url: 'https://linear.app/bluecoreenergy/issue/ENG-103',
+                  priority: 4,
+                  state: { name: 'Duplicate', type: 'backlog' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  canceledAt: null,
+                  assignee: { name: 'Nate Jones' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                },
+              ],
+            },
+            doneIssues: { nodes: [] },
+          },
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await respond({
+          issues: {
+            nodes: [
+              { id: 'uuid-1', identifier: 'ENG-101', relations: { nodes: [] }, children: { nodes: [] } },
+              { id: 'uuid-2', identifier: 'ENG-102', relations: { nodes: [] }, children: { nodes: [] } },
+              { id: 'uuid-3', identifier: 'ENG-103', relations: { nodes: [] }, children: { nodes: [] } },
+            ],
+          },
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await respond({
+          workflowStates: {
+            nodes: [
+              { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-4', name: 'Duplicate', type: 'duplicate', position: 1 },
+            ],
+          },
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    await expect(page.getByText('No issues with dates yet')).toBeVisible();
+    await expect(page.getByText('2 issues need a due date', { exact: false })).toBeVisible();
+
+    // The summary row shows just the ignored-filtered Unscheduled count, with no misleading zeroed scheduled cards
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^2Unscheduled$/ })
+        .first(),
+    ).toBeVisible();
+    await expect(page.locator('div').filter({ hasText: /^0Active$/ })).toHaveCount(0);
+    await expect(page.getByText('Total Span', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('In Progress', { exact: true })).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });

@@ -98,14 +98,9 @@ function CheckIcon() {
   );
 }
 
-export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
-  const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
-  const unscheduled = countUnscheduledTasks(unscheduledTasks);
-  if (!visibleTasks.length && !unscheduled) return null;
-
-  const { active, inProgress, completed, span } = computeTaskStats(visibleTasks);
-
-  const cards = [
+function buildScheduledCards(tasks: Task[]) {
+  const { active, inProgress, completed, span } = computeTaskStats(tasks);
+  return [
     {
       label: 'Active',
       value: active,
@@ -130,6 +125,18 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
       color: 'var(--color-accent-light)',
       Icon: CalendarIcon,
     },
+  ];
+}
+
+export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
+  const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
+  const unscheduled = countUnscheduledTasks(unscheduledTasks);
+  if (!visibleTasks.length && !unscheduled) return null;
+
+  const scheduledCards = visibleTasks.length ? buildScheduledCards(visibleTasks) : [];
+
+  const cards = [
+    ...scheduledCards,
     ...(unscheduled > 0
       ? [
           {
