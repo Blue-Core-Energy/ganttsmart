@@ -4,6 +4,7 @@ import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
+import { BAR_HEIGHT, CELL_HIT_PAD, ROW_HEIGHT } from '@/utils/ganttLayout';
 import {
   barGradients,
   barShadows,
@@ -623,45 +624,41 @@ export default function GanttRow({
               data-task-indent={depth}
             >
               {showTreeGutter && treeGutter}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  {task.isExternal &&
-                    !showsColumn('project') &&
-                    (task.projectId && onSelectProject ? (
-                      <button
-                        type="button"
-                        data-external-project-jump={task.projectId}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectProject(task.projectId!);
-                        }}
-                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
-                        title={`From ${task.projectName || 'External project'} — click to open project`}
-                      >
-                        <span className="truncate">{task.projectName || 'External'}</span>
-                      </button>
-                    ) : (
-                      <span
-                        className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
-                        title={`External issue · ${task.projectName || 'No Project'}`}
-                      >
-                        {task.projectName || 'External'}
-                      </span>
-                    ))}
-                  {depViolation && depViolation.length > 0 && (
-                    <span
-                      className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
-                      title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
+              <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                {task.isExternal &&
+                  !showsColumn('project') &&
+                  (task.projectId && onSelectProject ? (
+                    <button
+                      type="button"
+                      data-external-project-jump={task.projectId}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectProject(task.projectId!);
+                      }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
+                      title={`From ${task.projectName || 'External project'} — click to open project`}
                     >
-                      <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                        <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
-                      </svg>
+                      <span className="truncate">{task.projectName || 'External'}</span>
+                    </button>
+                  ) : (
+                    <span
+                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
+                      title={`External issue · ${task.projectName || 'No Project'}`}
+                    >
+                      {task.projectName || 'External'}
                     </span>
-                  )}
-                  {/* Keep click-to-cycle reachable when the status column is hidden */}
-                  {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
-                </div>
+                  ))}
+                {depViolation && depViolation.length > 0 && (
+                  <span
+                    className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
+                    title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
+                    </svg>
+                  </span>
+                )}
                 {isEditingTitle ? (
                   <input
                     ref={titleInputRef}
@@ -684,7 +681,7 @@ export default function GanttRow({
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => e.stopPropagation()}
-                    className="w-full -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
+                    className="min-w-10 flex-1 -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
                     style={{
                       maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
                     }}
@@ -692,7 +689,7 @@ export default function GanttRow({
                 ) : (
                   <div
                     data-task-title={task.id}
-                    className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
+                    className={`min-w-10 flex-1 text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
                     style={{
                       maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
                     }}
@@ -709,6 +706,8 @@ export default function GanttRow({
                     {task.title}
                   </div>
                 )}
+                {/* Keep click-to-cycle reachable when the status column is hidden */}
+                {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
               </div>
             </div>
           </div>
@@ -727,7 +726,8 @@ export default function GanttRow({
           <div
             ref={assigneeAnchorRef}
             data-assignee-cell={task.id}
-            className="flex items-center gap-2 min-w-0 py-[18px] -my-[18px] cursor-pointer"
+            className="flex items-center gap-2 min-w-0 cursor-pointer"
+            style={{ paddingBlock: CELL_HIT_PAD, marginBlock: -CELL_HIT_PAD }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -783,7 +783,8 @@ export default function GanttRow({
           <div
             ref={statusAnchorRef}
             data-status-cell={task.id}
-            className="flex items-center gap-2 min-w-0 py-[18px] -my-[18px] cursor-pointer"
+            className="flex items-center gap-2 min-w-0 cursor-pointer"
+            style={{ paddingBlock: CELL_HIT_PAD, marginBlock: -CELL_HIT_PAD }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -873,7 +874,7 @@ export default function GanttRow({
       case 'priority':
         return (
           <span
-            className={`inline-flex items-center gap-1.5 text-[11px] font-semibold py-[3px] pl-[7px] pr-2 rounded-full ${priorityBadgeClasses[pCls]}`}
+            className={`flex w-fit items-center gap-1.5 text-[11px] font-semibold py-[3px] pl-[7px] pr-2 rounded-full ${priorityBadgeClasses[pCls]}`}
           >
             <span
               className="w-[6px] h-[6px] rounded-full shrink-0"
@@ -1050,7 +1051,7 @@ export default function GanttRow({
             key={key}
             data-column-key={key}
             data-frozen={isSticky ? 'true' : undefined}
-            className={`h-[56px] border-b border-r border-border-primary align-middle overflow-hidden gantt-sticky-cell ${
+            className={`border-b border-r border-border-primary align-middle overflow-hidden gantt-sticky-cell ${
               key === 'task' ? 'px-[18px]' : 'px-3'
             } ${isSticky ? 'sticky z-[6]' : ''} ${
               isFirstCol
@@ -1062,6 +1063,7 @@ export default function GanttRow({
               minWidth: Math.min(getColumnDef(key).minWidth, colWidths[key]),
               maxWidth: colWidths[key],
               left: isSticky ? stickyLeft : undefined,
+              height: ROW_HEIGHT,
             }}
           >
             {renderCell(key)}
@@ -1069,7 +1071,7 @@ export default function GanttRow({
         );
       })}
       {/* Chart */}
-      <td className="h-[56px] p-0 relative border-b border-border-primary align-middle">
+      <td className="p-0 relative border-b border-border-primary align-middle" style={{ height: ROW_HEIGHT }}>
         <div className="relative h-full flex items-center" style={{ width: totalDays * dayWidth }}>
           {/* Background grid — also the drag surface for panning the timeline */}
           <div data-timeline-background className="absolute inset-0 flex cursor-grab">
@@ -1110,8 +1112,9 @@ export default function GanttRow({
           {/* Ghost bar — baseline (original plan) overlay, rendered above main bar */}
           {baselineBar && (
             <div
-              className="absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 z-[3] border-2 border-dashed border-amber-400/60 pointer-events-none"
+              className="absolute rounded-md top-1/2 -translate-y-1/2 z-[3] border-2 border-dashed border-amber-400/60 pointer-events-none"
               style={{
+                height: BAR_HEIGHT,
                 left: baselineBar.left,
                 width: baselineBar.width,
                 background: 'rgba(251, 191, 36, 0.08)',
@@ -1120,20 +1123,21 @@ export default function GanttRow({
             />
           )}
 
-          {/* Bar wrapper — sized to the 28px bar height so the vertical margin pans */}
+          {/* Bar wrapper — sized to the bar height so the vertical margin pans */}
           <div
-            className="group/bar absolute top-1/2 -translate-y-1/2 h-[28px]"
-            style={{ left: displayBarLeft, width: Math.max(displayBarWidth, 20) + 20 }}
+            className="group/bar absolute top-1/2 -translate-y-1/2"
+            style={{ left: displayBarLeft, width: Math.max(displayBarWidth, 20) + 20, height: BAR_HEIGHT }}
           >
             {/* Main bar */}
             <div
               data-task-bar={task.id}
               data-external-bar={task.isExternal ? 'true' : undefined}
               data-highlighted={isHighlighted ? 'true' : undefined}
-              className={`gantt-bar absolute h-[28px] rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-2 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
+              className={`gantt-bar absolute rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
                 left: 0,
                 width: displayBarWidth,
+                height: BAR_HEIGHT,
                 background: isDone
                   ? 'linear-gradient(135deg, #15803d, #22c55e)'
                   : overdue
