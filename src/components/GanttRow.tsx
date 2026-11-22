@@ -625,8 +625,6 @@ export default function GanttRow({
               {showTreeGutter && treeGutter}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  {/* The ID moves out when it has a column of its own */}
-                  {!showsColumn('id') && issueIdLink}
                   {task.isExternal &&
                     !showsColumn('project') &&
                     (task.projectId && onSelectProject ? (
