@@ -2702,8 +2702,8 @@ test.describe('GanttSmart GCP app', () => {
     const headers = page.locator('#gantt-export-target thead th');
     const headerLabels = async () => (await headers.allInnerTexts()).slice(0, -1).map((t) => t.split('\n')[0]);
 
-    // Default columns: task, assignee, status, due date — priority is no longer shown
-    expect(await headerLabels()).toEqual(['TASK', 'ASSIGNEE', 'STATUS', 'DUE']);
+    // Default columns: issue, assignee, status, due date — priority is no longer shown
+    expect(await headerLabels()).toEqual(['ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
 
     // Assignee and status are real columns, not just icons in the task cell
     const assigneeCell = page.locator('tr[data-task-id="ENG-101"] td').nth(1);
@@ -2716,8 +2716,8 @@ test.describe('GanttSmart GCP app', () => {
     await headers.nth(1).click({ button: 'right' });
     const picker = page.getByRole('group', { name: 'Columns' });
     await expect(picker).toBeVisible();
-    await expect(picker.getByRole('checkbox', { name: 'Task' })).toBeDisabled();
-    await expect(picker.getByRole('checkbox', { name: 'Task' })).toBeChecked();
+    await expect(picker.getByRole('checkbox', { name: 'Issue', exact: true })).toBeDisabled();
+    await expect(picker.getByRole('checkbox', { name: 'Issue', exact: true })).toBeChecked();
     await page.keyboard.press('Escape');
     await expect(picker).toHaveCount(0);
 
@@ -2730,7 +2730,7 @@ test.describe('GanttSmart GCP app', () => {
       await picker.getByRole('checkbox', { name: label }).check();
     }
     expect(await headerLabels()).toEqual([
-      'TASK',
+      'ISSUE',
       'ASSIGNEE',
       'STATUS',
       'START',
@@ -2754,11 +2754,11 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('button[data-status-bubble="ENG-101"]')).toBeVisible();
     await picker.getByRole('checkbox', { name: 'Status' }).check();
 
-    // The last optional column can't be hidden: that would leave only the task column
+    // The last optional column can't be hidden: that would leave only the issue column
     for (const label of ['Assignee', 'Status', 'Start date', 'Due date', 'Priority', 'Project', 'Sub-issue progress']) {
       await picker.getByRole('checkbox', { name: label }).uncheck();
     }
-    expect(await headerLabels()).toEqual(['TASK', 'ID']);
+    expect(await headerLabels()).toEqual(['ISSUE', 'ID']);
     await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeDisabled();
     await picker.getByRole('checkbox', { name: 'Due date' }).check();
     await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeEnabled();
@@ -2784,7 +2784,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.reload();
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     expect(await headerLabels()).toEqual([
-      'TASK',
+      'ISSUE',
       'ASSIGNEE',
       'STATUS',
       'START',
@@ -2799,7 +2799,7 @@ test.describe('GanttSmart GCP app', () => {
     // Reset puts the defaults back
     await page.getByRole('button', { name: 'Choose columns' }).click();
     await page.getByRole('button', { name: 'Reset to defaults' }).click();
-    expect(await headerLabels()).toEqual(['TASK', 'ASSIGNEE', 'STATUS', 'DUE']);
+    expect(await headerLabels()).toEqual(['ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
 
     expect(errors).toEqual([]);
   });
