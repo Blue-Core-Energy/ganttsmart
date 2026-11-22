@@ -4,7 +4,7 @@ import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
-import { BAR_HEIGHT, CELL_HIT_PAD, ROW_HEIGHT } from '@/utils/ganttLayout';
+import { BAR_HEIGHT, CELL_HIT_PAD, INDENT_PER_DEPTH, ROW_HEIGHT } from '@/utils/ganttLayout';
 import {
   barGradients,
   barShadows,
@@ -70,8 +70,6 @@ interface Props {
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
-/** Horizontal indent per nesting level, in px */
-const INDENT_PER_DEPTH = 18;
 
 export default function GanttRow({
   task,
@@ -681,18 +679,12 @@ export default function GanttRow({
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => e.stopPropagation()}
-                    className="min-w-10 flex-1 -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
-                    style={{
-                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
-                    }}
+                    className="min-w-0 flex-auto -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
                   />
                 ) : (
                   <div
                     data-task-title={task.id}
-                    className={`min-w-10 flex-1 text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-                    style={{
-                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
-                    }}
+                    className={`min-w-0 flex-auto text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
                     title={task.title}
                     onDoubleClick={
                       canInlineEdit

@@ -29,7 +29,13 @@ export const ARROW_STAGGER_STEP = 6;
 /** Offset step for staggering unrelated overlapping lanes (horizontal tracks) in px; tighter than the column step to fit the row gap */
 export const ARROW_LANE_STAGGER_STEP = 4;
 
-/** Free space kept between the outermost staggered lane and the next row's bar, in px */
+/**
+ * Free space kept between the outermost staggered lane and the next row's bar, in px. It does not
+ * budget for that bar's highlight ring (3px) or half a selected stroke, so a third stacked lane can run
+ * under a highlighted neighbour's ring. Arrows paint beneath bars, so that only tucks the line away for
+ * a few px, and it needs three overlapping lanes plus a highlighted neighbour. Raising this to 4 would cap
+ * lanes at two tracks, which costs more than the edge case.
+ */
 const ARROW_LANE_EDGE_MARGIN = 2;
 
 /**

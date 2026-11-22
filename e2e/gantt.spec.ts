@@ -4397,6 +4397,8 @@ test.describe('GanttSmart GCP app', () => {
                 issue(301, 'Depth one', 18, -3, 300),
                 issue(302, 'Depth two', 16, -3, 301),
                 issue(303, 'Depth three with a long enough title to truncate', 14, -2, 302),
+                issue(304, 'Depth four with a long enough title to truncate', 13, -2, 303),
+                issue(305, 'Depth five with a long enough title to truncate', 12, -2, 304),
                 issue(310, 'Blocker due late', 25, -4, null),
               ],
             },
@@ -4418,11 +4420,15 @@ test.describe('GanttSmart GCP app', () => {
               relationsOf(301, [], [302]),
               relationsOf(302, [], [303]),
               // LOC-303 and the external CTRL-42 both start before LOC-310 is due, so both carry a warning
-              relationsOf(303, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], []),
+              relationsOf(303, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [304]),
+              // LOC-304 also warns (depth four with a warning); LOC-305 is the deepest row, with only the dot
+              relationsOf(304, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [305]),
+              relationsOf(305, [], []),
               relationsOf(
                 310,
                 [
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-303' } },
+                  { type: 'blocks', relatedIssue: { identifier: 'LOC-304' } },
                   { type: 'blocks', relatedIssue: externalIssue },
                 ],
                 [],
@@ -4455,12 +4461,21 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('tr[data-task-id="LOC-303"]')).toHaveAttribute('data-task-depth', '3');
     await expect(page.locator('tr[data-task-id="CTRL-42"]')).toHaveAttribute('data-external-task', 'true');
 
-    // The widest metadata lines the Issue cell can hold at 200px: the deepest indent with a warning, and an
-    // external row (always top level) with its project badge and a warning
-    for (const id of ['LOC-303', 'CTRL-42']) {
+    await expect(page.locator('tr[data-task-id="LOC-304"]')).toHaveAttribute('data-task-depth', '4');
+    await expect(page.locator('tr[data-task-id="LOC-305"]')).toHaveAttribute('data-task-depth', '5');
+
+    // The widest lines the Issue cell can hold at 200px: deep indents (3 and 4 with a warning, 5 with just the
+    // dot, which is the only status control on a phone) and an external row (always top level) with its project
+    // badge and a warning
+    for (const { id, warns } of [
+      { id: 'LOC-303', warns: true },
+      { id: 'LOC-304', warns: true },
+      { id: 'LOC-305', warns: false },
+      { id: 'CTRL-42', warns: true },
+    ]) {
       const row = page.locator(`tr[data-task-id="${id}"]`);
       const cell = row.locator('td[data-column-key="task"]');
-      await expect(cell.locator('span[title^="Starts before"]')).toBeVisible();
+      await expect(cell.locator('span[title^="Starts before"]')).toHaveCount(warns ? 1 : 0);
       const bubble = cell.locator(`[data-status-bubble="${id}"]`);
       await expect(bubble).toBeVisible();
 
@@ -4485,8 +4500,15 @@ test.describe('GanttSmart GCP app', () => {
         { x: dotBox.x + dotBox.width / 2, y: dotBox.y + dotBox.height / 2, id },
       );
       expect(hit).toBe(true);
-      const warnBox = (await cell.locator('span[title^="Starts before"]').boundingBox())!;
-      expect(warnBox.x + warnBox.width).toBeLessThanOrEqual(dotBox.x);
+      if (warns) {
+        const warnBox = (await cell.locator('span[title^="Starts before"]').boundingBox())!;
+        expect(warnBox.x + warnBox.width).toBeLessThanOrEqual(dotBox.x);
+      }
+
+      // The title keeps some room: it truncates rather than vanishing
+      const titleBox = (await cell.locator(`[data-task-title="${id}"]`).boundingBox())!;
+      expect(titleBox.width).toBeGreaterThanOrEqual(16);
+      expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(dotBox.x);
     }
 
     // The Issue cell holds only the title and these indicators: no dependency icon or sub-issue count
@@ -4499,9 +4521,11 @@ test.describe('GanttSmart GCP app', () => {
       .boundingBox())!;
     expect(badgeBox.width).toBeGreaterThan(20);
 
-    // Click-to-cycle still works from the deepest row
+    // Click-to-cycle still works from the deepest rows
     await page.locator('[data-status-bubble="LOC-303"]').click();
     await expect.poll(() => stateUpdates).toEqual(['uuid-303']);
+    await page.locator('[data-status-bubble="LOC-305"]').click();
+    await expect.poll(() => stateUpdates).toEqual(['uuid-303', 'uuid-305']);
 
     expect(errors).toEqual([]);
   });

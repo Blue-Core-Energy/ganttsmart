@@ -18,7 +18,10 @@ import {
 } from './dependencyArrows';
 import { BAR_HEIGHT, ROW_HEIGHT } from './ganttLayout';
 
-/** How far a highlighted bar's ring reaches past the bar: `ring-2 ring-offset-1` in GanttRow.tsx */
+/**
+ * How far a highlighted bar's ring reaches past the bar: `ring-2 ring-offset-1` in GanttRow.tsx.
+ * (It was offset-2, 4px. The tighter ring leaves more room between the bar's own arrow lane and the ring.)
+ */
 const HIGHLIGHT_RING = 3;
 
 /** Longest arrowhead, in px — `markerWidth` 8 at userSpaceOnUse in DependencyArrows.tsx */
