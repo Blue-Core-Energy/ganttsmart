@@ -95,7 +95,7 @@ function createScheduleMock(initial: { description?: string | null; dueDate?: st
   return { state, handle };
 }
 
-const defaultScheduleMock = createScheduleMock();
+let defaultScheduleMock = createScheduleMock();
 
 function trackErrors(page: Page): string[] {
   const errors: string[] = [];
@@ -117,6 +117,7 @@ function trackErrors(page: Page): string[] {
 
 test.describe('GanttSmart GCP app', () => {
   test.beforeEach(async ({ page }) => {
+    defaultScheduleMock = createScheduleMock();
     await page.route('https://fonts.googleapis.com/**', (route) =>
       route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
     );

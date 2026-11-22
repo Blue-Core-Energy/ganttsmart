@@ -1639,6 +1639,15 @@ describe('resolveIssueSchedule precedence', () => {
     ).toBe('2026-05-15');
   });
 
+  it('treats the due date as cleared when dueDate is removed in Linear after the schedule comment was written', () => {
+    expect(resolveIssueSchedule({ dueDate: null, issueUpdatedAt: '2026-05-03T00:00:00Z', comment }).dueDate).toBeNull();
+    // Comment newer than the issue, or no timestamps: the comment end still applies
+    expect(resolveIssueSchedule({ dueDate: null, issueUpdatedAt: '2026-05-01T00:00:00Z', comment }).dueDate).toBe(
+      '2026-05-08',
+    );
+    expect(resolveIssueSchedule({ dueDate: null, comment }).dueDate).toBe('2026-05-08');
+  });
+
   it('keeps the comment end when it is newer than the issue or timestamps are unavailable', () => {
     expect(
       resolveIssueSchedule({ dueDate: '2026-05-15', issueUpdatedAt: '2026-05-01T00:00:00Z', comment }).dueDate,
@@ -1842,6 +1851,14 @@ describe('fetchIssues schedule comments', () => {
     expect(issuesQueryText).not.toContain('comments');
   });
 
+  it('requests the newest-updated schedule comments with a server-side body filter', () => {
+    for (const query of [SCHEDULE_COMMENTS_QUERY, ISSUE_SCHEDULE_QUERY]) {
+      expect(query).toContain(
+        `comments(first: ${SCHEDULE_COMMENTS_PER_ISSUE}, orderBy: updatedAt, filter: { body: { containsIgnoreCase: "GanttSmart schedule" } })`,
+      );
+    }
+  });
+
   it('keeps legacy and native dates when the schedule comments request fails', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
@@ -1940,7 +1957,7 @@ describe('schedule mutations', () => {
     calls = [];
     issue = { description: 'start: 01-12-26', dueDate: null, updatedAt: '2026-11-01T00:00:00Z', comments: [] };
     await updateIssueDueDate('tok', 'uuid-2', '2026-12-09');
-    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentCreate', 'issueUpdate']);
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentCreate']);
     expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-09');
   });
 
@@ -1980,9 +1997,9 @@ describe('schedule mutations', () => {
 
     await updateIssueDueDate('tok', 'uuid-1', '2026-12-15');
 
-    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentUpdate', 'issueUpdate']);
-    expect(calls[1].variables.body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-15');
-    expect(calls[2].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
+    expect(calls[1].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
+    expect(calls[2].variables.body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-15');
     expect(issue.dueDate).toBe('2026-12-15');
   });
 

@@ -186,6 +186,9 @@ export async function fetchProjects(apiKey: string): Promise<Project[]> {
 //          If they differ, someone changed one of them outside GanttSmart; the most recently updated of the
 //          schedule comment (`comment.updatedAt`) and the issue (`issue.updatedAt`) wins. This keeps edits made
 //          to the due date in Linear's own UI visible without ignoring a deliberately edited schedule comment.
+//          This includes clearing the due date in Linear: a null `issue.dueDate` on an issue updated after the comment
+//          means the date was removed, so the stale comment `end:` is ignored (the task becomes unscheduled/implicit).
+//          Writes update the issue first and the comment second so `comment.updatedAt >= issue.updatedAt` afterwards.
 // The legacy description tag is never rewritten; the schedule comment simply takes precedence over it.
 
 /** Max issues per comments query. Keep batch * SCHEDULE_COMMENTS_PER_ISSUE far below Linear's 10,000 limit. */
@@ -301,18 +304,21 @@ export function resolveIssueSchedule(input: {
   let dueDate = nativeDue;
   if (comment?.endDate) {
     const commentStamp = comment.updatedAt || comment.createdAt;
-    const nativeIsNewer =
-      nativeDue !== null &&
-      nativeDue !== comment.endDate &&
-      Boolean(commentStamp) &&
-      Boolean(input.issueUpdatedAt) &&
-      timeOf(input.issueUpdatedAt) > timeOf(commentStamp);
-    dueDate = nativeIsNewer ? nativeDue : comment.endDate;
+    const issueIsNewer =
+      Boolean(commentStamp) && Boolean(input.issueUpdatedAt) && timeOf(input.issueUpdatedAt) > timeOf(commentStamp);
+    if (issueIsNewer && nativeDue === null) {
+      // dueDate was cleared in Linear after the schedule comment was written
+      dueDate = null;
+    } else if (issueIsNewer && nativeDue !== comment.endDate) {
+      dueDate = nativeDue;
+    } else {
+      dueDate = comment.endDate;
+    }
   }
   return { startDate, dueDate };
 }
 
-const SCHEDULE_COMMENTS_FIELDS = `comments(last: ${SCHEDULE_COMMENTS_PER_ISSUE}, filter: { body: { containsIgnoreCase: "${SCHEDULE_COMMENT_FILTER}" } }) {
+const SCHEDULE_COMMENTS_FIELDS = `comments(first: ${SCHEDULE_COMMENTS_PER_ISSUE}, orderBy: updatedAt, filter: { body: { containsIgnoreCase: "${SCHEDULE_COMMENT_FILTER}" } }) {
         nodes { id body createdAt updatedAt }
       }`;
 
@@ -942,6 +948,19 @@ function writeIssueSchedule(
       dueDate: patch.dueDate ?? current.dueDate,
     });
 
+    // Write the native dueDate before the comment so the comment is never older than the issue.
+    if (patch.dueDate) {
+      await gql(
+        apiKey,
+        `mutation($id: String!, $dueDate: TimelessDate!) {
+          issueUpdate(id: $id, input: { dueDate: $dueDate }) {
+            success
+          }
+        }`,
+        { id: issueId, dueDate: patch.dueDate },
+      );
+    }
+
     if (existing) {
       const res = await gql(
         apiKey,
@@ -968,18 +987,6 @@ function writeIssueSchedule(
       if ((res.commentCreate as { success?: boolean } | undefined)?.success === false) {
         throw new Error('Linear did not confirm schedule comment creation.');
       }
-    }
-
-    if (patch.dueDate) {
-      await gql(
-        apiKey,
-        `mutation($id: String!, $dueDate: TimelessDate!) {
-          issueUpdate(id: $id, input: { dueDate: $dueDate }) {
-            success
-          }
-        }`,
-        { id: issueId, dueDate: patch.dueDate },
-      );
     }
   });
 }
