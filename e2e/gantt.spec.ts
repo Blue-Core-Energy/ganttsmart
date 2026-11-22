@@ -4303,6 +4303,209 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('keeps the status dot and warning icon inside the narrow Issue cell at the deepest indent', async ({ page }) => {
+    const errors = trackErrors(page);
+    const stateUpdates: string[] = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+    await page.route('**/api/me', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      }),
+    );
+
+    const issue = (n: number, title: string, dueInDays: number, startInDays: number, parent: number | null) => ({
+      id: `uuid-${n}`,
+      identifier: `LOC-${n}`,
+      title,
+      description: `${startTagOffsetDays(startInDays)}\nDetails`,
+      dueDate: isoOffsetDays(dueInDays),
+      url: `https://linear.app/bluecoreenergy/issue/LOC-${n}`,
+      priority: 2,
+      state: { name: 'Todo', type: 'unstarted' },
+      createdAt: '2026-01-01T00:00:00Z',
+      completedAt: null,
+      canceledAt: null,
+      assignee: { name: 'Andrew Phillips' },
+      team: { id: 'team-1' },
+      projectMilestone: null,
+      parent: parent === null ? null : { id: `uuid-${parent}`, identifier: `LOC-${parent}` },
+    });
+    const childRef = (n: number) => ({
+      id: `uuid-${n}`,
+      completedAt: null,
+      state: { name: 'Todo', type: 'unstarted' },
+    });
+    // Both ends of the longest-named project badge: a long project name makes the external badge as wide as it can get
+    const externalIssue = {
+      id: 'uuid-ctrl-42',
+      identifier: 'CTRL-42',
+      title: 'Wire PLC cabinet',
+      description: `${startTagOffsetDays(-3)}\nPLC cabinet wiring`,
+      dueDate: isoOffsetDays(6),
+      url: 'https://linear.app/bluecoreenergy/issue/CTRL-42',
+      priority: 1,
+      completedAt: null,
+      canceledAt: null,
+      state: { name: 'In Progress', type: 'started' },
+      assignee: { name: 'Carol Vance' },
+      team: { id: 'team-ctrl' },
+      project: { id: 'proj-2', name: 'Controls and Instrumentation Rollout', targetDate: isoOffsetDays(20) },
+    };
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: Record<string, unknown>;
+      } | null;
+      if (await defaultScheduleMock.handle(route, payload)) return;
+      const query = payload?.query ?? '';
+      const respond = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) {
+        return respond({
+          projects: {
+            nodes: [
+              { id: 'proj-1', name: 'Local' },
+              { id: 'proj-2', name: 'Controls and Instrumentation Rollout' },
+            ],
+          },
+        });
+      }
+      if (query.includes('externalLinks')) {
+        return respond({
+          project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } },
+        });
+      }
+      if (query.includes('project(id:')) {
+        return respond({
+          project: {
+            name: 'Local',
+            startDate: isoOffsetDays(-5),
+            targetDate: isoOffsetDays(40),
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                issue(300, 'Root', 20, -4, null),
+                issue(301, 'Depth one', 18, -3, 300),
+                issue(302, 'Depth two', 16, -3, 301),
+                issue(303, 'Depth three with a long enough title to truncate', 14, -2, 302),
+                issue(310, 'Blocker due late', 25, -4, null),
+              ],
+            },
+            doneIssues: { nodes: [] },
+          },
+        });
+      }
+      if (query.includes('relations')) {
+        const relationsOf = (n: number, nodes: unknown[], children: number[]) => ({
+          id: `uuid-${n}`,
+          identifier: `LOC-${n}`,
+          relations: { nodes },
+          children: { nodes: children.map(childRef) },
+        });
+        return respond({
+          issues: {
+            nodes: [
+              relationsOf(300, [], [301]),
+              relationsOf(301, [], [302]),
+              relationsOf(302, [], [303]),
+              // LOC-303 and the external CTRL-42 both start before LOC-310 is due, so both carry a warning
+              relationsOf(303, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], []),
+              relationsOf(
+                310,
+                [
+                  { type: 'blocks', relatedIssue: { identifier: 'LOC-303' } },
+                  { type: 'blocks', relatedIssue: externalIssue },
+                ],
+                [],
+              ),
+            ],
+          },
+        });
+      }
+      if (query.includes('workflowStates')) {
+        return respond({
+          workflowStates: {
+            nodes: [
+              { id: 'st-todo', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-prog', name: 'In Progress', type: 'started', position: 1 },
+              { id: 'st-done', name: 'Done', type: 'completed', position: 2 },
+            ],
+          },
+        });
+      }
+      if (query.includes('issueUpdate')) {
+        stateUpdates.push(String(payload?.variables?.id ?? ''));
+        return respond({ issueUpdate: { success: true } });
+      }
+      return route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('/app');
+    await expect(page.locator('tr[data-task-id="LOC-303"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="LOC-303"]')).toHaveAttribute('data-task-depth', '3');
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toHaveAttribute('data-external-task', 'true');
+
+    // The widest metadata lines the Issue cell can hold at 200px: the deepest indent with a warning, and an
+    // external row (always top level) with its project badge and a warning
+    for (const id of ['LOC-303', 'CTRL-42']) {
+      const row = page.locator(`tr[data-task-id="${id}"]`);
+      const cell = row.locator('td[data-column-key="task"]');
+      await expect(cell.locator('span[title^="Starts before"]')).toBeVisible();
+      const bubble = cell.locator(`[data-status-bubble="${id}"]`);
+      await expect(bubble).toBeVisible();
+
+      const cellBox = (await cell.boundingBox())!;
+      expect(cellBox.width).toBeCloseTo(200, 0);
+      const metaRow = bubble.locator('xpath=..').locator('xpath=..');
+      const fit = await metaRow.evaluate((el) => ({
+        children: Array.from(el.children).map((c) => c.getBoundingClientRect().right),
+        right: el.getBoundingClientRect().right,
+      }));
+      // Nothing in the metadata line spills past it, and the line stays within the cell. (The dot's 20px hit
+      // area deliberately overhangs its 8px box into the cell padding, so scrollWidth is not a fair measure.)
+      for (const childRight of fit.children) expect(childRight).toBeLessThanOrEqual(fit.right + 0.5);
+      expect(fit.right).toBeLessThanOrEqual(cellBox.x + cellBox.width);
+
+      // The status dot sits fully inside the cell, and is what a click there lands on
+      const dotBox = (await bubble.boundingBox())!;
+      expect(dotBox.x).toBeGreaterThanOrEqual(cellBox.x);
+      expect(dotBox.x + dotBox.width).toBeLessThanOrEqual(cellBox.x + cellBox.width);
+      const hit = await page.evaluate(
+        ({ x, y, id: taskId }) => document.elementFromPoint(x, y)?.closest(`[data-status-bubble="${taskId}"]`) !== null,
+        { x: dotBox.x + dotBox.width / 2, y: dotBox.y + dotBox.height / 2, id },
+      );
+      expect(hit).toBe(true);
+      const warnBox = (await cell.locator('span[title^="Starts before"]').boundingBox())!;
+      expect(warnBox.x + warnBox.width).toBeLessThanOrEqual(dotBox.x);
+    }
+
+    // The Issue cell holds only the title and these indicators: no dependency icon or sub-issue count
+    await expect(page.locator('tr[data-task-id="LOC-310"] td[data-column-key="task"] svg[aria-label]')).toHaveCount(0);
+    await expect(page.locator('tr[data-task-id="LOC-300"] td[data-column-key="task"]')).not.toContainText(/\d\/\d/);
+
+    // The external row shows its project badge alongside the warning and dot without being squeezed out
+    const badgeBox = (await page
+      .locator('tr[data-task-id="CTRL-42"] td[data-column-key="task"] [data-external-project-jump]')
+      .boundingBox())!;
+    expect(badgeBox.width).toBeGreaterThan(20);
+
+    // Click-to-cycle still works from the deepest row
+    await page.locator('[data-status-bubble="LOC-303"]').click();
+    await expect.poll(() => stateUpdates).toEqual(['uuid-303']);
+
+    expect(errors).toEqual([]);
+  });
+
   test('keeps frozen cells above milestone lines on completed rows while only fading cell contents', async ({
     page,
   }) => {
