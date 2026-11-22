@@ -40,6 +40,9 @@ export const DEFAULT_COLUMN_WIDTHS: ColumnWidths = Object.fromEntries(
 // Last write wins across tabs, which is fine for a preference of this kind.
 const VISIBLE_KEY = 'gantt_columns';
 const WIDTHS_KEY = 'gantt_column_widths';
+// One-shot flag: the ID column became a default column, so saved selections from before
+// that get it added once. Never re-added afterwards, so hiding it sticks.
+const ID_MIGRATED_KEY = 'gantt_columns_id_added';
 
 const defByKey = new Map(COLUMN_DEFS.map((c) => [c.key, c]));
 
@@ -60,9 +63,16 @@ export function normalizeVisibleColumns(keys: unknown): ColumnKey[] {
 
 export function loadVisibleColumns(): ColumnKey[] {
   try {
+    const migrated = localStorage.getItem(ID_MIGRATED_KEY) === '1';
+    // Set before anything else, so a fresh install never counts as needing the migration
+    if (!migrated) localStorage.setItem(ID_MIGRATED_KEY, '1');
     const raw = localStorage.getItem(VISIBLE_KEY);
     if (!raw) return [...DEFAULT_VISIBLE_COLUMNS];
-    return normalizeVisibleColumns(JSON.parse(raw));
+    const stored = normalizeVisibleColumns(JSON.parse(raw));
+    if (migrated) return stored;
+    const withId = normalizeVisibleColumns([...stored, 'id']);
+    saveVisibleColumns(withId);
+    return withId;
   } catch {
     return [...DEFAULT_VISIBLE_COLUMNS];
   }
@@ -71,6 +81,8 @@ export function loadVisibleColumns(): ColumnKey[] {
 export function saveVisibleColumns(keys: ColumnKey[]): void {
   try {
     localStorage.setItem(VISIBLE_KEY, JSON.stringify(normalizeVisibleColumns(keys)));
+    // A selection saved on purpose is already past the migration
+    localStorage.setItem(ID_MIGRATED_KEY, '1');
   } catch {
     // Storage unavailable (private mode, quota) — the session still works
   }

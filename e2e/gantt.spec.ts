@@ -3925,6 +3925,18 @@ test.describe('GanttSmart GCP app', () => {
       .getByRole('checkbox')
       .evaluateAll((els) => els.map((el) => (el as HTMLInputElement).closest('label')?.textContent?.trim()));
     expect(pickerLabels.indexOf('Issue ID')).toBeLessThan(pickerLabels.indexOf('Issue'));
+    // The menu is wider than the ID header it hangs from, so it must paint over the Issue header
+    // beside it: sample the top-right corner of the menu, which overhangs that header
+    const menuBox = (await picker.boundingBox())!;
+    const topRightHit = await picker.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const hit = document.elementFromPoint(r.right - 6, r.top + 4);
+      return !!hit && el.contains(hit);
+    });
+    const issueHeaderBox = (await headers.nth(1).boundingBox())!;
+    expect(menuBox.x + menuBox.width).toBeGreaterThan(issueHeaderBox.x + 20);
+    expect(menuBox.y).toBeLessThan(issueHeaderBox.y + issueHeaderBox.height);
+    expect(topRightHit).toBe(true);
     await page.keyboard.press('Escape');
     await expect(picker).toHaveCount(0);
 
@@ -4638,11 +4650,11 @@ test.describe('GanttSmart GCP app', () => {
     }
     await expect(timelineHeader).toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
 
-    // 4. Ctrl+wheel over the fixed Task column does not jump scrollLeft, and clamping at max zoom leaves no stale anchor
+    // 4. Ctrl+wheel over the fixed Issue column does not jump scrollLeft, and clamping at max zoom leaves no stale anchor
     await scroller.evaluate((el) => {
       el.scrollLeft = 0;
     });
-    const taskCell = page.locator('tr[data-task-id="ENG-101"] td').first();
+    const taskCell = page.locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]');
     const taskBox = (await taskCell.boundingBox())!;
     await page.mouse.move(taskBox.x + 80, taskBox.y + taskBox.height / 2);
     await page.keyboard.down('Control');
@@ -4920,10 +4932,11 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('tr[data-task-id="ENG-210"]')).toHaveAttribute('data-task-depth', '0');
 
     // Each level is indented further to the right in the task column
+    // Measured on the tree gutter, the first thing rendered inside the indented container
     const idX = async (id: string) =>
-      page.locator(`tr[data-task-id="${id}"] td[data-column-key="task"] [data-task-indent]`).evaluate((el) => {
-        return el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft);
-      });
+      (await page
+        .locator(`tr[data-task-id="${id}"] td[data-column-key="task"] [data-task-indent] > :first-child`)
+        .boundingBox())!.x;
     const [x200, x201, x203, x202, x210] = [
       await idX('ENG-200'),
       await idX('ENG-201'),

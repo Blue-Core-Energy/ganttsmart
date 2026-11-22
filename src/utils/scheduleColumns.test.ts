@@ -12,6 +12,7 @@ import {
   saveVisibleColumns,
   totalColumnWidth,
   computeStickyColumnOffsets,
+  MAX_FROZEN_WIDTH_RATIO,
   MOBILE_BREAKPOINT,
   type ColumnKey,
 } from './scheduleColumns';
@@ -143,6 +144,45 @@ describe('persistence', () => {
     expect(localStorage.getItem('gantt_columns')).toBe('["id","task"]');
   });
 
+  describe('adding the ID column to saved selections', () => {
+    it('adds ID once, in canonical position, to a selection saved before it was a default', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'assignee', 'status', 'due']));
+      expect(loadVisibleColumns()).toEqual(['id', 'task', 'assignee', 'status', 'due']);
+      expect(localStorage.getItem('gantt_columns')).toBe('["id","task","assignee","status","due"]');
+    });
+
+    it('adds ID to older selections that already had it last, without duplicating it', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'due', 'id']));
+      expect(loadVisibleColumns()).toEqual(['id', 'task', 'due']);
+    });
+
+    it('keeps ID hidden across reloads once the user has hidden it', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'due']));
+      expect(loadVisibleColumns()).toContain('id');
+      saveVisibleColumns(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+    });
+
+    it('keeps ID hidden when it was hidden right after a fresh install', () => {
+      expect(loadVisibleColumns()).toEqual(DEFAULT_VISIBLE_COLUMNS);
+      saveVisibleColumns(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+    });
+
+    it('leaves a fresh install on the defaults and marks the migration done', () => {
+      expect(loadVisibleColumns()).toEqual(DEFAULT_VISIBLE_COLUMNS);
+      expect(localStorage.getItem('gantt_columns')).toBeNull();
+      expect(localStorage.getItem('gantt_columns_id_added')).toBe('1');
+    });
+
+    it('does not touch a selection saved after the migration ran', () => {
+      localStorage.setItem('gantt_columns_id_added', '1');
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'priority']));
+      expect(loadVisibleColumns()).toEqual(['task', 'priority']);
+    });
+  });
+
   it('keeps working when storage is unavailable', () => {
     stubStorage({
       getItem: () => {
@@ -233,7 +273,7 @@ describe('computeStickyColumnOffsets', () => {
     });
 
     it('narrow fallback pins ID and task together when they fit', () => {
-      const result = computeStickyColumnOffsets(withId, idWidths, { isNarrow: true, viewportWidth: 1280 });
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 640 });
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ id: 0, task: 96 });
       expect(result.lastFrozenKey).toBe('task');
@@ -245,6 +285,26 @@ describe('computeStickyColumnOffsets', () => {
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ task: 0 });
       expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('still pins ID and task together when the pair sits exactly on the 65% limit', () => {
+      // 396 is exactly 65% of 396 / 0.65 (= 609.23...), so the pair is allowed
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 396 / MAX_FROZEN_WIDTH_RATIO });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ id: 0, task: 96 });
+    });
+
+    it('falls back to task alone when a wider Issue column tips the pair over the limit', () => {
+      const viewportWidth = 396 / MAX_FROZEN_WIDTH_RATIO;
+      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 301 }, { viewportWidth });
+      expect(result.offsets).toEqual({ task: 0 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('fallback pins just task at left: 0 when ID is hidden', () => {
+      const result = computeStickyColumnOffsets(visible, idWidths, { viewportWidth: 640 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ task: 0 });
     });
   });
 

@@ -883,7 +883,13 @@ export default function GanttChart({
                     data-column-key={key}
                     data-frozen={isSticky ? 'true' : undefined}
                     className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
-                      isSticky ? 'sticky top-0 z-[10]' : 'sticky top-0 z-[5]'
+                      // Each header is its own stacking context, so the open picker menu, which is wider
+                      // than the first header, needs that header lifted above the ones that follow it
+                      i === 0 && pickerOpen
+                        ? 'sticky top-0 z-[20]'
+                        : isSticky
+                          ? 'sticky top-0 z-[10]'
+                          : 'sticky top-0 z-[5]'
                     } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
                       width: colWidths[key],
