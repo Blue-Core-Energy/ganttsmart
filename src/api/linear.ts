@@ -1081,6 +1081,7 @@ const ASSIGNABLE_USERS_PAGE_SIZE = 100;
 const ASSIGNABLE_USERS_MAX_PAGES = 5;
 const WORKSPACE_USERS_KEY = '__workspace__';
 const assignableUsersCache = new Map<string, Promise<AssignableUser[]>>();
+let assignableUsersCacheToken: string | null = null;
 
 interface UserNode {
   id: string;
@@ -1148,13 +1149,18 @@ async function fetchAssignableUsersUncached(apiKey: string, teamId: string): Pro
 /**
  * Active users that can be assigned to an issue: the members of the issue's team, or all active
  * workspace users when the team is unknown. Cached per team for the session; failures are not cached.
+ * The cache belongs to one token, so switching workspaces in the same tab never shows a stale list.
  */
 export function fetchAssignableUsers(apiKey: string, teamId: string): Promise<AssignableUser[]> {
+  if (assignableUsersCacheToken !== apiKey) {
+    assignableUsersCache.clear();
+    assignableUsersCacheToken = apiKey;
+  }
   const key = teamId || WORKSPACE_USERS_KEY;
   const cached = assignableUsersCache.get(key);
   if (cached) return cached;
-  const request = fetchAssignableUsersUncached(apiKey, teamId).catch((e) => {
-    assignableUsersCache.delete(key);
+  const request: Promise<AssignableUser[]> = fetchAssignableUsersUncached(apiKey, teamId).catch((e) => {
+    if (assignableUsersCache.get(key) === request) assignableUsersCache.delete(key);
     throw e;
   });
   assignableUsersCache.set(key, request);
@@ -1163,6 +1169,7 @@ export function fetchAssignableUsers(apiKey: string, teamId: string): Promise<As
 
 export function clearAssignableUsersCache(): void {
   assignableUsersCache.clear();
+  assignableUsersCacheToken = null;
 }
 
 export async function createIssueRelation(apiKey: string, issueId: string, relatedIssueId: string): Promise<void> {

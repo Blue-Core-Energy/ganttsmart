@@ -94,11 +94,11 @@ export default function CellMenu({
     else menuRef.current?.focus();
   }, [position, searchable]);
 
-  // Dismiss on outside press, on scroll/resize (the anchor moves), and on Escape. Escape is caught in
+  // Dismiss on outside press (capture phase, so elements that stop propagation still dismiss), on scroll/resize (the anchor moves), and on Escape. Escape is caught in
   // the capture phase on window so it is consumed here wherever focus is — other Escape handlers
   // (detail panel, filter search) never see it.
   useEffect(() => {
-    const onMouseDown = (e: MouseEvent) => {
+    const onPointerDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (menuRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
       close(false);
@@ -113,12 +113,12 @@ export default function CellMenu({
       e.stopPropagation();
       close(true);
     };
-    document.addEventListener('mousedown', onMouseDown);
+    document.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     window.addEventListener('keydown', onKeyDown, true);
     return () => {
-      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onScroll);
       window.removeEventListener('keydown', onKeyDown, true);

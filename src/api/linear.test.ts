@@ -1461,6 +1461,25 @@ describe('inline issue edits (assignee, title) and assignable users', () => {
     expect(calls).toHaveLength(2);
   });
 
+  it('fetchAssignableUsers does not reuse a cached team list across tokens', async () => {
+    const tokens: string[] = [];
+    linearRequestMock.mockImplementation(async (token: string) => {
+      tokens.push(token);
+      return jsonResponse({
+        team: {
+          members: {
+            nodes: [{ id: `user-of-${token}`, name: token, displayName: token, active: true }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    });
+
+    expect((await fetchAssignableUsers('tok-a', 'team-1'))[0].id).toBe('user-of-tok-a');
+    expect((await fetchAssignableUsers('tok-b', 'team-1'))[0].id).toBe('user-of-tok-b');
+    expect(tokens).toEqual(['tok-a', 'tok-b']);
+  });
+
   it('fetchAssignableUsers follows pagination and falls back to active workspace users without a team', async () => {
     const calls: Call[] = [];
     linearRequestMock.mockImplementation(async (_token: string, body: Call) => {

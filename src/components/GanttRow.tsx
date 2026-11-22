@@ -119,7 +119,8 @@ export default function GanttRow({
 
   // Inline cell editing: status/assignee dropdowns (portaled menus) and double-click title rename
   const [menu, setMenu] = useState<'status' | 'assignee' | null>(null);
-  const [menuError, setMenuError] = useState('');
+  const [menuErrors, setMenuErrors] = useState<{ status: string; assignee: string }>({ status: '', assignee: '' });
+  const menuLoadIdRef = useRef({ status: 0, assignee: 0 });
   const [teamStates, setTeamStates] = useState<WorkflowState[] | null>(null);
   const [teamUsers, setTeamUsers] = useState<AssignableUser[] | null>(null);
   const statusAnchorRef = useRef<HTMLDivElement>(null);
@@ -143,18 +144,18 @@ export default function GanttRow({
       return;
     }
     setMenu(kind);
-    setMenuError('');
+    const loadId = ++menuLoadIdRef.current[kind];
+    setMenuErrors((prev) => ({ ...prev, [kind]: '' }));
+    const fail = (label: string) => (e: unknown) => {
+      // A newer load for the same menu supersedes this one
+      if (menuLoadIdRef.current[kind] !== loadId) return;
+      setMenuErrors((prev) => ({ ...prev, [kind]: `Failed to load ${label}: ${(e as Error).message}` }));
+    };
     if (kind === 'status' && !teamStates) {
-      inlineEdit
-        .loadWorkflowStates(task.teamId)
-        .then(setTeamStates)
-        .catch((e: unknown) => setMenuError(`Failed to load statuses: ${(e as Error).message}`));
+      inlineEdit.loadWorkflowStates(task.teamId).then(setTeamStates).catch(fail('statuses'));
     }
     if (kind === 'assignee' && !teamUsers) {
-      inlineEdit
-        .loadAssignableUsers(task.teamId)
-        .then(setTeamUsers)
-        .catch((e: unknown) => setMenuError(`Failed to load users: ${(e as Error).message}`));
+      inlineEdit.loadAssignableUsers(task.teamId).then(setTeamUsers).catch(fail('users'));
     }
   };
 
@@ -678,8 +679,8 @@ export default function GanttRow({
                 searchable
                 searchPlaceholder="Search people…"
                 emptyMessage="No matching people"
-                loading={!teamUsers && !menuError}
-                error={menuError}
+                loading={!teamUsers && !menuErrors.assignee}
+                error={menuErrors.assignee}
                 ariaLabel={`Assignee for ${task.id}`}
                 onClose={() => setMenu(null)}
                 onSelect={(id) => {
@@ -731,8 +732,8 @@ export default function GanttRow({
                 anchorRef={statusAnchorRef}
                 options={statusMenuOptions}
                 value={activeStatusId}
-                loading={!teamStates && !menuError}
-                error={menuError}
+                loading={!teamStates && !menuErrors.status}
+                error={menuErrors.status}
                 emptyMessage="No workflow states"
                 ariaLabel={`Status for ${task.id}`}
                 onClose={() => setMenu(null)}

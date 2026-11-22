@@ -2466,6 +2466,34 @@ test.describe('GanttSmart GCP app', () => {
     await page.mouse.click(5, 300);
     await expect(menu).toHaveCount(0);
 
+    // Opening another row's menu swaps the open menu instead of leaving two floating. A menu opens below
+    // its row, so the row above stays clickable while the menu is open.
+    const statusButton = (id: string) => page.locator(`[data-status-cell="${id}"] button[aria-haspopup="listbox"]`);
+    await statusButton('ENG-102').click();
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Status for ENG-102');
+    await statusButton('ENG-101').click();
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Status for ENG-101');
+    await row101.locator('[data-assignee-cell="ENG-101"] button[aria-haspopup="listbox"]').click();
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Assignee for ENG-101');
+
+    // Controls that stop propagation (task bar, status bubble) still dismiss an open menu
+    await page.locator('[data-task-bar="ENG-101"]').click();
+    await expect(menu).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    await statusButton('ENG-102').click();
+    await expect(menu).toHaveCount(1);
+    const bubbleBox = (await page.locator('[data-status-bubble="ENG-101"]').boundingBox())!;
+    await page.mouse.move(bubbleBox.x + bubbleBox.width / 2, bubbleBox.y + bubbleBox.height / 2);
+    await page.mouse.down();
+    await expect(menu).toHaveCount(0);
+    // Release elsewhere so the press does not count as a click that cycles the status
+    await page.mouse.move(5, 300);
+    await page.mouse.up();
+    expect(updates).toHaveLength(5);
+
     // ---- Title rename ----
     const title101 = page.locator('[data-task-title="ENG-101"]');
     await title101.click();
