@@ -132,12 +132,12 @@ function LinkPlusIcon() {
   );
 }
 
-function ExternalLinkIcon() {
+function ExternalLinkIcon({ className = 'shrink-0' }: { className?: string }) {
   return (
     <svg
       width="12"
       height="12"
-      className="hidden lg:inline shrink-0"
+      className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -186,29 +186,36 @@ export default memo(function Header({
   linkingToLinear,
   onAddToLinear,
 }: Props) {
-  const [showExportMenu, setShowExportMenu] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showFeedbackMenu, setShowFeedbackMenu] = useState(false);
   const [feedbackType, setFeedbackType] = useState<FeedbackType | null>(null);
   const [exporting, setExporting] = useState(false);
-  const exportRef = useRef<HTMLDivElement>(null);
   const accountRef = useRef<HTMLDivElement>(null);
   const feedbackRef = useRef<HTMLDivElement>(null);
 
-  // Close menus on outside click
+  // Close menus on outside click or Escape
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (exportRef.current && !exportRef.current.contains(e.target as Node)) setShowExportMenu(false);
       if (accountRef.current && !accountRef.current.contains(e.target as Node)) setShowAccountMenu(false);
       if (feedbackRef.current && !feedbackRef.current.contains(e.target as Node)) setShowFeedbackMenu(false);
     };
+    const keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAccountMenu(false);
+        setShowFeedbackMenu(false);
+      }
+    };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('keydown', keyHandler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('keydown', keyHandler);
+    };
   }, []);
 
   const handleExport = async (format: 'png' | 'pdf') => {
-    setShowExportMenu(false);
+    setShowAccountMenu(false);
     setExporting(true);
     try {
       const el = document.getElementById('gantt-export-target');
@@ -228,6 +235,7 @@ export default memo(function Header({
 
   const toggleTheme = () => {
     onThemeChange(theme === 'dark' ? 'light' : 'dark');
+    setShowAccountMenu(false);
   };
 
   return (
@@ -276,50 +284,6 @@ export default memo(function Header({
           </span>
         )}
 
-        {/* Linear project resource link */}
-        {projectId &&
-          onAddToLinear &&
-          (isLinkedInLinear ? (
-            isSafeUrl(linearProjectUrl) ? (
-              <a
-                href={linearProjectUrl!}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-2 lg:px-2.5 h-8 rounded-md text-xs font-medium text-low bg-low/10 border border-low/30 hover:bg-low/15 transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                aria-label="Open in Linear"
-                title="Linked in Linear — open project in Linear"
-              >
-                <CheckCircleIcon />
-                <span className="hidden lg:inline">Open in Linear</span>
-                <ExternalLinkIcon />
-              </a>
-            ) : (
-              <span
-                className="flex items-center gap-1.5 px-2 lg:px-2.5 h-8 rounded-md text-xs font-medium text-low bg-low/10 border border-low/30 whitespace-nowrap shrink-0"
-                aria-label="Linked in Linear"
-                title="Open in GanttSmart link is on this project's Linear page"
-              >
-                <CheckCircleIcon />
-                <span className="hidden lg:inline">Linked in Linear</span>
-              </span>
-            )
-          ) : (
-            <button
-              onClick={onAddToLinear}
-              disabled={linkingToLinear || loading}
-              className={`${ghostBtn} disabled:opacity-50 disabled:cursor-not-allowed`}
-              aria-label={linkingToLinear ? 'Linking to Linear' : 'Add to Linear'}
-              title="Add an 'Open in GanttSmart' link to this project's Linear page"
-            >
-              {linkingToLinear ? (
-                <span className="inline-block w-3.5 h-3.5 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
-              ) : (
-                <LinkPlusIcon />
-              )}
-              <span className="hidden lg:inline">{linkingToLinear ? 'Linking…' : 'Add to Linear'}</span>
-            </button>
-          ))}
-
         {/* Refresh */}
         <button onClick={onRefresh} className={ghostBtn} title="Refresh (R)">
           {loading ? (
@@ -342,58 +306,6 @@ export default memo(function Header({
           )}
           <span className="hidden md:inline">Sync</span>
         </button>
-
-        {/* Export */}
-        <div className="relative" ref={exportRef}>
-          <button
-            onClick={() => setShowExportMenu((v) => !v)}
-            className={ghostBtn}
-            disabled={exporting}
-            title="Export roadmap"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-              <polyline points="7 10 12 15 17 10" />
-              <line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-            <span className="hidden md:inline">{exporting ? 'Exporting…' : 'Export'}</span>
-          </button>
-          {showExportMenu && (
-            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[160px] py-1">
-              <button
-                onClick={() => handleExport('png')}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
-              >
-                Export as PNG
-              </button>
-              <button
-                onClick={() => handleExport('pdf')}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
-              >
-                Export as PDF
-              </button>
-              <div className="border-t border-border-primary my-0.5" />
-              <button
-                onClick={() => {
-                  setShowExportMenu(false);
-                  window.print();
-                }}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
-              >
-                Print
-              </button>
-            </div>
-          )}
-        </div>
 
         {/* Share */}
         {backend.capabilities.sharing && (
@@ -520,18 +432,16 @@ export default memo(function Header({
         {/* Divider */}
         <div className="w-px h-5 bg-border-primary mx-0.5 sm:mx-1" />
 
-        {/* Theme toggle */}
-        <button
-          onClick={toggleTheme}
-          className={iconBtn}
-          title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-        >
-          {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
-        </button>
-
         {/* Account menu */}
         <div className="relative" ref={accountRef}>
-          <button onClick={() => setShowAccountMenu((v) => !v)} className={iconBtn} title="Account">
+          <button
+            type="button"
+            onClick={() => setShowAccountMenu((v) => !v)}
+            className={iconBtn}
+            title="Account"
+            aria-label="Account"
+            aria-expanded={showAccountMenu}
+          >
             <svg
               width="16"
               height="16"
@@ -548,7 +458,119 @@ export default memo(function Header({
           </button>
           {showAccountMenu && (
             <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] py-1">
+              {/* Linear project resource link */}
+              {projectId && onAddToLinear && (
+                <>
+                  {isLinkedInLinear ? (
+                    isSafeUrl(linearProjectUrl) ? (
+                      <a
+                        href={linearProjectUrl!}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => setShowAccountMenu(false)}
+                        className="w-full text-left px-3 py-2 text-xs text-low hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                        aria-label="Open in Linear"
+                        title="Linked in Linear — open project in Linear"
+                      >
+                        <span className="flex items-center gap-2">
+                          <CheckCircleIcon />
+                          <span>Open in Linear</span>
+                        </span>
+                        <ExternalLinkIcon className="shrink-0" />
+                      </a>
+                    ) : (
+                      <span
+                        className="w-full text-left px-3 py-2 text-xs text-low flex items-center gap-2"
+                        aria-label="Linked in Linear"
+                        title="Open in GanttSmart link is on this project's Linear page"
+                      >
+                        <CheckCircleIcon />
+                        <span>Linked in Linear</span>
+                      </span>
+                    )
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAccountMenu(false);
+                        onAddToLinear();
+                      }}
+                      disabled={linkingToLinear || loading}
+                      className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      aria-label={linkingToLinear ? 'Linking to Linear' : 'Add to Linear'}
+                      title="Add an 'Open in GanttSmart' link to this project's Linear page"
+                    >
+                      {linkingToLinear ? (
+                        <span className="inline-block w-3.5 h-3.5 border-2 border-text-muted border-t-accent rounded-full animate-spin shrink-0" />
+                      ) : (
+                        <LinkPlusIcon />
+                      )}
+                      <span>{linkingToLinear ? 'Linking…' : 'Add to Linear'}</span>
+                    </button>
+                  )}
+                  <div className="border-t border-border-primary my-0.5" />
+                </>
+              )}
+
+              {/* Export */}
+              <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
+                Export
+              </div>
               <button
+                type="button"
+                onClick={() => handleExport('png')}
+                disabled={exporting}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>Export as PNG</span>
+                {exporting && (
+                  <span className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleExport('pdf')}
+                disabled={exporting}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <span>Export as PDF</span>
+                {exporting && (
+                  <span className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAccountMenu(false);
+                  window.print();
+                }}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+              >
+                Print
+              </button>
+
+              <div className="border-t border-border-primary my-0.5" />
+
+              {/* Theme toggle */}
+              <button
+                type="button"
+                onClick={toggleTheme}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              >
+                <span className="flex items-center gap-2">
+                  {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+                  <span>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+                </span>
+                <span className="text-[11px] text-text-muted capitalize">{theme}</span>
+              </button>
+
+              <div className="border-t border-border-primary my-0.5" />
+
+              {/* Account management */}
+              <button
+                type="button"
                 onClick={() => {
                   setShowAccountMenu(false);
                   onDisconnectLinear();
@@ -561,6 +583,7 @@ export default memo(function Header({
                 <>
                   <div className="border-t border-border-primary my-0.5" />
                   <button
+                    type="button"
                     onClick={() => {
                       setShowAccountMenu(false);
                       onSignOut();

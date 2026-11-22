@@ -219,8 +219,11 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
-    // Account menu shows GCP Sign out + note
+    // Account menu shows GCP Sign out + note and export actions
     await page.getByTitle('Account').click();
+    await expect(page.getByRole('button', { name: 'Export as PNG' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Export as PDF' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Print' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Disconnect Linear' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
     await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toBeVisible();
@@ -284,6 +287,7 @@ test.describe('GanttSmart GCP app', () => {
 
     // Theme toggle flips dark/light class on <html>
     await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+    await page.getByTitle('Account').click();
     await page.locator('button[title*="mode"]').click();
     await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
 
@@ -1638,6 +1642,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
 
     // 3. Clicking "Add to Linear" creates the EntityExternalLink and updates button state to "Open in Linear"
+    await page.getByTitle('Account').click();
     const addBtn = page.getByRole('button', { name: 'Add to Linear' });
     await expect(addBtn).toBeVisible();
     await expect(addBtn).toHaveAttribute('title', "Add an 'Open in GanttSmart' link to this project's Linear page");
@@ -1653,6 +1658,7 @@ test.describe('GanttSmart GCP app', () => {
     ]);
     await expect(page.getByRole('button', { name: 'Add to Linear' })).toHaveCount(0);
 
+    await page.getByTitle('Account').click();
     const openLink = page.getByRole('link', { name: 'Open in Linear' });
     await expect(openLink).toBeVisible();
 
