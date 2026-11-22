@@ -3,7 +3,10 @@ import type { Task } from '@/types';
 import {
   ARROW_DIRECT_MIN_GAP,
   ARROW_HOP_RADIUS,
+  ARROW_LANE_CLEARANCE,
+  ARROW_LANE_MAX_STEPS,
   ARROW_LANE_OFFSET,
+  ARROW_LANE_STAGGER_STEP,
   ARROW_STAGGER_STEP,
   ARROW_STUB,
   buildArrowPath,
@@ -13,10 +16,13 @@ import {
   type ArrowEndpoints,
   type DependencyArrowEdge,
 } from './dependencyArrows';
+import { BAR_HEIGHT, ROW_HEIGHT } from './ganttLayout';
 
-/** Mirrors the Tailwind sizes in GanttRow.tsx: `h-[28px]` bars in `h-[56px]` rows */
-const BAR_HEIGHT = 28;
-const ROW_HEIGHT = 56;
+/**
+ * How far a highlighted bar's ring reaches past the bar: `ring-2 ring-offset-1` in GanttRow.tsx.
+ * (It was offset-2, 4px. The tighter ring leaves more room between the bar's own arrow lane and the ring.)
+ */
+const HIGHLIGHT_RING = 3;
 
 /** Longest arrowhead, in px — `markerWidth` 8 at userSpaceOnUse in DependencyArrows.tsx */
 const ARROW_HEAD = 8;
@@ -89,7 +95,7 @@ describe('buildArrowPath', () => {
 
   it('routes around through the lane beside the source row when the target starts first', () => {
     const path = buildArrowPath({ fromX: 300, fromY: 50, toX: 100, toY: 94 });
-    // Exits right to 312, drops to lane 70, runs back to 88, drops to toY 94, enters toX 100
+    // Exits right to 312, drops to the lane, runs back to 88, drops to toY 94, enters toX 100
     expect(path).toContain('M 300 50');
     expect(path).toContain('H 100');
     // All 4 corners have rounded elbows (Q commands)
@@ -98,7 +104,7 @@ describe('buildArrowPath', () => {
 
     // With cornerRadius: 0, matches exact right angles
     const sharp = buildArrowPath({ fromX: 300, fromY: 50, toX: 100, toY: 94 }, { cornerRadius: 0 });
-    expect(sharp).toBe('M 300 50 H 312 V 70 H 88 V 94 H 100');
+    expect(sharp).toBe(`M 300 50 H 312 V ${50 + ARROW_LANE_OFFSET} H 88 V 94 H 100`);
   });
 
   it('puts the lane on the side the target is on, so it never runs along another row', () => {
@@ -162,6 +168,29 @@ describe('buildArrowPath', () => {
   it('runs its lane clear of the source bar but inside the row gap', () => {
     expect(ARROW_LANE_OFFSET).toBeGreaterThan(BAR_HEIGHT / 2);
     expect(ARROW_LANE_OFFSET).toBeLessThan(ROW_HEIGHT - BAR_HEIGHT / 2);
+    expect(ARROW_LANE_OFFSET).toBe(BAR_HEIGHT / 2 + ARROW_LANE_CLEARANCE);
+    // The first lane stays clear of the highlight ring around its own bar
+    expect(ARROW_LANE_OFFSET - BAR_HEIGHT / 2).toBeGreaterThanOrEqual(HIGHLIGHT_RING + 1);
+  });
+
+  it("keeps every staggered lane short of the next row's bar", () => {
+    expect(ARROW_LANE_MAX_STEPS).toBeGreaterThanOrEqual(1);
+    const outermostLane = ARROW_LANE_OFFSET + ARROW_LANE_MAX_STEPS * ARROW_LANE_STAGGER_STEP;
+    expect(outermostLane).toBeLessThanOrEqual(ROW_HEIGHT - BAR_HEIGHT / 2 - 2);
+  });
+
+  it('never staggers lanes beyond the row gap, even with more overlapping lanes than tracks', () => {
+    const arrows = Array.from({ length: ARROW_LANE_MAX_STEPS + 3 }, (_, i) => ({
+      sourceId: `S${i}`,
+      targetId: `T${i}`,
+      fromX: 400 - i * 20,
+      fromY: 50,
+      toX: 100 - i * 10,
+      toY: 50 + ROW_HEIGHT * (i + 1),
+    }));
+    for (const r of routeDependencyArrows(arrows)) {
+      expect(r.laneYOffset).toBeLessThanOrEqual(ARROW_LANE_MAX_STEPS * ARROW_LANE_STAGGER_STEP);
+    }
   });
 
   it('starts on the source and ends on the target with horizontal final approach', () => {
@@ -369,8 +398,8 @@ describe('routeDependencyArrows', () => {
     const exits = sameSource.map((r) => verticals(r.path)[0]);
     expect(exits[0].x).toBe(412);
     expect(exits[1].x).toBe(412);
-    expect(horizontals(sameSource[0].path).some((h) => h.y === 70)).toBe(true);
-    expect(horizontals(sameSource[1].path).some((h) => h.y === 70)).toBe(true);
+    expect(horizontals(sameSource[0].path).some((h) => h.y === 50 + ARROW_LANE_OFFSET)).toBe(true);
+    expect(horizontals(sameSource[1].path).some((h) => h.y === 50 + ARROW_LANE_OFFSET)).toBe(true);
   });
 
   it('staggers forward columns against backwards exit and entry columns in the same system', () => {
@@ -389,7 +418,7 @@ describe('routeDependencyArrows', () => {
   });
 
   it('staggers overlapping backwards lanes away from the source bar, never toward it', () => {
-    // Below the bar: lanes at fromY + 20, then +26 — never fromY + 14
+    // Below the bar: lanes at fromY + ARROW_LANE_OFFSET, then one lane step further — never closer than that
     const below = route([
       { sourceId: 'S1', targetId: 'T1', fromX: 400, fromY: 50, toX: 100, toY: 162 },
       { sourceId: 'S2', targetId: 'T2', fromX: 250, fromY: 50, toX: 50, toY: 218 },
@@ -402,10 +431,10 @@ describe('routeDependencyArrows', () => {
       ),
     );
     expect(belowLanes).toContain(50 + ARROW_LANE_OFFSET);
-    expect(belowLanes).toContain(50 + ARROW_LANE_OFFSET + ARROW_STAGGER_STEP);
+    expect(belowLanes).toContain(50 + ARROW_LANE_OFFSET + ARROW_LANE_STAGGER_STEP);
     expect(Math.min(...belowLanes)).toBeGreaterThanOrEqual(50 + ARROW_LANE_OFFSET);
 
-    // Above the bar: lanes at fromY - 20, then -26
+    // Above the bar: the same, mirrored
     const above = route([
       { sourceId: 'S1', targetId: 'T1', fromX: 400, fromY: 218, toX: 100, toY: 106 },
       { sourceId: 'S2', targetId: 'T2', fromX: 250, fromY: 218, toX: 50, toY: 50 },
@@ -418,7 +447,7 @@ describe('routeDependencyArrows', () => {
       ),
     );
     expect(aboveLanes).toContain(218 - ARROW_LANE_OFFSET);
-    expect(aboveLanes).toContain(218 - ARROW_LANE_OFFSET - ARROW_STAGGER_STEP);
+    expect(aboveLanes).toContain(218 - ARROW_LANE_OFFSET - ARROW_LANE_STAGGER_STEP);
     expect(Math.max(...aboveLanes)).toBeLessThanOrEqual(218 - ARROW_LANE_OFFSET);
   });
 
@@ -492,7 +521,7 @@ describe('crossing hops', () => {
       { sourceId: 'S', targetId: 'T', fromX: 400, fromY: 50, toX: 100, toY: 218 },
       across('B', 150, 60, 500),
     ]);
-    // Exit column x = 412 passes through the lane at 70 only at its end; entry column (88) crosses y = 150
+    // Exit column x = 412 passes through the lane only at its end; entry column (88) crosses y = 150
     expect(arcs(back.path)).toHaveLength(1);
     expect(back.path).toContain(`V ${150 - R} A ${R} ${R} 0 0 1 88 ${150 + R}`);
     expect(arcs(cross.path)).toHaveLength(0);

@@ -1,4 +1,5 @@
 import type { Task } from '@/types';
+import { BAR_HEIGHT, ROW_HEIGHT } from './ganttLayout';
 
 /** Horizontal run leaving a source bar and entering a target bar */
 export const ARROW_STUB = 12;
@@ -10,18 +11,40 @@ export const ARROW_STUB = 12;
  */
 export const ARROW_DIRECT_MIN_GAP = 2 * ARROW_STUB;
 
+/** Free space between a source bar and the lane of a backwards dependency, in px. Clears the bar's highlight ring. */
+export const ARROW_LANE_CLEARANCE = 6;
+
 /**
- * Vertical offset of the lane a backwards dependency travels along. Bars are 28px
- * tall in a 56px row, so 20px clears the source bar and still sits inside the gap
- * next to it rather than across a neighbouring row.
+ * Vertical offset of the lane a backwards dependency travels along: just clear of the
+ * source bar, so it sits inside the gap next to it rather than across a neighbouring row.
  */
-export const ARROW_LANE_OFFSET = 20;
+export const ARROW_LANE_OFFSET = BAR_HEIGHT / 2 + ARROW_LANE_CLEARANCE;
 
 /** Default corner radius for rounded elbows in px */
 export const ARROW_CORNER_RADIUS = 6;
 
-/** Offset step for staggering unrelated overlapping arrow tracks in px */
+/** Offset step for staggering unrelated overlapping vertical tracks in px */
 export const ARROW_STAGGER_STEP = 6;
+
+/** Offset step for staggering unrelated overlapping lanes (horizontal tracks) in px; tighter than the column step to fit the row gap */
+export const ARROW_LANE_STAGGER_STEP = 4;
+
+/**
+ * Free space kept between the outermost staggered lane and the next row's bar, in px. It does not
+ * budget for that bar's highlight ring (3px) or half a selected stroke, so a third stacked lane can run
+ * under a highlighted neighbour's ring. Arrows paint beneath bars, so that only tucks the line away for
+ * a few px, and it needs three overlapping lanes plus a highlighted neighbour. Raising this to 4 would cap
+ * lanes at two tracks, which costs more than the edge case.
+ */
+const ARROW_LANE_EDGE_MARGIN = 2;
+
+/**
+ * How many times a lane may be staggered away from the bar: the farthest track must still
+ * stop short of the neighbouring row's bar, which starts `ROW_HEIGHT - BAR_HEIGHT / 2` away.
+ */
+export const ARROW_LANE_MAX_STEPS = Math.floor(
+  (ROW_HEIGHT - BAR_HEIGHT / 2 - ARROW_LANE_EDGE_MARGIN - ARROW_LANE_OFFSET) / ARROW_LANE_STAGGER_STEP,
+);
 
 /** Radius of the arc a vertical run uses to hop over a horizontal run of another arrow, in px */
 export const ARROW_HOP_RADIUS = 4;
@@ -432,6 +455,7 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
   const staggerStep = options?.staggerStep ?? ARROW_STAGGER_STEP;
   /** Tracks closer than this (px) read as one line */
   const minSeparation = staggerStep - 1;
+  const minLaneSeparation = ARROW_LANE_STAGGER_STEP - 1;
 
   type Kind = 'straight' | 'forward' | 'backward';
   const kindOf = (a: T): Kind => {
@@ -487,13 +511,13 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
         placedLanes.some(
           (p) =>
             !mayShareTrack(p, { sourceId: lane.sourceId, targetId: span.targetId }) &&
-            Math.abs(p.y - y) < minSeparation &&
+            Math.abs(p.y - y) < minLaneSeparation &&
             overlapLength(span.x1, span.x2, p.x1, p.x2) > MIN_TRACK_OVERLAP,
         ),
       );
     let chosen = lane.baseY;
-    for (let step = 0; step <= 3; step++) {
-      const candidate = lane.baseY + lane.direction * step * staggerStep;
+    for (let step = 0; step <= ARROW_LANE_MAX_STEPS; step++) {
+      const candidate = lane.baseY + lane.direction * step * ARROW_LANE_STAGGER_STEP;
       if (!collides(candidate)) {
         chosen = candidate;
         break;
