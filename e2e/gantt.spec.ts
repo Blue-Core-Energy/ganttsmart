@@ -962,8 +962,8 @@ test.describe('GanttSmart GCP app', () => {
     const arrow = exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]');
     await expect(arrow).toHaveCount(1);
 
-    // ...routed with right angles only, and painted beneath the task bars
-    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
+    // ...routed with rounded elbows, and painted beneath the task bars
+    await expect(arrow).toHaveAttribute('d', /^M[-\d\s.HVQA,]+$/);
     const arrowLayers = await page.evaluate(() => {
       const svg = document.querySelector('#gantt-export-target svg path[data-arrow-source]')?.closest('svg');
       const bar = document.querySelector('[data-task-bar="ENG-101"]');
@@ -991,6 +991,67 @@ test.describe('GanttSmart GCP app', () => {
     const afterZoom = await arrowEndsOnTarget();
     expect(afterZoom.endX).toBeCloseTo(afterZoom.barLeft, 0);
     await page.keyboard.press('-');
+    await expect(arrow).toBeVisible();
+
+    // IT-105: Click arrow to highlight connected issues, Escape/background to clear, and drag-to-pan
+    const hitTarget = exportTarget.locator('svg path[data-arrow-hit-target="ENG-100->ENG-101"]');
+    await expect(hitTarget).toBeAttached();
+
+    // Real pointer click at the midpoint of the arrow's path, so the browser's own hit-testing
+    // has to resolve the click through the stacked bars, rows and overlays to the arrow
+    const clickArrowMidpoint = async () => {
+      await hitTarget.scrollIntoViewIfNeeded();
+      const point = await hitTarget.evaluate((el) => {
+        const path = el as unknown as SVGPathElement;
+        const mid = path.getPointAtLength(path.getTotalLength() / 2);
+        const matrix = path.getScreenCTM()!;
+        return { x: mid.x * matrix.a + matrix.e, y: mid.y * matrix.d + matrix.f };
+      });
+      await page.mouse.click(point.x, point.y);
+    };
+    await clickArrowMidpoint();
+
+    await expect(arrow).toHaveAttribute('data-selected', 'true');
+    const row100 = page.locator('tr[data-task-id="ENG-100"]');
+    const row101 = page.locator('tr[data-task-id="ENG-101"]');
+    const row102 = page.locator('tr[data-task-id="ENG-102"]');
+    const bar100 = page.locator('[data-task-bar="ENG-100"]');
+    const bar101 = page.locator('[data-task-bar="ENG-101"]');
+    const bar102 = page.locator('[data-task-bar="ENG-102"]');
+
+    await expect(row100).toHaveAttribute('data-highlighted', 'true');
+    await expect(row101).toHaveAttribute('data-highlighted', 'true');
+    await expect(bar100).toHaveAttribute('data-highlighted', 'true');
+    await expect(bar101).toHaveAttribute('data-highlighted', 'true');
+    await expect(row102).not.toHaveAttribute('data-highlighted', 'true');
+    await expect(bar102).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Pressing Escape clears arrow selection and unhighlights issues
+    await page.keyboard.press('Escape');
+    await expect(arrow).not.toHaveAttribute('data-selected', 'true');
+    await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
+    await expect(row101).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Clicking arrow again selects it; clicking empty timeline background clears selection
+    await clickArrowMidpoint();
+    await expect(arrow).toHaveAttribute('data-selected', 'true');
+    await page
+      .locator('[data-timeline-background]')
+      .first()
+      .click({ position: { x: 50, y: 10 } });
+    await expect(arrow).not.toHaveAttribute('data-selected', 'true');
+    await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
+
+    // Drag-to-pan on timeline background still works
+    const initialScroll = await exportTarget.evaluate((el) => el.scrollLeft);
+    const bg = page.locator('[data-timeline-background]').first();
+    const bgBox = (await bg.boundingBox())!;
+    await page.mouse.move(bgBox.x + 200, bgBox.y + 10);
+    await page.mouse.down();
+    await page.mouse.move(bgBox.x + 100, bgBox.y + 10, { steps: 5 });
+    await page.mouse.up();
+    const pannedScroll = await exportTarget.evaluate((el) => el.scrollLeft);
+    expect(pannedScroll).toBeGreaterThan(initialScroll);
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
     const countBox = await page.getByText('3/3').boundingBox();
@@ -1031,6 +1092,132 @@ test.describe('GanttSmart GCP app', () => {
     await expect(exportTarget.locator('table')).toHaveCount(1);
     await expect(exportTarget.locator('tbody tr[data-task-id]')).toHaveCount(3);
     await expect(exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]')).toHaveCount(1);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('hops a dependency arrow over an unrelated arrow it crosses', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    const issue = (n: number, start: number, due: number) => ({
+      id: `uuid-hop-${n}`,
+      identifier: `HOP-${n}`,
+      title: `Hop task ${n}`,
+      description: `${startTagOffsetDays(start)}\nDetails`,
+      dueDate: isoOffsetDays(due),
+      url: `https://linear.app/bluecoreenergy/issue/HOP-${n}`,
+      priority: 3,
+      state: { name: 'Todo', type: 'unstarted' },
+      createdAt: '2026-01-01T00:00:00Z',
+      completedAt: null,
+      assignee: { name: 'Andrew Phillips' },
+      team: { id: 'team-1' },
+      projectMilestone: null,
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      const respond = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) {
+        await respond({ projects: { nodes: [{ id: 'proj-1', name: 'Hop Roadmap' }] } });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await respond({
+          project: {
+            name: 'Hop Roadmap',
+            startDate: isoOffsetDays(-14),
+            targetDate: isoOffsetDays(30),
+            projectMilestones: { nodes: [] },
+            issues: { nodes: [issue(1, -8, 8), issue(2, -8, 2), issue(3, 12, 16), issue(4, 12, 16)] },
+            doneIssues: { nodes: [] },
+          },
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        // HOP-1 -> HOP-4 drops down a column that HOP-2 -> HOP-3's final approach runs straight across
+        await respond({
+          issues: {
+            nodes: [
+              {
+                id: 'uuid-hop-1',
+                identifier: 'HOP-1',
+                relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'HOP-4' } }] },
+                children: { nodes: [] },
+              },
+              {
+                id: 'uuid-hop-2',
+                identifier: 'HOP-2',
+                relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'HOP-3' } }] },
+                children: { nodes: [] },
+              },
+            ],
+          },
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await respond({
+          workflowStates: {
+            nodes: [
+              { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+              { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+            ],
+          },
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    const exportTarget = page.locator('#gantt-export-target');
+    const rows = exportTarget.locator('tbody tr[data-task-id]');
+    await expect(rows).toHaveCount(4);
+    const ids = await rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-task-id')));
+    // Rows sort by due date, so the earlier-ending HOP-2 sits above HOP-1
+    expect(ids).toEqual(['HOP-2', 'HOP-1', 'HOP-3', 'HOP-4']);
+
+    const crossed = exportTarget.locator('svg path[data-arrow-source="HOP-1"][data-arrow-target="HOP-4"]');
+    const crossing = exportTarget.locator('svg path[data-arrow-source="HOP-2"][data-arrow-target="HOP-3"]');
+    await expect(crossed).toHaveCount(1);
+    await expect(crossing).toHaveCount(1);
+
+    // The dropping arrow bulges to the right over the line it crosses; the line itself stays flat
+    await expect(crossed).toHaveAttribute('d', / A 4 4 0 0 1 [-\d.]+ [-\d.]+/);
+    await expect(crossing).not.toHaveAttribute('d', /A /);
+
+    // The hop is centred on the crossed line's row, and the click target follows the same path
+    const crossedD = (await crossed.getAttribute('d'))!;
+    const crossingD = (await crossing.getAttribute('d'))!;
+    const hopY = Number(crossedD.match(/A 4 4 0 0 1 [-\d.]+ ([-\d.]+)/)![1]) - 4;
+    const crossingY = Number(crossingD.match(/([-\d.]+) H [-\d.]+$/)![1]);
+    expect(hopY).toBeCloseTo(crossingY, 0);
+    await expect(exportTarget.locator('svg path[data-arrow-hit-target="HOP-1->HOP-4"]')).toHaveAttribute('d', crossedD);
 
     expect(errors).toEqual([]);
   });
@@ -2155,10 +2342,10 @@ test.describe('GanttSmart GCP app', () => {
     const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');
     await expect(crossArrow).toHaveCount(1);
     await expect(crossArrow).toHaveAttribute('data-cross-project', 'true');
-    // Violated cross-project arrows keep their own color and marker, and route with right angles
+    // Violated cross-project arrows keep their own color and marker, and route with rounded elbows
     await expect(crossArrow).toHaveAttribute('stroke', '#f97316');
     await expect(crossArrow).toHaveAttribute('marker-end', 'url(#dep-arrow-warn)');
-    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HV]+$/);
+    await expect(crossArrow).toHaveAttribute('d', /^M[-\d\s.HVQA,]+$/);
 
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);

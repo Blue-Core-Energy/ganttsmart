@@ -1,6 +1,6 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { Task } from '@/types';
-import { buildArrowPath } from '@/utils/dependencyArrows';
+import { routeDependencyArrows, type DependencyArrowEdge, type RoutedDependencyArrow } from '@/utils/dependencyArrows';
 
 interface Props {
   tasks: Task[];
@@ -9,41 +9,77 @@ interface Props {
   /** Layout drivers — ensure arrows recompute on zoom or column changes even if table width stays viewport-padded */
   dayWidth?: number;
   fixedColsWidth?: number;
+  selectedArrow?: { sourceId: string; targetId: string } | null;
+  onSelectArrow?: (sourceId: string, targetId: string) => void;
 }
 
-interface Arrow {
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
-  sourceId: string;
-  targetId: string;
+interface Arrow extends DependencyArrowEdge {
   violated: boolean;
   crossProject: boolean;
 }
 
-function ArrowPath({ arrow: a }: { arrow: Arrow }) {
+interface ArrowPathProps {
+  arrow: RoutedDependencyArrow & Arrow;
+  isSelected: boolean;
+  hasSelection: boolean;
+  onSelectArrow?: (sourceId: string, targetId: string) => void;
+}
+
+function ArrowPathItem({ arrow: a, isSelected, hasSelection, onSelectArrow }: ArrowPathProps) {
   const color = a.violated ? '#f97316' : a.crossProject ? '#8b5cf6' : '#ef4444';
   const markerId = a.violated ? 'dep-arrow-warn' : a.crossProject ? 'dep-arrow-cross' : 'dep-arrow';
 
+  // Solid subtle stroke for normal dependencies; dashed for violated and cross-project
+  const strokeDasharray = a.violated ? '8 4' : a.crossProject ? '4 3' : undefined;
+
+  const strokeWidth = isSelected ? (a.violated ? 3 : 2.5) : a.violated ? 2 : 1.5;
+  const opacity = isSelected ? 1 : hasSelection ? 0.15 : a.violated ? 0.85 : 0.65;
+
   return (
-    <path
-      d={buildArrowPath(a)}
-      fill="none"
-      stroke={color}
-      strokeWidth={a.violated ? 2 : 1.5}
-      strokeDasharray={a.violated ? '8 4' : a.crossProject ? '4 3' : '6 3'}
-      opacity={a.violated ? 0.85 : 0.65}
-      markerEnd={`url(#${markerId})`}
-      data-arrow-source={a.sourceId}
-      data-arrow-target={a.targetId}
-      data-cross-project={a.crossProject ? 'true' : undefined}
-    />
+    <g>
+      {/* Wider transparent hit-target path for easy click selection */}
+      <path
+        d={a.path}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={12}
+        className="pointer-events-auto cursor-pointer"
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelectArrow?.(a.sourceId, a.targetId);
+        }}
+        data-arrow-hit-target={`${a.sourceId}->${a.targetId}`}
+        aria-label={`Dependency: ${a.sourceId} blocks ${a.targetId}`}
+      />
+      {/* Visual arrow path */}
+      <path
+        d={a.path}
+        fill="none"
+        stroke={color}
+        strokeWidth={strokeWidth}
+        strokeDasharray={strokeDasharray}
+        opacity={opacity}
+        markerEnd={`url(#${markerId})`}
+        data-arrow-source={a.sourceId}
+        data-arrow-target={a.targetId}
+        data-cross-project={a.crossProject ? 'true' : undefined}
+        data-selected={isSelected ? 'true' : undefined}
+        className="pointer-events-none transition-[opacity,stroke-width] duration-150"
+      />
+    </g>
   );
 }
 
-export default memo(function DependencyArrows({ tasks, containerRef, depViolations, dayWidth, fixedColsWidth }: Props) {
-  const [arrows, setArrows] = useState<Arrow[]>([]);
+export default memo(function DependencyArrows({
+  tasks,
+  containerRef,
+  depViolations,
+  dayWidth,
+  fixedColsWidth,
+  selectedArrow,
+  onSelectArrow,
+}: Props) {
+  const [arrows, setArrows] = useState<(RoutedDependencyArrow & Arrow)[]>([]);
   const [size, setSize] = useState({ width: 0, height: 0 });
 
   const computeArrows = useCallback(() => {
@@ -55,7 +91,7 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
     const containerRect = container.getBoundingClientRect();
     const taskById = new Map(tasks.map((t) => [t.id, t]));
     const seenEdges = new Set<string>();
-    const newArrows: Arrow[] = [];
+    const rawArrows: Arrow[] = [];
 
     for (const task of tasks) {
       if (task.blocks.length === 0) continue;
@@ -78,7 +114,7 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
         const targetTask = taskById.get(blockedId);
         const crossProject = Boolean(task.isExternal || targetTask?.isExternal);
 
-        newArrows.push({
+        rawArrows.push({
           fromX: fromRect.right - containerRect.left,
           fromY: fromRect.top + fromRect.height / 2 - containerRect.top,
           toX: toRect.left - containerRect.left,
@@ -91,7 +127,8 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
       }
     }
 
-    setArrows(newArrows);
+    const routed = routeDependencyArrows(rawArrows);
+    setArrows(routed);
     setSize({ width: container.scrollWidth, height: container.scrollHeight });
   }, [tasks, containerRef, depViolations, dayWidth, fixedColsWidth]);
 
@@ -118,7 +155,21 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
     };
   }, [computeArrows, containerRef]);
 
+  // Paint selected arrow last so it sits on top of non-selected arrows
+  const sortedArrows = useMemo(() => {
+    if (!selectedArrow) return arrows;
+    return [...arrows].sort((a, b) => {
+      const aSel = a.sourceId === selectedArrow.sourceId && a.targetId === selectedArrow.targetId;
+      const bSel = b.sourceId === selectedArrow.sourceId && b.targetId === selectedArrow.targetId;
+      if (aSel) return 1;
+      if (bSel) return -1;
+      return 0;
+    });
+  }, [arrows, selectedArrow]);
+
   if (arrows.length === 0) return null;
+
+  const hasSelection = Boolean(selectedArrow);
 
   return (
     // z-[1] keeps arrows under the task bars (z-[2]) while still painting over the
@@ -166,9 +217,18 @@ export default memo(function DependencyArrows({ tasks, containerRef, depViolatio
           <polygon points="0 0, 8 3, 0 6" fill="#8b5cf6" opacity="0.85" />
         </marker>
       </defs>
-      {arrows.map((a) => (
-        <ArrowPath key={`${a.sourceId}-${a.targetId}`} arrow={a} />
-      ))}
+      {sortedArrows.map((a) => {
+        const isSelected = selectedArrow?.sourceId === a.sourceId && selectedArrow?.targetId === a.targetId;
+        return (
+          <ArrowPathItem
+            key={`${a.sourceId}->${a.targetId}`}
+            arrow={a}
+            isSelected={isSelected}
+            hasSelection={hasSelection}
+            onSelectArrow={onSelectArrow}
+          />
+        );
+      })}
     </svg>
   );
 });

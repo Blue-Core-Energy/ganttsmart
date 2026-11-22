@@ -116,6 +116,56 @@ export default function GanttChart({
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
   const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
+
+  const handleSelectArrow = useCallback((sourceId: string, targetId: string) => {
+    setSelectedArrow((prev) => {
+      if (prev && prev.sourceId === sourceId && prev.targetId === targetId) {
+        return null;
+      }
+      return { sourceId, targetId };
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedArrow(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // A selection only stays active while its dependency is still drawn: both tasks rendered and the
+  // source still blocks the target. Otherwise nothing stays dimmed or highlighted for a missing arrow.
+  const activeSelectedArrow = useMemo(() => {
+    if (!selectedArrow) return null;
+    const source = tasks.find((t) => t.id === selectedArrow.sourceId);
+    const targetRendered = tasks.some((t) => t.id === selectedArrow.targetId);
+    return source && targetRendered && source.blocks.includes(selectedArrow.targetId) ? selectedArrow : null;
+  }, [selectedArrow, tasks]);
+
+  useEffect(() => {
+    if (selectedArrow && !activeSelectedArrow) setSelectedArrow(null);
+  }, [selectedArrow, activeSelectedArrow]);
+
+  useEffect(() => {
+    if (!activeSelectedArrow) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-arrow-hit-target]')) return;
+      setSelectedArrow(null);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [activeSelectedArrow]);
+
+  const highlightedTaskIds = useMemo(() => {
+    if (!activeSelectedArrow) return undefined;
+    return new Set([activeSelectedArrow.sourceId, activeSelectedArrow.targetId]);
+  }, [activeSelectedArrow]);
+
   const ganttRef = useRef<HTMLDivElement>(null);
   /** Date and pointer position to restore after a zoom, set by the wheel handler */
   const zoomAnchorRef = useRef<{ anchorMs: number; pointerOffsetX: number } | null>(null);
@@ -886,6 +936,7 @@ export default function GanttChart({
                 onReorder={onReorder}
                 isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
+                isHighlighted={highlightedTaskIds?.has(task.id)}
               />
             ))}
           </tbody>
@@ -917,6 +968,8 @@ export default function GanttChart({
           depViolations={depViolations}
           dayWidth={dayWidth}
           fixedColsWidth={fixedColsWidth}
+          selectedArrow={activeSelectedArrow}
+          onSelectArrow={handleSelectArrow}
         />
 
         {/* Connection line overlay — updated imperatively during drag for performance.
