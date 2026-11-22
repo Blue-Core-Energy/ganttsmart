@@ -216,7 +216,7 @@ tr:focus-visible {
 }
 
 /* Toast slide-in animation */
-/* Company holidays/shutdowns (rose) and per-person PTO (teal): hatched so they read apart from weekends */
+/* Company-wide days off (rose) and one person's days off (teal): hatched so they read apart from weekends */
 .nonwork-company {
   background-image: repeating-linear-gradient(
     135deg,
@@ -227,7 +227,7 @@ tr:focus-visible {
   );
 }
 
-.nonwork-pto {
+.nonwork-person {
   background-image: repeating-linear-gradient(
     135deg,
     rgba(20, 184, 166, 0.22) 0,

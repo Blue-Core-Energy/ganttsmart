@@ -1,13 +1,13 @@
 import type { Backend } from '../types';
 import { history } from './history';
-import { nonWorkDays } from './nonWorkDays';
+import { daysOff } from './daysOff';
 import { useSupabaseAuth } from './useSupabaseAuth';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 
 export const backend: Backend = {
   kind: 'supabase',
-  capabilities: { sharing: true, passwordLogin: true, marketingPages: true, sharedNonWorkDays: false },
+  capabilities: { sharing: true, passwordLogin: true, marketingPages: true, sharedDaysOff: false },
   useAuth: useSupabaseAuth,
   linearRequest(token, body) {
     return fetch(LINEAR_API, {
@@ -17,5 +17,5 @@ export const backend: Backend = {
     });
   },
   history,
-  nonWorkDays,
+  daysOff,
 };

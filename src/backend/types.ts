@@ -1,4 +1,4 @@
-import type { NewNonWorkDay, NonWorkDay } from '@/types';
+import type { NewDayOff, DayOff } from '@/types';
 
 export interface TaskBaseline {
   issue_id: string;
@@ -54,13 +54,13 @@ export interface HistoryApi {
 }
 
 /**
- * The calendar of holidays, shutdowns and PTO. All methods throw on failure.
+ * The calendar of days off: company closures and one person's time off. All methods throw on failure.
  * Entries are stored on the backend. Whether teammates see the same calendar depends on the backend:
- * see `capabilities.sharedNonWorkDays`.
+ * see `capabilities.sharedDaysOff`.
  */
-export interface NonWorkDaysApi {
-  list(): Promise<NonWorkDay[]>;
-  add(entry: NewNonWorkDay): Promise<NonWorkDay>;
+export interface DaysOffApi {
+  list(): Promise<DayOff[]>;
+  add(entry: NewDayOff): Promise<DayOff>;
   remove(id: string): Promise<void>;
 }
 
@@ -70,13 +70,13 @@ export interface Backend {
     sharing: boolean;
     passwordLogin: boolean;
     marketingPages: boolean;
-    /** Whether the non-work-day calendar is one team-wide calendar (true) or one per signed-in account (false). */
-    sharedNonWorkDays: boolean;
+    /** Whether the days off calendar is one team-wide calendar (true) or one per signed-in account (false). */
+    sharedDaysOff: boolean;
     /** Whether the UI offers "Sign out". Absent means true. */
     signOut?: boolean;
   };
   useAuth(): AuthState;
   linearRequest(token: string, body: { query: string; variables?: Record<string, unknown> }): Promise<Response>;
   history: HistoryApi;
-  nonWorkDays: NonWorkDaysApi;
+  daysOff: DaysOffApi;
 }

@@ -19,11 +19,11 @@ import {
   updateMilestoneTargetDate,
 } from '@/api/linear';
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
-import type { AssignableUser, Filters, Milestone, NonWorkDay, Project, Task, WorkflowState } from '@/types';
+import type { AssignableUser, Filters, Milestone, DayOff, Project, Task, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
-import { planNonWorkDaySnap, saveScheduleSnap, type ScheduleSnap } from '@/utils/nonWorkDays';
+import { planDayOffSnap, saveScheduleSnap, type ScheduleSnap } from '@/utils/daysOff';
 import { applyCustomOrder, filterTasks, isTaskDone, reorderWithinHierarchy } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
@@ -484,14 +484,14 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   );
 
   /**
-   * Moves editable tasks whose start or due date sits on the just-added non-work day(s) to the next
+   * Moves editable tasks whose start or due date sits on the just-added day(s) off to the next
    * workday: updates the chart right away, saves to Linear, and offers one Undo for the batch.
    * `entries` is the whole calendar including `added`. Returns the snaps that were saved.
    */
-  const snapTasksToNonWorkDays = useCallback(
-    async (entries: NonWorkDay[], added: NonWorkDay): Promise<ScheduleSnap[]> => {
+  const snapTasksToDaysOff = useCallback(
+    async (entries: DayOff[], added: DayOff): Promise<ScheduleSnap[]> => {
       if (!linearToken) return [];
-      const plan = planNonWorkDaySnap(tasks, entries, added);
+      const plan = planDayOffSnap(tasks, entries, added);
       if (plan.length === 0) return [];
 
       const prevTasks = tasks;
@@ -1097,7 +1097,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     zoomOut,
     reschedule,
     rescheduleStart,
-    snapTasksToNonWorkDays,
+    snapTasksToDaysOff,
     updateMilestoneDate,
     cycleStatus,
     loadTeamWorkflowStates,

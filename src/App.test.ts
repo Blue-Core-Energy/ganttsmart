@@ -26,7 +26,7 @@ const { authState, backendMock } = vi.hoisted(() => {
       sharing: false,
       passwordLogin: false,
       marketingPages: false,
-      sharedNonWorkDays: true,
+      sharedDaysOff: true,
       signOut: true,
     },
     useAuth: () => authState,

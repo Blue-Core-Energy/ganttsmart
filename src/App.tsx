@@ -14,21 +14,21 @@ import DetailPanel from '@/components/DetailPanel';
 import {
   setBaselinesForPanel,
   setDetailPanelExternalEditState,
-  setDetailPanelNonWorkDays,
+  setDetailPanelDaysOff,
   setDetailPanelProjectSelectHandler,
   setDetailPanelTaskMap,
   setRemoveRelationHandler,
 } from '@/components/detailPanelStore';
 import MilestonePanel from '@/components/MilestonePanel';
-import NonWorkDaysDialog from '@/components/NonWorkDaysDialog';
+import DaysOffDialog from '@/components/DaysOffDialog';
 import { setMilestoneDateHandler } from '@/components/milestonePanelStore';
 import { backend } from '@/backend';
 import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
-import { useNonWorkDays } from '@/hooks/useNonWorkDays';
+import { useDaysOff } from '@/hooks/useDaysOff';
 import { usePlanningHistory } from '@/hooks/usePlanningHistory';
 import { useTheme } from '@/hooks/useTheme';
-import type { InlineEditHandlers, NewNonWorkDay } from '@/types';
+import type { InlineEditHandlers, NewDayOff } from '@/types';
 import {
   clearPendingOAuthProject,
   peekPendingOAuthProject,
@@ -97,7 +97,7 @@ function GanttView({
     zoomOut,
     reschedule,
     rescheduleStart,
-    snapTasksToNonWorkDays,
+    snapTasksToDaysOff,
     updateMilestoneDate,
     cycleStatus,
     loadTeamWorkflowStates,
@@ -155,16 +155,16 @@ function GanttView({
     [rescheduleStart, tasks, logChange],
   );
 
-  // Shared holidays / PTO calendar. Adding an entry snaps affected tasks off the new days.
-  const nonWorkDays = useNonWorkDays();
-  const [showNonWorkDays, setShowNonWorkDays] = useState(false);
-  const openNonWorkDays = useCallback(() => setShowNonWorkDays(true), []);
-  const closeNonWorkDays = useCallback(() => setShowNonWorkDays(false), []);
+  // Shared days off calendar. Adding an entry snaps affected tasks off the new days.
+  const daysOff = useDaysOff();
+  const [showDaysOff, setShowDaysOff] = useState(false);
+  const openDaysOff = useCallback(() => setShowDaysOff(true), []);
+  const closeDaysOff = useCallback(() => setShowDaysOff(false), []);
 
-  const handleAddNonWorkDay = useCallback(
-    async (input: NewNonWorkDay) => {
-      const added = await nonWorkDays.add(input);
-      void snapTasksToNonWorkDays([...nonWorkDays.entries, added], added)
+  const handleAddDayOff = useCallback(
+    async (input: NewDayOff) => {
+      const added = await daysOff.add(input);
+      void snapTasksToDaysOff([...daysOff.entries, added], added)
         .then((snapped) => {
           if (snapped.length === 0) toastSuccess(`Added ${added.label}`);
           for (const { task, startDate, due } of snapped) {
@@ -174,13 +174,13 @@ function GanttView({
         })
         .catch(() => {});
     },
-    [nonWorkDays, snapTasksToNonWorkDays, logChange],
+    [daysOff, snapTasksToDaysOff, logChange],
   );
 
   useEffect(() => {
-    setDetailPanelNonWorkDays(nonWorkDays.entries);
-    return () => setDetailPanelNonWorkDays([]);
-  }, [nonWorkDays.entries]);
+    setDetailPanelDaysOff(daysOff.entries);
+    return () => setDetailPanelDaysOff([]);
+  }, [daysOff.entries]);
 
   // Wrap cycleStatus to log status transitions
   const cycleStatusWithHistory = useCallback(
@@ -308,8 +308,8 @@ function GanttView({
         isLinkedInLinear={isLinkedInLinear}
         linkingToLinear={linkingToLinear}
         onAddToLinear={addProjectLinkToLinear}
-        onOpenNonWorkDays={openNonWorkDays}
-        nonWorkDayCount={nonWorkDays.entries.length}
+        onOpenDaysOff={openDaysOff}
+        daysOffCount={daysOff.entries.length}
       />
 
       <FilterBar
@@ -355,21 +355,21 @@ function GanttView({
           onSelectProject={selectProject}
           projectName={projectName}
           ignoreCollapsed={hasActiveRowFilters(filters)}
-          nonWorkDays={nonWorkDays.entries}
+          daysOff={daysOff.entries}
         />
       </div>
 
       <DetailPanel />
       <MilestonePanel />
-      {showNonWorkDays && (
-        <NonWorkDaysDialog
-          entries={nonWorkDays.entries}
+      {showDaysOff && (
+        <DaysOffDialog
+          entries={daysOff.entries}
           assignees={assignees}
-          loaded={nonWorkDays.loaded}
-          shared={backend.capabilities.sharedNonWorkDays}
-          onAdd={handleAddNonWorkDay}
-          onRemove={nonWorkDays.remove}
-          onClose={closeNonWorkDays}
+          loaded={daysOff.loaded}
+          shared={backend.capabilities.sharedDaysOff}
+          onAdd={handleAddDayOff}
+          onRemove={daysOff.remove}
+          onClose={closeDaysOff}
         />
       )}
       <ToastContainer />

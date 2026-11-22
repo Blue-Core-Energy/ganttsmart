@@ -9,7 +9,7 @@ import { createTokenService } from './linear/tokens.js';
 import { describeError, log } from './log.js';
 import { historyRoutes } from './routes/history.js';
 import { linearRoutes } from './routes/linear.js';
-import { nonWorkDayRoutes } from './routes/nonWorkDays.js';
+import { daysOffRoutes } from './routes/daysOff.js';
 import type { Store } from './store/types.js';
 
 export interface AppDeps {
@@ -105,7 +105,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }),
   );
   app.route('/api/history', historyRoutes({ store }));
-  app.route('/api/non-work-days', nonWorkDayRoutes({ store }));
+  app.route('/api/days-off', daysOffRoutes({ store }));
+  // Alias for the previous name, so a browser still running the cached pre-rename bundle keeps
+  // working right after a deploy. Remove it (and `legacyKeys`) one release after the rename ships.
+  app.route('/api/non-work-days', daysOffRoutes({ store, legacyKeys: true }));
 
   // Unknown API routes are a JSON 404, never the SPA shell. This must stay after every /api route.
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));

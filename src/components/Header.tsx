@@ -29,9 +29,9 @@ interface Props {
   isLinkedInLinear?: boolean;
   linkingToLinear?: boolean;
   onAddToLinear?: () => void;
-  /** Opens the Holidays / PTO manager; the menu entry is hidden when omitted */
-  onOpenNonWorkDays?: () => void;
-  nonWorkDayCount?: number;
+  /** Opens the Days Off manager; the menu entry is hidden when omitted */
+  onOpenDaysOff?: () => void;
+  daysOffCount?: number;
 }
 
 const iconBtn =
@@ -207,8 +207,8 @@ export default memo(function Header({
   isLinkedInLinear,
   linkingToLinear,
   onAddToLinear,
-  onOpenNonWorkDays,
-  nonWorkDayCount = 0,
+  onOpenDaysOff,
+  daysOffCount = 0,
 }: Props) {
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
@@ -482,24 +482,24 @@ export default memo(function Header({
                 </>
               )}
 
-              {/* Holidays / PTO calendar manager */}
-              {onOpenNonWorkDays && (
+              {/* Days Off calendar manager */}
+              {onOpenDaysOff && (
                 <>
                   <button
                     type="button"
                     onClick={() => {
                       setShowAccountMenu(false);
-                      onOpenNonWorkDays();
+                      onOpenDaysOff();
                     }}
                     className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
-                    title="Manage company holidays, shutdowns and per-person PTO"
+                    title="Manage company-wide closures and one person's time off"
                   >
                     <span className="flex items-center gap-2">
                       <CalendarOffIcon />
-                      <span>Holidays / PTO</span>
+                      <span>Days Off</span>
                     </span>
-                    {nonWorkDayCount > 0 && (
-                      <span className="font-mono tabular-nums text-[11px] text-text-muted">{nonWorkDayCount}</span>
+                    {daysOffCount > 0 && (
+                      <span className="font-mono tabular-nums text-[11px] text-text-muted">{daysOffCount}</span>
                     )}
                   </button>
                   <div className="border-t border-border-primary my-0.5" />

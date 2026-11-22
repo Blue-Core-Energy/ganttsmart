@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { InlineEditHandlers, Milestone, NonWorkDay, Task, TimeScale } from '@/types';
+import type { InlineEditHandlers, Milestone, DayOff, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, formatIsoDate, isWeekend, startOfWeek } from '@/utils/date';
@@ -62,8 +62,8 @@ interface Props {
   projectName?: string;
   /** Show every row even under a collapsed parent — set while search or filters are narrowing the list */
   ignoreCollapsed?: boolean;
-  /** Shared holidays and PTO: shaded on the timeline and skipped by workday math. Omit for none. */
-  nonWorkDays?: NonWorkDay[];
+  /** Shared days off: shaded on the timeline and skipped by workday math. Omit for none. */
+  daysOff?: DayOff[];
 }
 
 // Resize handle component
@@ -123,7 +123,7 @@ export default function GanttChart({
   onSelectProject,
   projectName,
   ignoreCollapsed = false,
-  nonWorkDays,
+  daysOff,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
@@ -612,17 +612,17 @@ export default function GanttChart({
       else topCells.push({ label, days: c.days });
     }
 
-    // Company-wide days off get a header tint and the holiday name as a tooltip (day scale only)
-    const companyEntries = timeScale === 'day' ? (nonWorkDays ?? []).filter((e) => !e.assigneeName) : [];
+    // Company-wide days off get a header tint and the entry name as a tooltip (day scale only)
+    const companyEntries = timeScale === 'day' ? (daysOff ?? []).filter((e) => !e.assigneeName) : [];
 
     const bottomCells = cells.map((c) => {
       const end = new Date(c.start);
       end.setDate(end.getDate() + c.days - 1);
       const iso = formatIsoDate(c.start);
-      const holidays = companyEntries.filter((e) => iso >= e.startDate && iso <= e.endDate).map((e) => e.label);
+      const names = companyEntries.filter((e) => iso >= e.startDate && iso <= e.endDate).map((e) => e.label);
       return {
         days: c.days,
-        holiday: holidays.length > 0 ? holidays.join(', ') : undefined,
+        dayOff: names.length > 0 ? names.join(', ') : undefined,
         isWeekend: timeScale === 'day' && isWeekend(c.start),
         isCurrent: today >= c.start && today <= end,
         label:
@@ -636,7 +636,7 @@ export default function GanttChart({
     });
 
     return { topCells, bottomCells };
-  }, [chartStart, totalDays, today, timeScale, nonWorkDays]);
+  }, [chartStart, totalDays, today, timeScale, daysOff]);
 
   // Milestone positions (memoized)
   const milestonesInRange = useMemo(
@@ -1057,9 +1057,9 @@ export default function GanttChart({
                           : d.isWeekend
                             ? 'bg-bg-hover/40 text-text-muted'
                             : 'text-text-muted'
-                      } ${d.holiday ? 'nonwork-company' : ''}`}
-                      data-header-holiday={d.holiday}
-                      title={d.holiday}
+                      } ${d.dayOff ? 'nonwork-company' : ''}`}
+                      data-header-day-off={d.dayOff}
+                      title={d.dayOff}
                       style={{
                         width: d.days * dayWidth,
                       }}
@@ -1119,7 +1119,7 @@ export default function GanttChart({
                 isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
                 isHighlighted={highlightedTaskIds?.has(task.id)}
-                nonWorkDays={nonWorkDays}
+                daysOff={daysOff}
               />
             ))}
           </tbody>

@@ -124,7 +124,7 @@ interface MockIssue {
   dueOffset: number;
 }
 
-interface NonWorkDayEntry {
+interface DayOffEntry {
   id: string;
   label: string;
   startDate: string;
@@ -138,25 +138,25 @@ function mondayOffset(): number {
 }
 
 /**
- * Serves the holidays/PTO API from memory so these tests never touch the shared dev server's
+ * Serves the days off API from memory so these tests never touch the shared dev server's
  * calendar (other tests run against the same server in parallel).
  */
-async function mockNonWorkDayApi(page: Page, initial: NonWorkDayEntry[] = []): Promise<NonWorkDayEntry[]> {
+async function mockDaysOffApi(page: Page, initial: DayOffEntry[] = []): Promise<DayOffEntry[]> {
   const entries = [...initial];
   let counter = 0;
-  await page.route('**/api/non-work-days**', async (route) => {
+  await page.route('**/api/days-off**', async (route) => {
     const req = route.request();
     if (req.method() === 'GET') {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ nonWorkDays: entries }),
+        body: JSON.stringify({ daysOff: entries }),
       });
       return;
     }
     if (req.method() === 'POST') {
-      const body = req.postDataJSON() as Omit<NonWorkDayEntry, 'id'>;
-      const entry: NonWorkDayEntry = {
+      const body = req.postDataJSON() as Omit<DayOffEntry, 'id'>;
+      const entry: DayOffEntry = {
         id: `nwd-${++counter}`,
         label: body.label,
         startDate: body.startDate,
@@ -167,7 +167,7 @@ async function mockNonWorkDayApi(page: Page, initial: NonWorkDayEntry[] = []): P
       await route.fulfill({
         status: 201,
         contentType: 'application/json',
-        body: JSON.stringify({ nonWorkDay: entry }),
+        body: JSON.stringify({ dayOff: entry }),
       });
       return;
     }
@@ -319,17 +319,17 @@ async function mockLinearIssues(page: Page, issues: MockIssue[]) {
   return { dueUpdates, startUpdates };
 }
 
-async function openNonWorkDaysDialog(page: Page): Promise<void> {
+async function openDaysOffDialog(page: Page): Promise<void> {
   await page.getByTitle('Account').click();
-  await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+  await page.getByRole('button', { name: /Days Off/ }).click();
 }
 
-async function addNonWorkDayViaDialog(
+async function addDayOffViaDialog(
   page: Page,
   entry: { label: string; start: string; end?: string; person?: string },
 ): Promise<void> {
-  const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
-  await openNonWorkDaysDialog(page);
+  const dialog = page.getByRole('dialog', { name: 'Days Off' });
+  await openDaysOffDialog(page);
   await expect(dialog).toBeVisible();
   await dialog.getByLabel('Name', { exact: true }).fill(entry.label);
   await dialog.getByLabel('Start date', { exact: true }).fill(entry.start);
@@ -339,7 +339,7 @@ async function addNonWorkDayViaDialog(
     await dialog.getByLabel('Person', { exact: true }).fill(entry.person);
   }
   await dialog.getByRole('button', { name: 'Add', exact: true }).click();
-  await expect(dialog.locator(`[data-non-work-entry="${entry.label}"]`)).toBeVisible();
+  await expect(dialog.locator(`[data-day-off-entry="${entry.label}"]`)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 }
@@ -5777,7 +5777,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('adds a company holiday and per-person PTO, shades the timeline, and snaps affected tasks forward', async ({
+  test("adds a company-wide day off and one person's day off, shades the timeline, and snaps affected tasks forward", async ({
     page,
   }) => {
     const errors = trackErrors(page);
@@ -5815,18 +5815,18 @@ test.describe('GanttSmart GCP app', () => {
         dueOffset: mon + 1,
       },
     ]);
-    const entries = await mockNonWorkDayApi(page);
+    const entries = await mockDaysOffApi(page);
 
     await page.goto('/app');
     const barWidth = async (id: string) => (await page.locator(`[data-task-bar="${id}"]`).boundingBox())!.width;
     await expect(page.locator('[data-task-bar="ENG-201"]')).toBeVisible();
-    await expect(page.locator('[data-non-work-day]')).toHaveCount(0);
+    await expect(page.locator('[data-day-off]')).toHaveCount(0);
     const dayWidth = 28;
     expect(await barWidth('ENG-201')).toBeCloseTo(3 * dayWidth, 0); // Mon–Wed
     expect(await barWidth('ENG-202')).toBeCloseTo(3 * dayWidth, 0); // Wed–Fri
 
-    // 1. Company-wide holiday
-    await addNonWorkDayViaDialog(page, { label: 'Company Retreat', start: isoOffsetDays(wed) });
+    // 1. Company-wide day off
+    await addDayOffViaDialog(page, { label: 'Company Retreat', start: isoOffsetDays(wed) });
     expect(entries).toEqual([
       expect.objectContaining({
         label: 'Company Retreat',
@@ -5836,14 +5836,14 @@ test.describe('GanttSmart GCP app', () => {
       }),
     ]);
 
-    // Shaded on every row and in the date ruler, with the holiday name on hover
+    // Shaded on every row and in the date ruler, with the entry name on hover
     for (const id of ['ENG-201', 'ENG-202', 'ENG-203']) {
-      const shade = page.locator(`tr[data-task-id="${id}"] [data-non-work-day="Company Retreat"]`);
+      const shade = page.locator(`tr[data-task-id="${id}"] [data-day-off="Company Retreat"]`);
       await expect(shade).toHaveCount(1);
-      await expect(shade).toHaveAttribute('data-non-work-scope', 'company');
+      await expect(shade).toHaveAttribute('data-day-off-scope', 'company');
       await expect(shade).toHaveAttribute('title', /Company Retreat/);
     }
-    const headerShade = page.locator('[data-header-holiday="Company Retreat"]');
+    const headerShade = page.locator('[data-header-day-off="Company Retreat"]');
     await expect(headerShade).toHaveCount(1);
     await expect(headerShade).toHaveAttribute('title', 'Company Retreat');
 
@@ -5857,22 +5857,22 @@ test.describe('GanttSmart GCP app', () => {
     await expect.poll(() => barWidth('ENG-202')).toBeCloseTo(2 * dayWidth, 0); // Thu–Fri
     expect(await barWidth('ENG-203')).toBeCloseTo(2 * dayWidth, 0);
 
-    // 2. Per-person PTO for Nate on Thu: only Nate's tasks are affected
-    await addNonWorkDayViaDialog(page, { label: 'Nate PTO', start: isoOffsetDays(thu), person: 'Nate Jones' });
-    expect(entries[1]).toMatchObject({ label: 'Nate PTO', assigneeName: 'Nate Jones' });
+    // 2. One person's day off for Nate on Thu: only Nate's tasks are affected
+    await addDayOffViaDialog(page, { label: 'Nate Out', start: isoOffsetDays(thu), person: 'Nate Jones' });
+    expect(entries[1]).toMatchObject({ label: 'Nate Out', assigneeName: 'Nate Jones' });
 
     for (const id of ['ENG-202', 'ENG-203']) {
-      const shade = page.locator(`tr[data-task-id="${id}"] [data-non-work-day="Nate PTO"]`);
+      const shade = page.locator(`tr[data-task-id="${id}"] [data-day-off="Nate Out"]`);
       await expect(shade).toHaveCount(1);
-      await expect(shade).toHaveAttribute('data-non-work-scope', 'pto');
-      await expect(shade).toHaveAttribute('title', /Nate PTO · Nate Jones out/);
+      await expect(shade).toHaveAttribute('data-day-off-scope', 'person');
+      await expect(shade).toHaveAttribute('title', /Nate Out · Nate Jones out/);
     }
-    await expect(page.locator('tr[data-task-id="ENG-201"] [data-non-work-day="Nate PTO"]')).toHaveCount(0);
-    // PTO is not a company holiday, so the date ruler does not mark it
-    await expect(page.locator('[data-header-holiday]')).toHaveCount(1);
+    await expect(page.locator('tr[data-task-id="ENG-201"] [data-day-off="Nate Out"]')).toHaveCount(0);
+    // A per-person day off is not company-wide, so the date ruler does not mark it
+    await expect(page.locator('[data-header-day-off]')).toHaveCount(1);
 
-    // ENG-202 started on Thu (snapped earlier), now Nate's PTO: Thu -> Fri
-    await expect(page.getByText('Nate PTO added: moved 1 task to the next workday')).toBeVisible();
+    // ENG-202 started on Thu (snapped earlier), now Nate's day off: Thu -> Fri
+    await expect(page.getByText('Nate Out added: moved 1 task to the next workday')).toBeVisible();
     await expect.poll(() => startUpdates.map((u) => u.id)).toEqual(['uuid-202', 'uuid-202']);
     expect(startUpdates[1].body).toContain(`start: ${isoOffsetDays(fri)}`);
     expect(dueUpdates).toEqual([{ id: 'uuid-201', dueDate: isoOffsetDays(thu) }]); // Andrew's task is untouched
@@ -5931,14 +5931,14 @@ test.describe('GanttSmart GCP app', () => {
         dueOffset: wed,
       },
     ]);
-    const entries = await mockNonWorkDayApi(page);
+    const entries = await mockDaysOffApi(page);
 
     await page.goto('/app');
     const bar = page.locator('[data-task-bar="ENG-211"]');
     await expect(bar).toBeVisible();
 
     // Nothing lands on a far-away holiday: a plain confirmation, no snapping
-    await addNonWorkDayViaDialog(page, {
+    await addDayOffViaDialog(page, {
       label: 'Far Future',
       start: isoOffsetDays(mon + 40),
       end: isoOffsetDays(mon + 41),
@@ -5946,7 +5946,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Added Far Future')).toBeVisible();
     expect(dueUpdates).toEqual([]);
 
-    await addNonWorkDayViaDialog(page, { label: 'Retreat', start: isoOffsetDays(wed) });
+    await addDayOffViaDialog(page, { label: 'Retreat', start: isoOffsetDays(wed) });
     await expect.poll(() => dueUpdates.length).toBe(1);
     await expect.poll(async () => (await bar.boundingBox())!.width).toBeCloseTo(4 * 28, 0);
 
@@ -5957,20 +5957,20 @@ test.describe('GanttSmart GCP app', () => {
     expect(dueUpdates[1]).toEqual({ id: 'uuid-211', dueDate: isoOffsetDays(wed) });
 
     // The manager lists both entries; removing one clears its shading
-    await openNonWorkDaysDialog(page);
-    const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
-    await expect(dialog.locator('[data-non-work-entry]')).toHaveCount(2);
-    await expect(dialog.locator('[data-non-work-entry="Far Future"]')).toContainText(' – ');
+    await openDaysOffDialog(page);
+    const dialog = page.getByRole('dialog', { name: 'Days Off' });
+    await expect(dialog.locator('[data-day-off-entry]')).toHaveCount(2);
+    await expect(dialog.locator('[data-day-off-entry="Far Future"]')).toContainText(' – ');
     await dialog.getByRole('button', { name: 'Remove Retreat' }).click();
-    await expect(dialog.locator('[data-non-work-entry="Retreat"]')).toHaveCount(0);
+    await expect(dialog.locator('[data-day-off-entry="Retreat"]')).toHaveCount(0);
     await expect.poll(() => entries.map((e) => e.label)).toEqual(['Far Future']);
     await page.keyboard.press('Escape');
-    await expect(page.locator('[data-non-work-day="Retreat"]')).toHaveCount(0);
+    await expect(page.locator('[data-day-off="Retreat"]')).toHaveCount(0);
 
     expect(errors).toEqual([]);
   });
 
-  test('validates the Holidays / PTO form before saving', async ({ page }) => {
+  test('validates the Days Off form before saving', async ({ page }) => {
     const errors = trackErrors(page);
     const mon = mondayOffset();
     await mockLinearIssues(page, [
@@ -5983,12 +5983,12 @@ test.describe('GanttSmart GCP app', () => {
         dueOffset: mon + 1,
       },
     ]);
-    const entries = await mockNonWorkDayApi(page);
+    const entries = await mockDaysOffApi(page);
 
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-221"]')).toBeVisible();
-    await openNonWorkDaysDialog(page);
-    const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
+    await openDaysOffDialog(page);
+    const dialog = page.getByRole('dialog', { name: 'Days Off' });
     const add = dialog.getByRole('button', { name: 'Add', exact: true });
 
     await add.click();
@@ -6011,7 +6011,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('skips holidays and PTO when moving bars and counting workdays in the detail panel', async ({ page }) => {
+  test('skips days off when moving bars and counting workdays in the detail panel', async ({ page }) => {
     const errors = trackErrors(page);
     const mon = mondayOffset();
     const wed = mon + 2;
@@ -6039,13 +6039,13 @@ test.describe('GanttSmart GCP app', () => {
       {
         id: 'uuid-233',
         identifier: 'ENG-233',
-        title: 'Spans PTO',
+        title: 'Spans person day off',
         assignee: 'Nate Jones',
         startOffset: mon,
         dueOffset: mon + 4,
       },
     ]);
-    await mockNonWorkDayApi(page, [
+    await mockDaysOffApi(page, [
       {
         id: 'h1',
         label: 'Company Retreat',
@@ -6055,7 +6055,7 @@ test.describe('GanttSmart GCP app', () => {
       },
       {
         id: 'p1',
-        label: 'Nate PTO',
+        label: 'Nate Out',
         startDate: isoOffsetDays(mon + 1),
         endDate: isoOffsetDays(mon + 1),
         assigneeName: 'Nate Jones',
@@ -6065,9 +6065,9 @@ test.describe('GanttSmart GCP app', () => {
     await page.goto('/app');
     const bar = page.locator('[data-task-bar="ENG-231"]');
     await expect(bar).toBeVisible();
-    await expect(page.locator('tr[data-task-id="ENG-233"] [data-non-work-day="Nate PTO"]')).toHaveCount(1);
+    await expect(page.locator('tr[data-task-id="ENG-233"] [data-day-off="Nate Out"]')).toHaveCount(1);
 
-    // Duration in the detail panel excludes the holiday, and PTO only for Nate
+    // Duration in the detail panel excludes the company-wide day off, and Nate's own only for Nate
     await page.locator('[data-task-bar="ENG-232"]').click();
     await expect(page.getByText('4 workdays')).toBeVisible();
     await page.keyboard.press('Escape');
@@ -6095,18 +6095,18 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('shares the holidays / PTO calendar through the server API', async ({ request, baseURL }) => {
+  test('shares the days off calendar through the server API', async ({ request, baseURL }) => {
     const origin = baseURL ?? 'http://127.0.0.1:4173';
     const headers = { origin, 'content-type': 'application/json' };
     const label = `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    const created = await request.post('/api/non-work-days', {
+    const created = await request.post('/api/days-off', {
       headers,
       data: { label, startDate: '2099-11-26', endDate: '2099-11-27', assigneeName: 'Alex Rivera' },
     });
     expect(created.status()).toBe(201);
-    const { nonWorkDay } = (await created.json()) as { nonWorkDay: NonWorkDayEntry };
-    expect(nonWorkDay).toMatchObject({
+    const { dayOff } = (await created.json()) as { dayOff: DayOffEntry };
+    expect(dayOff).toMatchObject({
       label,
       startDate: '2099-11-26',
       endDate: '2099-11-27',
@@ -6114,22 +6114,47 @@ test.describe('GanttSmart GCP app', () => {
     });
 
     try {
-      const listed = await request.get('/api/non-work-days');
-      expect(((await listed.json()) as { nonWorkDays: NonWorkDayEntry[] }).nonWorkDays).toContainEqual(nonWorkDay);
+      const listed = await request.get('/api/days-off');
+      expect(((await listed.json()) as { daysOff: DayOffEntry[] }).daysOff).toContainEqual(dayOff);
 
-      const bad = await request.post('/api/non-work-days', { headers, data: { label, startDate: '2099-02-31' } });
+      const bad = await request.post('/api/days-off', { headers, data: { label, startDate: '2099-02-31' } });
       expect(bad.status()).toBe(400);
-      const crossOrigin = await request.post('/api/non-work-days', {
+      const crossOrigin = await request.post('/api/days-off', {
         headers: { ...headers, origin: 'https://evil.example.com' },
         data: { label, startDate: '2099-11-26' },
       });
       expect(crossOrigin.status()).toBe(403);
     } finally {
+      const removed = await request.delete(`/api/days-off/${dayOff.id}`, { headers });
+      expect(removed.status()).toBe(200);
+    }
+    const gone = await request.delete(`/api/days-off/${dayOff.id}`, { headers });
+    expect(gone.status()).toBe(404);
+  });
+
+  test('keeps the previous /api/non-work-days path working as an alias', async ({ request, baseURL }) => {
+    const origin = baseURL ?? 'http://127.0.0.1:4173';
+    const headers = { origin, 'content-type': 'application/json' };
+    const label = `e2e-legacy-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const created = await request.post('/api/non-work-days', {
+      headers,
+      data: { label, startDate: '2099-11-26', endDate: '2099-11-27' },
+    });
+    expect(created.status()).toBe(201);
+    const { nonWorkDay } = (await created.json()) as { nonWorkDay: DayOffEntry };
+    expect(nonWorkDay).toMatchObject({ label, startDate: '2099-11-26', endDate: '2099-11-27', assigneeName: null });
+
+    try {
+      const legacy = await request.get('/api/non-work-days');
+      expect(((await legacy.json()) as { nonWorkDays: DayOffEntry[] }).nonWorkDays).toContainEqual(nonWorkDay);
+      // Same calendar through the new path
+      const current = await request.get('/api/days-off');
+      expect(((await current.json()) as { daysOff: DayOffEntry[] }).daysOff).toContainEqual(nonWorkDay);
+    } finally {
       const removed = await request.delete(`/api/non-work-days/${nonWorkDay.id}`, { headers });
       expect(removed.status()).toBe(200);
     }
-    const gone = await request.delete(`/api/non-work-days/${nonWorkDay.id}`, { headers });
-    expect(gone.status()).toBe(404);
   });
 });
 

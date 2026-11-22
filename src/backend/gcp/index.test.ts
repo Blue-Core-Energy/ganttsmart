@@ -9,7 +9,7 @@ describe('gcp backend', () => {
       sharing: false,
       passwordLogin: false,
       marketingPages: false,
-      sharedNonWorkDays: true,
+      sharedDaysOff: true,
       signOut: true,
     });
   });

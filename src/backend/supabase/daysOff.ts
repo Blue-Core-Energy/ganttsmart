@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase';
-import type { NonWorkDay } from '@/types';
-import type { NonWorkDaysApi } from '../types';
+import type { DayOff } from '@/types';
+import type { DaysOffApi } from '../types';
 
 const COLUMNS = 'id, label, start_date, end_date, assignee_name';
 
@@ -12,7 +12,7 @@ interface Row {
   assignee_name: string | null;
 }
 
-const toEntry = (r: Row): NonWorkDay => ({
+const toEntry = (r: Row): DayOff => ({
   id: r.id,
   label: r.label,
   startDate: r.start_date,
@@ -29,7 +29,7 @@ function isMissingTable(error: { code?: string; message?: string }): boolean {
   );
 }
 
-const NOT_MIGRATED = 'Holidays / PTO are not set up on this Supabase project yet (apply migration 009).';
+const NOT_MIGRATED = 'Days Off are not set up on this Supabase project yet (apply migration 009).';
 
 async function getUserId(): Promise<string | null> {
   const {
@@ -38,14 +38,18 @@ async function getUserId(): Promise<string | null> {
   return session?.user?.id ?? null;
 }
 
+// The table is still `non_work_days`, the feature's original name. It is kept on purpose: the name is
+// invisible to users and renaming it would need a migration that also copes with projects where 009
+// was never applied.
 // Each Supabase account keeps its own calendar. Until the table exists the calendar reads as empty,
 // so the chart keeps working; adding an entry then fails with a message saying why.
-export const nonWorkDays: NonWorkDaysApi = {
+export const daysOff: DaysOffApi = {
   async list() {
     const userId = await getUserId();
     if (!userId) return [];
 
     const { data, error } = await supabase
+      // Original table name, see the note above `daysOff`
       .from('non_work_days')
       .select(COLUMNS)
       .eq('user_id', userId)
@@ -60,9 +64,10 @@ export const nonWorkDays: NonWorkDaysApi = {
 
   async add(entry) {
     const userId = await getUserId();
-    if (!userId) throw new Error('Sign in to save holidays and PTO.');
+    if (!userId) throw new Error('Sign in to save days off.');
 
     const { data, error } = await supabase
+      // Original table name, see the note above `daysOff`
       .from('non_work_days')
       .insert({
         user_id: userId,
@@ -82,6 +87,7 @@ export const nonWorkDays: NonWorkDaysApi = {
     const userId = await getUserId();
     if (!userId) return;
 
+    // Original table name, see the note above `daysOff`
     const { error } = await supabase.from('non_work_days').delete().eq('id', id).eq('user_id', userId);
     if (error) throw new Error(isMissingTable(error) ? NOT_MIGRATED : error.message);
   },

@@ -1,5 +1,5 @@
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
-import type { NonWorkDay, Task } from '@/types';
+import type { DayOff, Task } from '@/types';
 
 let globalOpenPanel: ((task: Task) => void) | null = null;
 let globalClosePanel: (() => void) | null = null;
@@ -7,7 +7,7 @@ let globalRemoveRelation: ((sourceId: string, targetId: string) => Promise<void>
 let globalBaselines: Map<string, TaskBaseline> = new Map();
 let globalTaskMap: Map<string, Task> = new Map();
 let globalSelectProject: ((projectId: string) => void) | null = null;
-let globalNonWorkDays: NonWorkDay[] = [];
+let globalDaysOff: DayOff[] = [];
 let globalAllowExternalEdits = false;
 let globalToggleExternalEdits: ((allow: boolean) => void) | null = null;
 const contextListeners = new Set<() => void>();
@@ -72,13 +72,13 @@ export function getDetailPanelExternalEditState(): {
   };
 }
 
-export function setDetailPanelNonWorkDays(entries: NonWorkDay[]): void {
-  globalNonWorkDays = entries;
+export function setDetailPanelDaysOff(entries: DayOff[]): void {
+  globalDaysOff = entries;
   notifyContextListeners();
 }
 
-export function getDetailPanelNonWorkDays(): NonWorkDay[] {
-  return globalNonWorkDays;
+export function getDetailPanelDaysOff(): DayOff[] {
+  return globalDaysOff;
 }
 
 export function openDetailPanel(task: Task): void {

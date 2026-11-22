@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AssignableUser, InlineEditHandlers, NonWorkDay, Task, TimeScale, WorkflowState } from '@/types';
+import type { AssignableUser, InlineEditHandlers, DayOff, Task, TimeScale, WorkflowState } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
@@ -22,7 +22,7 @@ import {
   isWeekend,
   moveTaskDatesPreservingWorkdays,
 } from '@/utils/date';
-import { buildNonWorkSpans, calendarFor, formatNonWorkRange } from '@/utils/nonWorkDays';
+import { buildNonWorkSpans, calendarFor, formatDayOffRange } from '@/utils/daysOff';
 import { isTaskDone } from '@/utils/tasks';
 import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/workflowStates';
 import CellMenu, { type CellMenuOption } from './CellMenu';
@@ -65,8 +65,8 @@ interface Props {
   /** The chevron is shown but inert — every matching row is revealed while filtering */
   toggleLocked?: boolean;
   onToggleCollapse?: (taskId: string) => void;
-  /** Holidays and PTO: shaded on the row and skipped by workday math for this task's assignee */
-  nonWorkDays?: NonWorkDay[];
+  /** Days off: shaded on the row and skipped by workday math for this task's assignee */
+  daysOff?: DayOff[];
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
@@ -101,7 +101,7 @@ export default function GanttRow({
   collapsed = false,
   toggleLocked = false,
   onToggleCollapse,
-  nonWorkDays,
+  daysOff,
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
@@ -248,10 +248,10 @@ export default function GanttRow({
     return today <= dueDate ? today : dueDate;
   }, [taskStartDate, isDone, overdue, dueDate, today]);
 
-  // Company holidays plus this assignee's PTO: what a bar move skips over
+  // Company-wide days off plus this assignee's own: what a bar move skips over
   const calendar = useMemo(
-    () => (nonWorkDays && nonWorkDays.length > 0 ? calendarFor(nonWorkDays, task.assignee) : undefined),
-    [nonWorkDays, task.assignee],
+    () => (daysOff && daysOff.length > 0 ? calendarFor(daysOff, task.assignee) : undefined),
+    [daysOff, task.assignee],
   );
 
   const moveDays = Math.round(moveDelta / dayWidth);
@@ -458,10 +458,10 @@ export default function GanttRow({
     isToday: timeScale === 'day' && c.start.getTime() === today.getTime(),
   }));
 
-  // Holidays / PTO shading: spans positioned over the grid, valid at every zoom level
+  // Days off shading: spans positioned over the grid, valid at every zoom level
   const nonWorkSpans = useMemo(
-    () => (nonWorkDays ? buildNonWorkSpans(nonWorkDays, task.assignee, chartStart, totalDays) : []),
-    [nonWorkDays, task.assignee, chartStart, totalDays],
+    () => (daysOff ? buildNonWorkSpans(daysOff, task.assignee, chartStart, totalDays) : []),
+    [daysOff, task.assignee, chartStart, totalDays],
   );
 
   // At week/month scale a whole cell spans many days, so mark today with a thin line instead
@@ -1079,18 +1079,18 @@ export default function GanttRow({
               />
             ))}
             {nonWorkSpans.map((span) => {
-              const entry = nonWorkDays?.find((e) => e.id === span.id);
+              const entry = daysOff?.find((e) => e.id === span.id);
               return (
                 <div
                   key={span.id}
-                  data-non-work-day={span.label}
-                  data-non-work-scope={span.scope}
-                  className={`absolute top-0 bottom-0 ${span.scope === 'pto' ? 'nonwork-pto' : 'nonwork-company'}`}
+                  data-day-off={span.label}
+                  data-day-off-scope={span.scope}
+                  className={`absolute top-0 bottom-0 ${span.scope === 'person' ? 'nonwork-person' : 'nonwork-company'}`}
                   style={{ left: span.offset * dayWidth, width: span.days * dayWidth }}
                   title={
-                    span.scope === 'pto'
-                      ? `${span.label} · ${task.assignee} out${entry ? ` · ${formatNonWorkRange(entry)}` : ''}`
-                      : `${span.label}${entry ? ` · ${formatNonWorkRange(entry)}` : ''}`
+                    span.scope === 'person'
+                      ? `${span.label} · ${task.assignee} out${entry ? ` · ${formatDayOffRange(entry)}` : ''}`
+                      : `${span.label}${entry ? ` · ${formatDayOffRange(entry)}` : ''}`
                   }
                 />
               );
