@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import type { Filters, Task } from '@/types';
 import {
+  applyCollapsedParents,
   applyCustomOrder,
+  buildTaskHierarchy,
   computeDepViolations,
   computeTaskStats,
   filterTasks,
+  groupSubtasksUnderParents,
+  hasActiveRowFilters,
   isTaskDone,
   mergeUnifiedTasks,
+  reorderWithinHierarchy,
   sortTasks,
 } from './tasks';
 
@@ -227,5 +232,168 @@ describe('computeTaskStats', () => {
       completed: 1,
       span: 14,
     });
+  });
+});
+
+/** Task whose uuid mirrors its identifier ('ENG-1' -> 'u-ENG-1'), optionally under a parent */
+function node(id: string, parentId?: string | null, overrides: Partial<Task> = {}): Task {
+  return makeTask({ id, uuid: `u-${id}`, parentId, ...overrides });
+}
+
+const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+
+describe('buildTaskHierarchy', () => {
+  it('returns the same array when nothing has a parent in the list', () => {
+    const tasks = [node('A'), node('B'), node('C', 'MISSING')];
+    const h = buildTaskHierarchy(tasks);
+    expect(h.tasks).toBe(tasks);
+    expect(h.parentById.size).toBe(0);
+    expect(h.depthById.get('C')).toBe(0);
+  });
+
+  it('groups sub-issues directly under their parent and keeps the remaining order', () => {
+    const tasks = [node('A'), node('A1', 'A'), node('B'), node('A2', 'A'), node('C')];
+    // A1 was already under A, A2 is pulled up from after B
+    expect(ids(groupSubtasksUnderParents(tasks))).toEqual(['A', 'A1', 'A2', 'B', 'C']);
+  });
+
+  it('places children listed before their parent beneath it and keeps sibling order', () => {
+    const tasks = [node('A2', 'A'), node('B'), node('A1', 'A'), node('A')];
+    expect(ids(groupSubtasksUnderParents(tasks))).toEqual(['B', 'A', 'A2', 'A1']);
+  });
+
+  it('nests multiple levels and reports depth, parents and direct children', () => {
+    const tasks = [node('A'), node('B'), node('A1a', 'A1'), node('A1', 'A'), node('A2', 'A')];
+    const h = buildTaskHierarchy(tasks);
+    expect(ids(h.tasks)).toEqual(['A', 'A1', 'A1a', 'A2', 'B']);
+    expect(h.depthById.get('A')).toBe(0);
+    expect(h.depthById.get('A1')).toBe(1);
+    expect(h.depthById.get('A1a')).toBe(2);
+    expect(h.parentById.get('A1a')).toBe('A1');
+    expect(h.childIdsById.get('A')).toEqual(['A1', 'A2']);
+    expect(h.childIdsById.get('B')).toBeUndefined();
+  });
+
+  it('treats a sub-issue whose parent is absent from the list as a top-level row', () => {
+    const tasks = [node('A'), node('X1', 'X'), node('A1', 'A')];
+    const h = buildTaskHierarchy(tasks);
+    expect(ids(h.tasks)).toEqual(['A', 'A1', 'X1']);
+    expect(h.depthById.get('X1')).toBe(0);
+    expect(h.parentById.has('X1')).toBe(false);
+  });
+
+  it('never drops rows when parent links form a cycle or point at themselves', () => {
+    const tasks = [node('A', 'B'), node('B', 'A'), node('C', 'C'), node('D')];
+    const result = groupSubtasksUnderParents(tasks);
+    expect(ids(result).sort()).toEqual(['A', 'B', 'C', 'D']);
+  });
+
+  it('composes with sortTasks so parents stay ahead of their children', () => {
+    const parent = node('P', null, { priorityVal: 3, due: '2026-05-20' });
+    const urgentChild = node('P1', 'P', { priorityVal: 1, due: '2026-05-01' });
+    const other = node('O', null, { priorityVal: 2, due: '2026-05-10' });
+    expect(ids(groupSubtasksUnderParents(sortTasks([parent, urgentChild, other])))).toEqual(['O', 'P', 'P1']);
+  });
+});
+
+describe('applyCollapsedParents', () => {
+  const tasks = [node('A'), node('A1', 'A'), node('A1a', 'A1'), node('A2', 'A'), node('B'), node('B1', 'B')];
+  const hierarchy = buildTaskHierarchy(tasks);
+
+  it('keeps every row when nothing is collapsed', () => {
+    const { rows, hiddenInto } = applyCollapsedParents(hierarchy, new Set());
+    expect(ids(rows)).toEqual(ids(hierarchy.tasks));
+    expect(hiddenInto.size).toBe(0);
+  });
+
+  it('hides the descendants of a collapsed parent and maps them to it', () => {
+    const { rows, hiddenInto } = applyCollapsedParents(hierarchy, new Set(['A']));
+    expect(ids(rows)).toEqual(['A', 'B', 'B1']);
+    expect([...hiddenInto]).toEqual([
+      ['A1', 'A'],
+      ['A1a', 'A'],
+      ['A2', 'A'],
+    ]);
+  });
+
+  it('maps grandchildren to the outermost collapsed ancestor', () => {
+    const { rows, hiddenInto } = applyCollapsedParents(hierarchy, new Set(['A1', 'A']));
+    expect(ids(rows)).toEqual(['A', 'B', 'B1']);
+    expect(hiddenInto.get('A1a')).toBe('A');
+  });
+
+  it('only hides the collapsed branch when a nested parent is collapsed', () => {
+    const { rows, hiddenInto } = applyCollapsedParents(hierarchy, new Set(['A1']));
+    expect(ids(rows)).toEqual(['A', 'A1', 'A2', 'B', 'B1']);
+    expect(hiddenInto.get('A1a')).toBe('A1');
+  });
+
+  it('ignores collapsed ids that are not parents in the list', () => {
+    const { rows } = applyCollapsedParents(hierarchy, new Set(['GONE', 'A2']));
+    expect(ids(rows)).toEqual(ids(hierarchy.tasks));
+  });
+});
+
+describe('hasActiveRowFilters', () => {
+  it('is true for search, assignee or status and ignores whitespace-only search', () => {
+    expect(hasActiveRowFilters(defaultFilters())).toBe(false);
+    expect(hasActiveRowFilters(defaultFilters({ search: '   ' }))).toBe(false);
+    expect(hasActiveRowFilters(defaultFilters({ search: 'x' }))).toBe(true);
+    expect(hasActiveRowFilters(defaultFilters({ assignee: 'Alice' }))).toBe(true);
+    expect(hasActiveRowFilters(defaultFilters({ status: 'Todo' }))).toBe(true);
+    expect(hasActiveRowFilters(defaultFilters({ showCompleted: false }))).toBe(false);
+  });
+});
+
+describe('filterTasks with hierarchy', () => {
+  it('keeps a matching sub-issue as a top-level row when its parent is filtered out', () => {
+    const tasks = [node('A', null, { title: 'Parent' }), node('A1', 'A', { title: 'Needle child' })];
+    const matches = filterTasks(tasks, defaultFilters({ search: 'needle' }));
+    const h = buildTaskHierarchy(matches);
+    expect(ids(h.tasks)).toEqual(['A1']);
+    expect(h.depthById.get('A1')).toBe(0);
+  });
+});
+
+describe('reorderWithinHierarchy', () => {
+  const tasks = [node('A'), node('A1', 'A'), node('A2', 'A'), node('B'), node('B1', 'B'), node('C')];
+  const uuids = (order: string[] | null) => order?.map((u) => u.replace('u-', ''));
+
+  it('moves a parent together with its sub-issues', () => {
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-A', 'u-C', true))).toEqual(['B', 'B1', 'C', 'A', 'A1', 'A2']);
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-B', 'u-A', false))).toEqual(['B', 'B1', 'A', 'A1', 'A2', 'C']);
+  });
+
+  it('resolves a drop on a nested row to the sibling block that contains it', () => {
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-C', 'u-A1', false))).toEqual(['C', 'A', 'A1', 'A2', 'B', 'B1']);
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-C', 'u-A1', true))).toEqual(['A', 'A1', 'A2', 'C', 'B', 'B1']);
+  });
+
+  it('reorders a sub-issue among its siblings only', () => {
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-A2', 'u-A1', false))).toEqual(['A', 'A2', 'A1', 'B', 'B1', 'C']);
+    expect(uuids(reorderWithinHierarchy(tasks, 'u-A1', 'u-A2', true))).toEqual(['A', 'A2', 'A1', 'B', 'B1', 'C']);
+  });
+
+  it('refuses to move a sub-issue across a parent boundary', () => {
+    expect(reorderWithinHierarchy(tasks, 'u-A1', 'u-B', false)).toBeNull();
+    expect(reorderWithinHierarchy(tasks, 'u-A1', 'u-B1', true)).toBeNull();
+    expect(reorderWithinHierarchy(tasks, 'u-A1', 'u-A', true)).toBeNull();
+  });
+
+  it('refuses to drop a parent into its own subtree and ignores unknown or identical rows', () => {
+    expect(reorderWithinHierarchy(tasks, 'u-A', 'u-A1', true)).toBeNull();
+    expect(reorderWithinHierarchy(tasks, 'u-A', 'u-A', true)).toBeNull();
+    expect(reorderWithinHierarchy(tasks, 'u-A', 'u-nope', true)).toBeNull();
+  });
+
+  it('behaves like a plain move for flat lists', () => {
+    const flat = [node('X'), node('Y'), node('Z')];
+    expect(uuids(reorderWithinHierarchy(flat, 'u-X', 'u-Z', true))).toEqual(['Y', 'Z', 'X']);
+    expect(uuids(reorderWithinHierarchy(flat, 'u-Z', 'u-X', false))).toEqual(['Z', 'X', 'Y']);
+  });
+
+  it('keeps nested subtrees intact when moving a mid-level parent among its siblings', () => {
+    const deep = [node('A'), node('A1', 'A'), node('A1a', 'A1'), node('A2', 'A')];
+    expect(uuids(reorderWithinHierarchy(deep, 'u-A1', 'u-A2', true))).toEqual(['A', 'A2', 'A1', 'A1a']);
   });
 });

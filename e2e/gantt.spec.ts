@@ -4665,4 +4665,352 @@ test.describe('GanttSmart GCP app', () => {
 
     expect(errors).toEqual([]);
   });
+  test('groups sub-issues under their parent row and indents them by depth', async ({ page }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    // The API sorts ENG-201 ahead of its parent; grouping pulls children (and the grandchild) under ENG-200
+    const rows = page.locator('tr[data-task-id]');
+    await expect(rows).toHaveCount(6);
+    const order = () => rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.taskId));
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-200', 'ENG-201', 'ENG-203', 'ENG-202', 'ENG-210']);
+    await expect(page.locator('tr[data-task-id="ENG-200"]')).toHaveAttribute('data-task-depth', '0');
+    await expect(page.locator('tr[data-task-id="ENG-201"]')).toHaveAttribute('data-task-depth', '1');
+    await expect(page.locator('tr[data-task-id="ENG-203"]')).toHaveAttribute('data-task-depth', '2');
+    await expect(page.locator('tr[data-task-id="ENG-202"]')).toHaveAttribute('data-task-depth', '1');
+    await expect(page.locator('tr[data-task-id="ENG-210"]')).toHaveAttribute('data-task-depth', '0');
+
+    // Each level is indented further to the right in the task column
+    const idX = async (id: string) => (await page.locator(`tr[data-task-id="${id}"] a`).first().boundingBox())!.x;
+    const [x200, x201, x203, x202, x210] = [
+      await idX('ENG-200'),
+      await idX('ENG-201'),
+      await idX('ENG-203'),
+      await idX('ENG-202'),
+      await idX('ENG-210'),
+    ];
+    expect(x201).toBeGreaterThanOrEqual(x200 + 17);
+    expect(x203).toBeGreaterThanOrEqual(x201 + 17);
+    expect(x202).toBeCloseTo(x201, 0);
+    expect(x210).toBeCloseTo(x200, 0);
+
+    // Only rows that have sub-issues get a chevron, and parents start expanded
+    await expect(page.locator('[data-collapse-toggle]')).toHaveCount(2);
+    await expect(page.locator('[data-collapse-toggle="ENG-200"]')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('[data-collapse-toggle="ENG-201"]')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('[data-collapse-toggle="ENG-200"]')).toHaveAccessibleName(
+      'Collapse 2 sub-issues of ENG-200',
+    );
+
+    expect(errors).toEqual([]);
+  });
+
+  test('collapses and expands a parent, keeps the choice across reloads, and never opens the detail panel', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    const toggle = page.locator('[data-collapse-toggle="ENG-200"]');
+    await expect(page.locator('[data-task-bar="ENG-202"]')).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).toHaveAccessibleName('Expand 2 sub-issues of ENG-200');
+    await expect(toggle).toHaveAttribute('title', 'Expand 2 sub-issues');
+    // The whole subtree goes, including the grandchild, and its nested chevron with it
+    for (const id of ['ENG-201', 'ENG-202', 'ENG-203']) {
+      await expect(page.locator(`tr[data-task-id="${id}"]`)).toHaveCount(0);
+      await expect(page.locator(`[data-task-bar="${id}"]`)).toHaveCount(0);
+    }
+    await expect(page.locator('tr[data-task-id="ENG-200"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(3);
+    // Clicking the chevron neither opens the detail panel nor starts anything else
+    await expect(page.getByText('Valve program details')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('gantt_collapsed_parents'))).toBe('["ENG-200"]');
+
+    // Persists across a reload
+    await page.reload();
+    await expect(page.locator('tr[data-task-id="ENG-200"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(3);
+    await expect(page.locator('[data-collapse-toggle="ENG-200"]')).toHaveAttribute('aria-expanded', 'false');
+
+    // Expanding restores the subtree, with the nested parent still expanded
+    await page.locator('[data-collapse-toggle="ENG-200"]').click();
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(6);
+    await expect(page.locator('[data-task-bar="ENG-203"]')).toBeVisible();
+    await expect(page.locator('[data-collapse-toggle="ENG-201"]')).toHaveAttribute('aria-expanded', 'true');
+    expect(await page.evaluate(() => localStorage.getItem('gantt_collapsed_parents'))).toBe('[]');
+
+    // A nested parent collapses on its own and leaves its siblings alone
+    await page.locator('[data-collapse-toggle="ENG-201"]').click();
+    await expect(page.locator('tr[data-task-id="ENG-203"]')).toHaveCount(0);
+    await expect(page.locator('tr[data-task-id="ENG-201"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-202"]')).toBeVisible();
+
+    // Opening a bar still works and the keyboard can operate the chevron
+    await page.locator('[data-task-bar="ENG-200"]').click();
+    await expect(page.getByText('Valve program details')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('Valve program details')).toHaveCount(0);
+    await page.locator('[data-collapse-toggle="ENG-201"]').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('tr[data-task-id="ENG-203"]')).toBeVisible();
+    await expect(page.getByText('Valve program details')).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('rolls dependency arrows up to a collapsed parent bar', async ({ page }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    const arrow = (from: string, to: string) =>
+      page.locator(`svg path[data-arrow-source="${from}"][data-arrow-target="${to}"]`);
+    const allArrows = page.locator('svg path[data-arrow-source]');
+
+    // Expanded: each relation is drawn between the real bars
+    await expect(arrow('ENG-201', 'ENG-210')).toHaveCount(1);
+    await expect(arrow('ENG-202', 'ENG-210')).toHaveCount(1);
+    await expect(arrow('ENG-201', 'ENG-202')).toHaveCount(1);
+    await expect(allArrows).toHaveCount(3);
+
+    // Collapsed: both children's arrows roll up into one ENG-200 -> ENG-210 arrow, and the
+    // sibling-to-sibling relation vanishes because it now sits inside one bar
+    await page.locator('[data-collapse-toggle="ENG-200"]').click();
+    await expect(arrow('ENG-200', 'ENG-210')).toHaveCount(1);
+    await expect(allArrows).toHaveCount(1);
+    await expect(arrow('ENG-201', 'ENG-210')).toHaveCount(0);
+
+    // The rolled-up arrow leaves the parent bar's right edge and enters the target bar's left edge
+    const chartBox = (await page.locator('#gantt-export-target > div').first().boundingBox())!;
+    const parentBox = (await page.locator('[data-task-bar="ENG-200"]').boundingBox())!;
+    const targetBox = (await page.locator('[data-task-bar="ENG-210"]').boundingBox())!;
+    // Paths are `M x y` then H/V segments, so the last two numbers are the final vertical and the target x
+    const coords = (await arrow('ENG-200', 'ENG-210').getAttribute('d'))!.match(/-?[\d.]+/g)!.map(Number);
+    const [startX, startY] = coords;
+    const endX = coords[coords.length - 1];
+    const endY = coords.length > 3 ? coords[coords.length - 2] : startY;
+    expect(startX).toBeCloseTo(parentBox.x + parentBox.width - chartBox.x, 0);
+    expect(startY).toBeCloseTo(parentBox.y + parentBox.height / 2 - chartBox.y, 0);
+    expect(endX).toBeCloseTo(targetBox.x - chartBox.x, 0);
+    expect(endY).toBeCloseTo(targetBox.y + targetBox.height / 2 - chartBox.y, 0);
+
+    // Expanding restores the individual arrows
+    await page.locator('[data-collapse-toggle="ENG-200"]').click();
+    await expect(arrow('ENG-201', 'ENG-210')).toHaveCount(1);
+    await expect(arrow('ENG-200', 'ENG-210')).toHaveCount(0);
+    await expect(allArrows).toHaveCount(3);
+
+    // Collapsing only the nested parent rolls just its own relations up
+    await page.locator('[data-collapse-toggle="ENG-201"]').click();
+    await expect(arrow('ENG-201', 'ENG-210')).toHaveCount(1);
+    await expect(arrow('ENG-201', 'ENG-202')).toHaveCount(1);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('reveals matching sub-issues under collapsed parents while search or filters are active', async ({ page }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    await page.locator('[data-collapse-toggle="ENG-200"]').click();
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(3);
+
+    // A search that matches only sub-issues surfaces them even though their parent is collapsed
+    const search = page.getByPlaceholder('Search tasks…');
+    await search.fill('needle');
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(2);
+    await expect(page.locator('[data-task-bar="ENG-202"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-203"]')).toBeVisible();
+    // Their parents are filtered out, so they read as top-level rows instead of dangling under nothing
+    await expect(page.locator('tr[data-task-id="ENG-202"]')).toHaveAttribute('data-task-depth', '0');
+    await expect(page.locator('tr[data-task-id="ENG-203"]')).toHaveAttribute('data-task-depth', '0');
+    await expect(page.locator('tr[data-task-id="ENG-200"]')).toHaveCount(0);
+
+    // When parent and sub-issues all match, the collapsed parent is forced open and its chevron is inert
+    await search.fill('valve');
+    const parentToggle = page.locator('[data-collapse-toggle="ENG-200"]');
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(3);
+    await expect(page.locator('[data-task-bar="ENG-201"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-202"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-201"]')).toHaveAttribute('data-task-depth', '1');
+    await expect(parentToggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(parentToggle).toBeDisabled();
+
+    // The remembered collapse comes back as soon as the search is cleared
+    await search.fill('');
+    await expect(page.locator('tr[data-task-id]')).toHaveCount(3);
+    await expect(page.locator('tr[data-task-id="ENG-201"]')).toHaveCount(0);
+    await expect(parentToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(parentToggle).toBeEnabled();
+
+    // Assignee filters count as filters too: Nate's sub-issues show up under the collapsed parent
+    await page.getByRole('button', { name: 'Filter', exact: true }).click();
+    await page.getByRole('button', { name: 'Any assignee' }).click();
+    await page.getByRole('option', { name: /Nate Jones/ }).click();
+    await expect(page.locator('[data-task-bar="ENG-202"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-203"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-210"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-200"]')).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps hierarchy intact when reordering rows with the keyboard', async ({ page }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    const rows = page.locator('tr[data-task-id]');
+    const order = () => rows.evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.taskId));
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-200', 'ENG-201', 'ENG-203', 'ENG-202', 'ENG-210']);
+
+    // A parent moves as a block with its whole subtree, stepping over its own sub-issues
+    await page.locator('tr[data-task-id="ENG-200"]').focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-210', 'ENG-200', 'ENG-201', 'ENG-203', 'ENG-202']);
+
+    // A sub-issue swaps with its sibling and takes its own sub-issues along
+    await page.locator('tr[data-task-id="ENG-201"]').focus();
+    await page.keyboard.press('Alt+ArrowDown');
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-210', 'ENG-200', 'ENG-202', 'ENG-201', 'ENG-203']);
+
+    // A sub-issue can't leave its parent: nothing moves and a toast explains why
+    await page.locator('tr[data-task-id="ENG-202"]').focus();
+    await page.keyboard.press('Alt+ArrowUp');
+    await expect(page.getByText('Sub-issues can only be reordered within their parent')).toBeVisible();
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-210', 'ENG-200', 'ENG-202', 'ENG-201', 'ENG-203']);
+
+    // The custom order survives a reload and is still grouped
+    await page.reload();
+    await expect(rows).toHaveCount(6);
+    await expect.poll(order).toEqual(['ENG-220', 'ENG-210', 'ENG-200', 'ENG-202', 'ENG-201', 'ENG-203']);
+
+    expect(errors).toEqual([]);
+  });
 });
+
+/**
+ * Mock a project with a two-level hierarchy:
+ * ENG-200 (parent) > ENG-201 > ENG-203, ENG-200 > ENG-202, plus standalone ENG-210 and ENG-220.
+ * ENG-201 blocks ENG-210 and ENG-202; ENG-202 blocks ENG-210.
+ * The API's priority/due sort lists ENG-201 before its parent, so grouping has to pull it under ENG-200.
+ */
+async function mockSubtaskProject(page: Page) {
+  await page.route('https://fonts.googleapis.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/css', body: '' }),
+  );
+  await page.route('https://fonts.gstatic.com/**', (route) => route.fulfill({ status: 200, body: '' }));
+  await page.addInitScript(() => {
+    localStorage.setItem('gantt_onboarding_done', '1');
+    localStorage.setItem('gantt_theme', 'dark');
+    localStorage.setItem('linear_selected_project', 'proj-1');
+  });
+  await page.route('**/api/me', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+    }),
+  );
+
+  const issue = (
+    n: number,
+    title: string,
+    priority: number,
+    dueInDays: number,
+    assignee: string,
+    parent: number | null,
+    description = '',
+  ) => ({
+    id: `uuid-${n}`,
+    identifier: `ENG-${n}`,
+    title,
+    description,
+    dueDate: isoOffsetDays(dueInDays),
+    url: `https://linear.app/bluecoreenergy/issue/ENG-${n}`,
+    priority,
+    state: { name: 'Todo', type: 'unstarted' },
+    createdAt: '2026-01-01T00:00:00Z',
+    completedAt: null,
+    canceledAt: null,
+    assignee: { name: assignee },
+    team: { id: 'team-1' },
+    projectMilestone: null,
+    parent: parent === null ? null : { id: `uuid-${parent}`, identifier: `ENG-${parent}` },
+  });
+  const relation = (n: number, blocks: number[], blockedBy: number[], children: number[]) => ({
+    id: `uuid-${n}`,
+    identifier: `ENG-${n}`,
+    relations: {
+      nodes: [
+        ...blocks.map((b) => ({ type: 'blocks', relatedIssue: { identifier: `ENG-${b}` } })),
+        ...blockedBy.map((b) => ({ type: 'blocked_by', relatedIssue: { identifier: `ENG-${b}` } })),
+      ],
+    },
+    children: {
+      nodes: children.map((c) => ({
+        id: `uuid-${c}`,
+        completedAt: null,
+        state: { name: 'Todo', type: 'unstarted' },
+      })),
+    },
+  });
+
+  await page.route('**/api/linear/graphql', async (route) => {
+    const payload = route.request().postDataJSON() as { query?: string } | null;
+    const query = payload?.query ?? '';
+    const respond = (data: unknown) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+    if (query.includes('projects(')) {
+      return respond({ projects: { nodes: [{ id: 'proj-1', name: 'Hierarchy Project' }] } });
+    }
+    if (query.includes('project(id:')) {
+      return respond({
+        project: {
+          name: 'Hierarchy Project',
+          startDate: isoOffsetDays(-5),
+          targetDate: isoOffsetDays(30),
+          projectMilestones: { nodes: [] },
+          issues: {
+            nodes: [
+              issue(200, 'Valve program', 2, 12, 'Andrew Phillips', null, 'Valve program details'),
+              issue(201, 'Valve seat design', 1, 4, 'Andrew Phillips', 200),
+              issue(202, 'Valve needle test', 3, 8, 'Nate Jones', 200),
+              issue(203, 'Needle calibration', 3, 9, 'Nate Jones', 201),
+              issue(210, 'Commissioning plan', 2, 16, 'Nate Jones', null),
+              issue(220, 'Urgent standalone', 1, 2, 'Andrew Phillips', null),
+            ],
+          },
+          doneIssues: { nodes: [] },
+        },
+      });
+    }
+    if (query.includes('relations')) {
+      return respond({
+        issues: {
+          nodes: [
+            relation(200, [], [], [201, 202]),
+            relation(201, [210, 202], [], [203]),
+            relation(202, [210], [201], []),
+            relation(203, [], [], []),
+            relation(210, [], [201, 202], []),
+            relation(220, [], [], []),
+          ],
+        },
+      });
+    }
+    if (query.includes('workflowStates')) {
+      return respond({
+        workflowStates: { nodes: [{ id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 }] },
+      });
+    }
+    return route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+  });
+}

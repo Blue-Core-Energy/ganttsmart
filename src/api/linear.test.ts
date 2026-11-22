@@ -761,6 +761,82 @@ function estimateLinearQueryComplexity(query: string): number {
   return Math.ceil(parseSelectionSet().cost);
 }
 
+describe('fetchIssues sub-issue parents', () => {
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+  });
+
+  async function fetchWithParents() {
+    const queries: string[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: { query: string }) => {
+      queries.push(body.query);
+      if (body.query.includes('project(id:')) {
+        return jsonResponse({
+          project: {
+            name: 'Hierarchy',
+            startDate: null,
+            targetDate: null,
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                makeIssueNode({ id: 'uuid-1', identifier: 'ENG-1', title: 'Parent', parent: null }),
+                makeIssueNode({
+                  id: 'uuid-2',
+                  identifier: 'ENG-2',
+                  title: 'Child',
+                  parent: { id: 'uuid-1', identifier: 'ENG-1' },
+                }),
+                // Older payloads (or issues outside the selection) may omit `parent` entirely
+                makeIssueNode({ id: 'uuid-3', identifier: 'ENG-3', title: 'Plain' }),
+              ],
+            },
+            doneIssues: {
+              nodes: [
+                makeIssueNode({
+                  id: 'uuid-4',
+                  identifier: 'ENG-4',
+                  title: 'Done child',
+                  state: { name: 'Done', type: 'completed' },
+                  completedAt: '2026-11-05T00:00:00Z',
+                  parent: { id: 'uuid-1', identifier: 'ENG-1' },
+                }),
+              ],
+            },
+          },
+        });
+      }
+      return jsonResponse({ issues: { nodes: [] } });
+    });
+    const result = await fetchIssues('token', 'proj-1');
+    return { result, queries };
+  }
+
+  it('maps each issue parent to the parent identifier for active and completed issues', async () => {
+    const { result } = await fetchWithParents();
+    const byId = new Map(result.tasks.map((t) => [t.id, t]));
+    expect(byId.get('ENG-1')?.parentId).toBeNull();
+    expect(byId.get('ENG-2')?.parentId).toBe('ENG-1');
+    expect(byId.get('ENG-3')?.parentId).toBeNull();
+    expect(byId.get('ENG-4')?.parentId).toBe('ENG-1');
+  });
+
+  it('selects parent { id identifier } on both project issue connections', async () => {
+    const { queries } = await fetchWithParents();
+    const projectQuery = queries.find((q) => q.includes('project(id:'))!;
+    expect(projectQuery.match(/parent \{ id identifier \}/g)).toHaveLength(2);
+  });
+
+  it('keeps the project issues query far below Linear 10,000 complexity limit with parent selected', async () => {
+    const { queries } = await fetchWithParents();
+    const projectQuery = queries.find((q) => q.includes('project(id:'))!;
+    const withParent = estimateLinearQueryComplexity(projectQuery);
+    const withoutParent = estimateLinearQueryComplexity(projectQuery.replaceAll('parent { id identifier }', ''));
+    expect(withParent).toBeLessThan(10000);
+    // parent is a single object per issue: a few percent of the query, not a multiplier
+    expect(withParent - withoutParent).toBeLessThan(withoutParent * 0.25);
+  });
+});
+
 describe('FEEDBACK_TARGET_QUERY complexity', () => {
   it('stays well below Linear 10,000 single-query complexity limit without nested label connections', () => {
     expect(FEEDBACK_TARGET_QUERY).not.toMatch(/\blabels\s*\(/);

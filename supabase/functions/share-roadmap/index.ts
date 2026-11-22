@@ -153,6 +153,7 @@ interface LinearIssueNode {
   canceledAt?: string | null;
   state: { name: string; type: string } | null;
   assignee: { name: string } | null;
+  parent?: { identifier: string } | null;
 }
 
 function isIgnoredIssueState(
@@ -188,6 +189,7 @@ interface MappedTask {
   completedChildren: number;
   completedAt: string | undefined;
   isDueImplicit: boolean | undefined;
+  parentId: string | null;
 }
 
 interface CachedRoadmapData {
@@ -220,6 +222,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
           id identifier title description dueDate priority url completedAt canceledAt
           state { name type }
           assignee { name }
+          parent { identifier }
         }
       }
       doneIssues: issues(first: 100, filter: { completedAt: { null: false }, canceledAt: { null: true } }) {
@@ -227,6 +230,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
           id identifier title description dueDate priority url completedAt canceledAt
           state { name type }
           assignee { name }
+          parent { identifier }
         }
       }
     }
@@ -275,6 +279,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       completedChildren: 0,
       completedAt: n.completedAt || undefined,
       isDueImplicit: isDueImplicit || undefined,
+      parentId: n.parent?.identifier ?? null,
     };
   }
 

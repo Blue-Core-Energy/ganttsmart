@@ -1,3 +1,5 @@
+import type { Task } from '@/types';
+
 /** Horizontal run leaving a source bar and entering a target bar */
 export const ARROW_STUB = 12;
 
@@ -662,4 +664,53 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
     midXOffset,
     laneYOffset,
   }));
+}
+
+export interface DependencyEdge {
+  /** Id of the task whose bar the arrow leaves — a collapsed ancestor when the real source is hidden */
+  sourceId: string;
+  /** Id of the task whose bar the arrow enters — a collapsed ancestor when the real target is hidden */
+  targetId: string;
+  /** The task-level dependencies this arrow stands for (more than one when several roll up together) */
+  members: Array<{ sourceId: string; targetId: string }>;
+  /** True when any member involves a cross-project task */
+  crossProject: boolean;
+}
+
+/**
+ * Turn every `blocks` relation into the arrow to draw. A relation with a hidden end (under a collapsed
+ * parent) attaches to the collapsed ancestor's bar instead; relations that end up on a single bar (a
+ * parent and its own sub-issue, or two siblings under one collapsed parent) are dropped, and relations
+ * that land on the same pair of bars are merged into one arrow.
+ */
+export function resolveDependencyEdges(
+  tasks: Task[],
+  hiddenInto: ReadonlyMap<string, string> = new Map(),
+): DependencyEdge[] {
+  const taskById = new Map(tasks.map((t) => [t.id, t]));
+  const edges = new Map<string, DependencyEdge>();
+
+  for (const task of tasks) {
+    for (const blockedId of task.blocks) {
+      const blocked = taskById.get(blockedId);
+      if (!blocked) continue;
+
+      const sourceId = hiddenInto.get(task.id) ?? task.id;
+      const targetId = hiddenInto.get(blockedId) ?? blockedId;
+      if (sourceId === targetId) continue;
+
+      const key = `${sourceId}->${targetId}`;
+      let edge = edges.get(key);
+      if (!edge) {
+        edge = { sourceId, targetId, members: [], crossProject: false };
+        edges.set(key, edge);
+      }
+      if (!edge.members.some((m) => m.sourceId === task.id && m.targetId === blockedId)) {
+        edge.members.push({ sourceId: task.id, targetId: blockedId });
+      }
+      if (task.isExternal || blocked.isExternal) edge.crossProject = true;
+    }
+  }
+
+  return [...edges.values()];
 }

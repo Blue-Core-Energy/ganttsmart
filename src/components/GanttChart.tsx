@@ -3,7 +3,8 @@ import type { InlineEditHandlers, Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
-import { buildArrowPath } from '@/utils/dependencyArrows';
+import { buildArrowPath, resolveDependencyEdges } from '@/utils/dependencyArrows';
+import { loadCollapsedParents, saveCollapsedParents } from '@/utils/collapsedParents';
 import {
   anchorDayOffset,
   anchoredScrollLeft,
@@ -24,7 +25,7 @@ import {
   type ColumnKey,
   type ColumnWidths,
 } from '@/utils/scheduleColumns';
-import { computeDepViolations } from '@/utils/tasks';
+import { applyCollapsedParents, buildTaskHierarchy, computeDepViolations } from '@/utils/tasks';
 import ColumnPicker from './ColumnPicker';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
@@ -57,6 +58,8 @@ interface Props {
   onSelectProject?: (projectId: string) => void;
   /** Name of the project being viewed, shown by the optional Project column */
   projectName?: string;
+  /** Show every row even under a collapsed parent — set while search or filters are narrowing the list */
+  ignoreCollapsed?: boolean;
 }
 
 // Resize handle component
@@ -115,6 +118,7 @@ export default function GanttChart({
   allowExternalEdits = false,
   onSelectProject,
   projectName,
+  ignoreCollapsed = false,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
@@ -140,35 +144,6 @@ export default function GanttChart({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
-
-  // A selection only stays active while its dependency is still drawn: both tasks rendered and the
-  // source still blocks the target. Otherwise nothing stays dimmed or highlighted for a missing arrow.
-  const activeSelectedArrow = useMemo(() => {
-    if (!selectedArrow) return null;
-    const source = tasks.find((t) => t.id === selectedArrow.sourceId);
-    const targetRendered = tasks.some((t) => t.id === selectedArrow.targetId);
-    return source && targetRendered && source.blocks.includes(selectedArrow.targetId) ? selectedArrow : null;
-  }, [selectedArrow, tasks]);
-
-  useEffect(() => {
-    if (selectedArrow && !activeSelectedArrow) setSelectedArrow(null);
-  }, [selectedArrow, activeSelectedArrow]);
-
-  useEffect(() => {
-    if (!activeSelectedArrow) return;
-    const onDocClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (target?.closest('[data-arrow-hit-target]')) return;
-      setSelectedArrow(null);
-    };
-    document.addEventListener('click', onDocClick);
-    return () => document.removeEventListener('click', onDocClick);
-  }, [activeSelectedArrow]);
-
-  const highlightedTaskIds = useMemo(() => {
-    if (!activeSelectedArrow) return undefined;
-    return new Set([activeSelectedArrow.sourceId, activeSelectedArrow.targetId]);
-  }, [activeSelectedArrow]);
 
   const [isNarrowViewport, setIsNarrowViewport] = useState(() =>
     typeof window !== 'undefined' ? window.innerWidth < 768 : false,
@@ -486,6 +461,57 @@ export default function GanttChart({
     }
     return computeDepViolations(combined, today);
   }, [tasks, externalTasksForViolations, today]);
+
+  // Sub-issues sit under their parent; collapsing a parent hides its descendants. The chart's date range
+  // and dependency violations still use every task, so toggling never shifts the timeline.
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(loadCollapsedParents);
+  const hierarchy = useMemo(() => buildTaskHierarchy(tasks), [tasks]);
+  const { rows: visibleRows, hiddenInto } = useMemo(
+    () => applyCollapsedParents(hierarchy, ignoreCollapsed ? new Set() : collapsedParents),
+    [hierarchy, collapsedParents, ignoreCollapsed],
+  );
+  const dependencyEdges = useMemo(
+    () => resolveDependencyEdges(hierarchy.tasks, hiddenInto),
+    [hierarchy.tasks, hiddenInto],
+  );
+  // A selection only stays active while its dependency is still drawn (including rolled-up edges on
+  // collapsed parents). Otherwise nothing stays dimmed or highlighted for a missing arrow.
+  const activeSelectedArrow = useMemo(() => {
+    if (!selectedArrow) return null;
+    return dependencyEdges.some(
+      (e) => e.sourceId === selectedArrow.sourceId && e.targetId === selectedArrow.targetId,
+    )
+      ? selectedArrow
+      : null;
+  }, [selectedArrow, dependencyEdges]);
+
+  useEffect(() => {
+    if (selectedArrow && !activeSelectedArrow) setSelectedArrow(null);
+  }, [selectedArrow, activeSelectedArrow]);
+
+  useEffect(() => {
+    if (!activeSelectedArrow) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-arrow-hit-target]')) return;
+      setSelectedArrow(null);
+    };
+    document.addEventListener('click', onDocClick);
+    return () => document.removeEventListener('click', onDocClick);
+  }, [activeSelectedArrow]);
+
+  const highlightedTaskIds = useMemo(() => {
+    if (!activeSelectedArrow) return undefined;
+    return new Set([activeSelectedArrow.sourceId, activeSelectedArrow.targetId]);
+  }, [activeSelectedArrow]);
+  const toggleCollapsed = useCallback((taskId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(taskId)) next.add(taskId);
+      saveCollapsedParents(next);
+      return next;
+    });
+  }, []);
 
   const { chartStart, totalDays } = useMemo(() => {
     if (!tasks.length) return { chartStart: today, totalDays: 0 };
@@ -963,10 +989,16 @@ export default function GanttChart({
             </tr>
           </thead>
           <tbody>
-            {tasks.map((task) => (
+            {visibleRows.map((task) => (
               <GanttRow
                 key={task.id}
                 task={task}
+                depth={hierarchy.depthById.get(task.id) ?? 0}
+                childCount={hierarchy.childIdsById.get(task.id)?.length ?? 0}
+                showTreeGutter={hierarchy.childIdsById.size > 0}
+                collapsed={!ignoreCollapsed && collapsedParents.has(task.id)}
+                toggleLocked={ignoreCollapsed}
+                onToggleCollapse={toggleCollapsed}
                 chartStart={chartStart}
                 totalDays={totalDays}
                 today={today}
@@ -1016,7 +1048,7 @@ export default function GanttChart({
         })}
 
         <DependencyArrows
-          tasks={tasks}
+          edges={dependencyEdges}
           containerRef={innerRef}
           depViolations={depViolations}
           dayWidth={dayWidth}
