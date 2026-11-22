@@ -11,6 +11,8 @@ import {
   saveColumnWidths,
   saveVisibleColumns,
   totalColumnWidth,
+  computeStickyColumnOffsets,
+  MOBILE_BREAKPOINT,
   type ColumnKey,
 } from './scheduleColumns';
 
@@ -157,5 +159,69 @@ describe('totalColumnWidth', () => {
     expect(totalColumnWidth(visible, DEFAULT_COLUMN_WIDTHS)).toBe(
       DEFAULT_COLUMN_WIDTHS.task + DEFAULT_COLUMN_WIDTHS.due,
     );
+  });
+});
+
+describe('computeStickyColumnOffsets', () => {
+  const visible: ColumnKey[] = ['task', 'assignee', 'status', 'due'];
+  const widths = { ...DEFAULT_COLUMN_WIDTHS, task: 300, assignee: 128, status: 128, due: 86 };
+
+  it('computes cumulative offsets for all visible columns on desktop', () => {
+    const result = computeStickyColumnOffsets(visible, widths, { viewportWidth: 1280 });
+    expect(result.onlyTaskFrozen).toBe(false);
+    expect(result.lastFrozenKey).toBe('due');
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.assignee).toBe(300);
+    expect(result.offsets.status).toBe(428);
+    expect(result.offsets.due).toBe(556);
+  });
+
+  it('updates offsets dynamically when a column is resized', () => {
+    const resizedWidths = { ...widths, task: 350 };
+    const result = computeStickyColumnOffsets(visible, resizedWidths, { viewportWidth: 1280 });
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.assignee).toBe(350);
+    expect(result.offsets.status).toBe(350 + 128);
+    expect(result.offsets.due).toBe(350 + 128 + 128);
+    expect(result.lastFrozenKey).toBe('due');
+  });
+
+  it('freezes ONLY the task column on narrow/mobile viewports (< 768px)', () => {
+    const result = computeStickyColumnOffsets(visible, widths, { viewportWidth: 640 });
+    expect(result.onlyTaskFrozen).toBe(true);
+    expect(result.lastFrozenKey).toBe('task');
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.assignee).toBeUndefined();
+    expect(result.offsets.status).toBeUndefined();
+    expect(result.offsets.due).toBeUndefined();
+  });
+
+  it('freezes ONLY the task column when isNarrow is explicitly set', () => {
+    const result = computeStickyColumnOffsets(visible, widths, { isNarrow: true, viewportWidth: 1280 });
+    expect(result.onlyTaskFrozen).toBe(true);
+    expect(result.lastFrozenKey).toBe('task');
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.assignee).toBeUndefined();
+  });
+
+  it('falls back to freezing only the task column when frozen columns would consume > 65% of viewport', () => {
+    // Total width is 642. At viewport 800, 642 / 800 = 80.25% > 65%
+    const result = computeStickyColumnOffsets(visible, widths, { viewportWidth: 800 });
+    expect(result.onlyTaskFrozen).toBe(true);
+    expect(result.lastFrozenKey).toBe('task');
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.assignee).toBeUndefined();
+  });
+
+  it('correctly sets lastFrozenKey for customized visible column lists', () => {
+    const customVisible: ColumnKey[] = ['task', 'priority'];
+    const result = computeStickyColumnOffsets(customVisible, widths, { viewportWidth: 1440 });
+    expect(result.lastFrozenKey).toBe('priority');
+    expect(result.offsets.task).toBe(0);
+    expect(result.offsets.priority).toBe(widths.task);
+  });
+
+  it('respects MOBILE_BREAKPOINT constant at 768', () => {
+    expect(MOBILE_BREAKPOINT).toBe(768);
   });
 });

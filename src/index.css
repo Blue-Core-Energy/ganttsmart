@@ -238,6 +238,37 @@ tr:focus-visible {
   }
 }
 
+/* Opaque backgrounds for frozen schedule table cells to prevent timeline bars/arrows bleeding through */
+.gantt-sticky-cell {
+  background-color: var(--color-bg-primary);
+}
+.group:hover .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-accent) 3%, var(--color-bg-primary));
+}
+.group:focus-within .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-primary));
+}
+.group[data-external-task] .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary));
+}
+.group[data-external-task]:hover .gantt-sticky-cell {
+  background-color: color-mix(
+    in srgb,
+    var(--color-accent) 3%,
+    color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary))
+  );
+}
+.group[data-external-task]:focus-within .gantt-sticky-cell {
+  background-color: color-mix(
+    in srgb,
+    var(--color-accent) 4%,
+    color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary))
+  );
+}
+.group[data-highlighted='true'] .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-primary));
+}
+
 /* Print styles */
 @media print {
   body {
@@ -245,6 +276,11 @@ tr:focus-visible {
     color: #1a1a1a !important;
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+
+  .gantt-sticky-cell {
+    background-color: transparent !important;
+    position: static !important;
   }
 
   .auth-overlay,

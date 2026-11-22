@@ -111,3 +111,75 @@ export function saveColumnWidths(widths: ColumnWidths): void {
 export function totalColumnWidth(visible: ColumnKey[], widths: ColumnWidths): number {
   return visible.reduce((sum, key) => sum + widths[key], 0);
 }
+
+export const MOBILE_BREAKPOINT = 768;
+
+/**
+ * Maximum fraction of viewport/container width that frozen columns may consume before
+ * falling back to freezing only the primary task column.
+ */
+export const MAX_FROZEN_WIDTH_RATIO = 0.65;
+
+export interface StickyColumnOffsets {
+  /** Sticky left offset in pixels, or undefined if the column is not sticky */
+  offsets: Partial<Record<ColumnKey, number>>;
+  /** The rightmost column that is frozen */
+  lastFrozenKey: ColumnKey;
+  /** Whether only the primary task column is frozen */
+  onlyTaskFrozen: boolean;
+}
+
+/**
+ * Computes sticky `left` offsets for schedule columns.
+ * On desktop (viewport >= 768px and columns don't crowd the timeline),
+ * all visible schedule columns are pinned with cumulative left offsets.
+ * On narrow/mobile viewports (< 768px) or when all frozen columns would take
+ * more than MAX_FROZEN_WIDTH_RATIO of the viewport, falls back to freezing
+ * ONLY the primary 'task' column at left: 0 so the timeline remains visible and reachable.
+ */
+export function computeStickyColumnOffsets(
+  visibleColumns: ColumnKey[],
+  colWidths: ColumnWidths,
+  options?: {
+    isNarrow?: boolean;
+    viewportWidth?: number;
+  },
+): StickyColumnOffsets {
+  const isNarrow =
+    options?.isNarrow ?? (options?.viewportWidth !== undefined ? options.viewportWidth < MOBILE_BREAKPOINT : false);
+
+  const totalWidth = totalColumnWidth(visibleColumns, colWidths);
+  const onlyTaskFrozen =
+    isNarrow ||
+    (options?.viewportWidth !== undefined &&
+      options.viewportWidth > 0 &&
+      totalWidth > options.viewportWidth * MAX_FROZEN_WIDTH_RATIO);
+
+  const offsets: Partial<Record<ColumnKey, number>> = {};
+
+  if (onlyTaskFrozen) {
+    if (visibleColumns.includes('task')) {
+      offsets.task = 0;
+    }
+    return {
+      offsets,
+      lastFrozenKey: 'task',
+      onlyTaskFrozen: true,
+    };
+  }
+
+  let currentLeft = 0;
+  let lastFrozenKey: ColumnKey = visibleColumns[0] ?? 'task';
+
+  for (const key of visibleColumns) {
+    offsets[key] = currentLeft;
+    lastFrozenKey = key;
+    currentLeft += colWidths[key] ?? getColumnDef(key).defaultWidth;
+  }
+
+  return {
+    offsets,
+    lastFrozenKey,
+    onlyTaskFrozen: false,
+  };
+}
