@@ -1,8 +1,11 @@
-import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
+import type { Project } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import { isSafeUrl } from '@/utils/url';
+import CustomDropdown from './CustomDropdown';
+import type { DropdownOption } from './CustomDropdown';
 import FeedbackDialog from './FeedbackDialog';
 import { toastError, toastSuccess } from './toastStore';
 
@@ -19,6 +22,8 @@ interface Props {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   projectId: string;
+  projects: Project[];
+  onSelectProject: (id: string) => void;
   linearToken?: string;
   linearProjectUrl?: string | null;
   isLinkedInLinear?: boolean;
@@ -34,6 +39,24 @@ const iconBtn =
 
 const ghostBtn =
   'flex items-center gap-1.5 px-2 md:px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
+
+function FolderIcon() {
+  return (
+    <svg
+      width="13"
+      height="13"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="text-text-muted shrink-0"
+    >
+      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
+    </svg>
+  );
+}
 
 function SunIcon() {
   return (
@@ -177,6 +200,8 @@ export default memo(function Header({
   theme,
   onThemeChange,
   projectId,
+  projects,
+  onSelectProject,
   linearToken,
   linearProjectUrl,
   isLinkedInLinear,
@@ -190,6 +215,11 @@ export default memo(function Header({
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
   const [exporting, setExporting] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+
+  const projectOptions: DropdownOption[] = useMemo(
+    () => projects.map((p) => ({ value: p.id, label: p.name, icon: <FolderIcon /> })),
+    [projects],
+  );
 
   // Close menus on outside click or Escape
   useEffect(() => {
@@ -256,12 +286,25 @@ export default memo(function Header({
         <span className="hidden sm:inline text-sm font-semibold text-text-primary tracking-tight whitespace-nowrap">
           Ganttsmart
         </span>
-        {projectName && (
+        {/* The switcher renders from the project list, not the loaded name, so a project that
+            fails to load can still be switched away from */}
+        {(projectName || projects.length > 0) && (
           <>
             <span className="hidden sm:inline text-text-muted text-sm">/</span>
-            <span className="hidden sm:inline text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
-              {projectName}
-            </span>
+            <CustomDropdown
+              variant="breadcrumb"
+              value={projectId}
+              options={projectOptions}
+              placeholder={projectName || 'Select project'}
+              placeholderIcon={<FolderIcon />}
+              onChange={onSelectProject}
+              className="min-w-0"
+              required
+              searchable
+              searchPlaceholder="Search projects…"
+              emptyMessage="No projects found"
+              ariaLabel="Projects"
+            />
             <span className="hidden xl:inline text-text-muted text-sm">/</span>
             <span className="hidden xl:inline text-sm text-text-primary font-medium whitespace-nowrap">Roadmap</span>
           </>

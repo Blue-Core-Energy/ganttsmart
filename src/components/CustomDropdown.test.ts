@@ -40,4 +40,20 @@ describe('CustomDropdown', () => {
 
     expect(html).toContain('All Projects');
   });
+
+  it('renders a borderless text trigger with a title for the breadcrumb variant', () => {
+    const html = renderToStaticMarkup(
+      createElement(CustomDropdown, {
+        value: 'proj-2',
+        options,
+        placeholder: 'All Projects',
+        onChange: vi.fn(),
+        required: true,
+        variant: 'breadcrumb',
+      }),
+    );
+
+    expect(html).toContain('Beta Project');
+    expect(html).toContain('title="Beta Project"');
+  });
 });

@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Filters, Project } from '@/types';
+import type { Filters } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import CustomDropdown from './CustomDropdown';
 import type { DropdownOption } from './CustomDropdown';
 import DateRangePicker from './DateRangePicker';
 
 interface Props {
-  projects: Project[];
-  selectedProjectId: string;
-  onSelectProject: (id: string) => void;
   assignees: string[];
   statuses: string[];
   filters: Filters;
   onFiltersChange: (f: Filters) => void;
   totalCount: number;
   filteredCount: number;
-  hideProjectSelector?: boolean;
   showBaselines?: boolean;
   onShowBaselinesChange?: (show: boolean) => void;
   externalCount?: number;
@@ -44,24 +40,6 @@ function SearchIcon() {
     >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
-    </svg>
-  );
-}
-
-function FolderIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-text-muted shrink-0"
-    >
-      <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" />
     </svg>
   );
 }
@@ -221,16 +199,12 @@ function XIcon() {
 }
 
 export default function FilterBar({
-  projects,
-  selectedProjectId,
-  onSelectProject,
   assignees,
   statuses,
   filters,
   onFiltersChange,
   totalCount,
   filteredCount,
-  hideProjectSelector,
   showBaselines,
   onShowBaselinesChange,
   externalCount = 0,
@@ -333,11 +307,6 @@ export default function FilterBar({
   }, [filterOpen, isInsideFilter, closeFilter]);
 
   // Build dropdown options
-  const projectOptions: DropdownOption[] = useMemo(
-    () => projects.map((p) => ({ value: p.id, label: p.name, icon: <FolderIcon /> })),
-    [projects],
-  );
-
   const assigneeOptions: DropdownOption[] = useMemo(
     () => assignees.map((a) => ({ value: a, label: a, icon: <Avatar name={a} size="sm" /> })),
     [assignees],
@@ -349,7 +318,11 @@ export default function FilterBar({
   );
 
   return (
-    <div ref={rootRef} className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20">
+    <div
+      ref={rootRef}
+      data-testid="filter-bar"
+      className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20"
+    >
       {/* Main filter row */}
       <div className="min-h-12 py-1.5 flex flex-wrap items-center gap-2 px-4">
         {/* Search */}
@@ -365,22 +338,6 @@ export default function FilterBar({
         </div>
 
         <div className="w-px h-5 bg-border-primary shrink-0" />
-
-        {/* Project */}
-        {!hideProjectSelector && (
-          <CustomDropdown
-            value={selectedProjectId}
-            options={projectOptions}
-            placeholder="All Projects"
-            placeholderIcon={<FolderIcon />}
-            onChange={(v) => onSelectProject(v)}
-            required
-            searchable
-            searchPlaceholder="Search projects…"
-            emptyMessage="No projects found"
-            ariaLabel="Projects"
-          />
-        )}
 
         {/* Filters — assignee, status, date range and completed visibility.
             The panel itself is rendered after the chip row so it can't cover it. */}

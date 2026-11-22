@@ -177,18 +177,14 @@ export default function SharedView() {
           {cachedAt && <p className="text-xs text-text-muted mt-1">Last updated {timeAgo(cachedAt)}</p>}
         </div>
 
-        {/* Filters (no project selector) */}
+        {/* Filters */}
         <FilterBar
-          projects={[]}
-          selectedProjectId=""
-          onSelectProject={() => {}}
           assignees={assignees}
           statuses={statuses}
           filters={filters}
           onFiltersChange={setFilters}
           totalCount={tasks.length}
           filteredCount={filteredTasks.length}
-          hideProjectSelector
         />
 
         <StatsRow tasks={filteredTasks} />

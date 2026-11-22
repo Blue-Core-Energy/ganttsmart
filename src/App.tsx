@@ -301,6 +301,8 @@ function GanttView({
         theme={theme}
         onThemeChange={setTheme}
         projectId={selectedProjectId}
+        projects={projects}
+        onSelectProject={selectProject}
         linearToken={linearToken}
         linearProjectUrl={linearProjectUrl}
         isLinkedInLinear={isLinkedInLinear}
@@ -311,9 +313,6 @@ function GanttView({
       />
 
       <FilterBar
-        projects={projects}
-        selectedProjectId={selectedProjectId}
-        onSelectProject={selectProject}
         assignees={assignees}
         statuses={statuses}
         filters={filters}
