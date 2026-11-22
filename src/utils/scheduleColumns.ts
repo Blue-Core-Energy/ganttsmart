@@ -14,6 +14,7 @@ export interface ColumnDef {
 
 /** Canonical left-to-right order. Showing or hiding a column never reorders the rest. */
 export const COLUMN_DEFS: ColumnDef[] = [
+  { key: 'id', label: 'ID', pickerLabel: 'Issue ID', defaultWidth: 96, minWidth: 70 },
   { key: 'task', label: 'Issue', defaultWidth: 300, minWidth: 220, required: true },
   { key: 'assignee', label: 'Assignee', defaultWidth: 128, minWidth: 90 },
   { key: 'status', label: 'Status', defaultWidth: 128, minWidth: 90 },
@@ -22,10 +23,9 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { key: 'priority', label: 'Priority', defaultWidth: 96, minWidth: 80 },
   { key: 'project', label: 'Project', defaultWidth: 140, minWidth: 100 },
   { key: 'progress', label: 'Sub-issues', pickerLabel: 'Sub-issue progress', defaultWidth: 96, minWidth: 70 },
-  { key: 'id', label: 'ID', pickerLabel: 'Issue ID', defaultWidth: 96, minWidth: 70 },
 ];
 
-export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['task', 'assignee', 'status', 'due'];
+export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
 
 export type ColumnWidths = Record<ColumnKey, number>;
 
@@ -40,6 +40,9 @@ export const DEFAULT_COLUMN_WIDTHS: ColumnWidths = Object.fromEntries(
 // Last write wins across tabs, which is fine for a preference of this kind.
 const VISIBLE_KEY = 'gantt_columns';
 const WIDTHS_KEY = 'gantt_column_widths';
+// One-shot flag: the ID column became a default column, so saved selections from before
+// that get it added once. Never re-added afterwards, so hiding it sticks.
+const ID_MIGRATED_KEY = 'gantt_columns_id_added';
 
 const defByKey = new Map(COLUMN_DEFS.map((c) => [c.key, c]));
 
@@ -58,11 +61,26 @@ export function normalizeVisibleColumns(keys: unknown): ColumnKey[] {
   return ordered.length > 1 ? ordered : [...DEFAULT_VISIBLE_COLUMNS];
 }
 
+function markIdMigrated(): void {
+  try {
+    localStorage.setItem(ID_MIGRATED_KEY, '1');
+  } catch {
+    // Storage that can be read but not written must not hide a valid saved selection
+  }
+}
+
 export function loadVisibleColumns(): ColumnKey[] {
   try {
+    const migrated = localStorage.getItem(ID_MIGRATED_KEY) === '1';
+    // Set before anything else, so a fresh install never counts as needing the migration
+    if (!migrated) markIdMigrated();
     const raw = localStorage.getItem(VISIBLE_KEY);
     if (!raw) return [...DEFAULT_VISIBLE_COLUMNS];
-    return normalizeVisibleColumns(JSON.parse(raw));
+    const stored = normalizeVisibleColumns(JSON.parse(raw));
+    if (migrated) return stored;
+    const withId = normalizeVisibleColumns([...stored, 'id']);
+    saveVisibleColumns(withId);
+    return withId;
   } catch {
     return [...DEFAULT_VISIBLE_COLUMNS];
   }
@@ -74,6 +92,8 @@ export function saveVisibleColumns(keys: ColumnKey[]): void {
   } catch {
     // Storage unavailable (private mode, quota) — the session still works
   }
+  // A selection saved on purpose is already past the migration
+  markIdMigrated();
 }
 
 /** Merge stored widths over the defaults, dropping unknown keys and sub-minimum values. */
@@ -115,8 +135,46 @@ export function totalColumnWidth(visible: ColumnKey[], widths: ColumnWidths): nu
 export const MOBILE_BREAKPOINT = 768;
 
 /**
+ * The only columns shown below MOBILE_BREAKPOINT, in table order. ID rides along with Issue
+ * so the identifier stays visible on a phone, and the rest wait for a wider screen.
+ */
+export const NARROW_COLUMNS: ColumnKey[] = ['id', 'task'];
+
+/**
+ * Widths used instead of the saved ones below MOBILE_BREAKPOINT, so the pinned pair is 280px:
+ * on a 375px phone that leaves about 95px of timeline beside it (40px on a 320px one).
+ * ID's 80px still holds a nine-character identifier such as ENG-1234 in its 56px of content,
+ * and 200px leaves the Issue title roughly 120px next to the tree gutter.
+ */
+export const NARROW_COLUMN_WIDTHS: Partial<ColumnWidths> = { id: 80, task: 200 };
+
+export interface ViewportOptions {
+  isNarrow?: boolean;
+  viewportWidth?: number;
+}
+
+export function resolveIsNarrow(options?: ViewportOptions): boolean {
+  return (
+    options?.isNarrow ?? (options?.viewportWidth !== undefined ? options.viewportWidth < MOBILE_BREAKPOINT : false)
+  );
+}
+
+/**
+ * The columns to render. This is a display rule only: the saved selection is left alone,
+ * so widening the window brings the full selection straight back.
+ */
+export function visibleColumnsForViewport(selected: ColumnKey[], options?: ViewportOptions): ColumnKey[] {
+  return resolveIsNarrow(options) ? [...NARROW_COLUMNS] : selected;
+}
+
+/** The widths to render, with the narrow-screen widths applied. Saved widths are never changed. */
+export function columnWidthsForViewport(widths: ColumnWidths, options?: ViewportOptions): ColumnWidths {
+  return resolveIsNarrow(options) ? { ...widths, ...NARROW_COLUMN_WIDTHS } : widths;
+}
+
+/**
  * Maximum fraction of viewport/container width that frozen columns may consume before
- * falling back to freezing only the primary task column.
+ * falling back to freezing only up to the primary task column.
  */
 export const MAX_FROZEN_WIDTH_RATIO = 0.65;
 
@@ -125,41 +183,52 @@ export interface StickyColumnOffsets {
   offsets: Partial<Record<ColumnKey, number>>;
   /** The rightmost column that is frozen */
   lastFrozenKey: ColumnKey;
-  /** Whether only the primary task column is frozen */
+  /** Whether the freeze is limited to the primary task column (plus any columns before it) */
   onlyTaskFrozen: boolean;
 }
 
 /**
  * Computes sticky `left` offsets for schedule columns.
- * On desktop (viewport >= 768px and columns don't crowd the timeline),
- * all visible schedule columns are pinned with cumulative left offsets.
- * On narrow/mobile viewports (< 768px) or when all frozen columns would take
- * more than MAX_FROZEN_WIDTH_RATIO of the viewport, falls back to freezing
- * ONLY the primary 'task' column at left: 0 so the timeline remains visible and reachable.
+ * When the viewport is >= 768px and the columns don't crowd the timeline, all visible
+ * columns are pinned with cumulative left offsets.
+ *
+ * Otherwise only the columns up to and including 'task' are pinned, so the timeline stays
+ * reachable. Below 768px those are always ID and Issue (see NARROW_COLUMNS): they are the
+ * only columns shown, so nothing else needs to scroll but the timeline, and pinning the pair
+ * regardless of the 65% ratio is what keeps ID from being stranded under Issue. Between 768px
+ * and the full freeze, ID and Issue are pinned together only while the pair fits within
+ * MAX_FROZEN_WIDTH_RATIO of the viewport. If resized widths push it past that, Issue pins
+ * alone at left: 0 and ID scrolls away underneath it, rather than being left stranded in
+ * front of it. Issue also pins alone when nothing precedes it (ID hidden).
  */
 export function computeStickyColumnOffsets(
   visibleColumns: ColumnKey[],
   colWidths: ColumnWidths,
-  options?: {
-    isNarrow?: boolean;
-    viewportWidth?: number;
-  },
+  options?: ViewportOptions,
 ): StickyColumnOffsets {
-  const isNarrow =
-    options?.isNarrow ?? (options?.viewportWidth !== undefined ? options.viewportWidth < MOBILE_BREAKPOINT : false);
+  const isNarrow = resolveIsNarrow(options);
 
-  const totalWidth = totalColumnWidth(visibleColumns, colWidths);
-  const onlyTaskFrozen =
-    isNarrow ||
-    (options?.viewportWidth !== undefined &&
-      options.viewportWidth > 0 &&
-      totalWidth > options.viewportWidth * MAX_FROZEN_WIDTH_RATIO);
+  // No limit when the viewport width is unknown
+  const frozenLimit = options?.viewportWidth ? options.viewportWidth * MAX_FROZEN_WIDTH_RATIO : Infinity;
+  const onlyTaskFrozen = isNarrow || totalColumnWidth(visibleColumns, colWidths) > frozenLimit;
 
   const offsets: Partial<Record<ColumnKey, number>> = {};
 
   if (onlyTaskFrozen) {
-    if (visibleColumns.includes('task')) {
-      offsets.task = 0;
+    const taskIndex = visibleColumns.indexOf('task');
+    if (taskIndex >= 0) {
+      const leading = visibleColumns.slice(0, taskIndex + 1);
+      const leadingWidth = totalColumnWidth(leading, colWidths);
+      const leadingFits = isNarrow || leadingWidth <= frozenLimit;
+      if (taskIndex === 0 || !leadingFits) {
+        offsets.task = 0;
+      } else {
+        let left = 0;
+        for (const key of leading) {
+          offsets[key] = left;
+          left += colWidths[key];
+        }
+      }
     }
     return {
       offsets,

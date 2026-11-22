@@ -4,7 +4,10 @@ import { COLUMN_DEFS, DEFAULT_VISIBLE_COLUMNS, type ColumnKey } from '@/utils/sc
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The saved selection, which a narrow screen does not show in full */
   visible: ColumnKey[];
+  /** Narrow screens show only ID and Issue, so the selection can't be edited from here */
+  narrow?: boolean;
   onChange: (next: ColumnKey[]) => void;
 }
 
@@ -33,7 +36,7 @@ function ColumnsIcon() {
  * header, or from the button this renders in the first header cell — right-click
  * alone would be out of reach for keyboard and touch users.
  */
-export default function ColumnPicker({ open, onOpenChange, visible, onChange }: Props) {
+export default function ColumnPicker({ open, onOpenChange, visible, narrow = false, onChange }: Props) {
   const ref = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -103,12 +106,17 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
           aria-label="Columns"
           className="absolute top-full left-0 mt-1.5 z-50 w-[196px] bg-bg-card border border-border-secondary rounded-lg shadow-xl py-1 normal-case tracking-normal"
         >
+          {narrow && (
+            <p className="px-3 py-1.5 text-[11px] leading-snug text-text-muted whitespace-normal">
+              Only ID and Issue are shown on narrow screens. Your selection returns on a wider screen.
+            </p>
+          )}
           {COLUMN_DEFS.map((def) => {
             const checked = visible.includes(def.key);
             // The task column alone is unreadable, so the last optional column holds
             // rather than silently snapping the whole set back to the defaults
             const isLastOptional = checked && !def.required && optionalVisibleCount === 1;
-            const locked = def.required || isLastOptional;
+            const locked = def.required || isLastOptional || narrow;
             return (
               <label
                 key={def.key}
@@ -118,7 +126,7 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
                 title={
                   def.required
                     ? 'The issue column is always shown'
-                    : isLastOptional
+                    : isLastOptional && !narrow
                       ? 'Keep at least one column besides Issue'
                       : undefined
                 }

@@ -12,6 +12,11 @@ import {
   saveVisibleColumns,
   totalColumnWidth,
   computeStickyColumnOffsets,
+  visibleColumnsForViewport,
+  columnWidthsForViewport,
+  NARROW_COLUMNS,
+  NARROW_COLUMN_WIDTHS,
+  MAX_FROZEN_WIDTH_RATIO,
   MOBILE_BREAKPOINT,
   type ColumnKey,
 } from './scheduleColumns';
@@ -29,19 +34,25 @@ describe('column definitions', () => {
     expect(taskCol?.label).toBe('Issue');
   });
 
-  it('defaults to task, assignee, status and due date', () => {
-    expect(DEFAULT_VISIBLE_COLUMNS).toEqual(['task', 'assignee', 'status', 'due']);
+  it('defaults to ID, task, assignee, status and due date', () => {
+    expect(DEFAULT_VISIBLE_COLUMNS).toEqual(['id', 'task', 'assignee', 'status', 'due']);
   });
 
-  it('offers start date, priority, project, sub-issue progress and issue ID as extras', () => {
+  it('places the ID column before the task column', () => {
+    const keys = COLUMN_DEFS.map((c) => c.key);
+    expect(keys[0]).toBe('id');
+    expect(keys.indexOf('id')).toBeLessThan(keys.indexOf('task'));
+  });
+
+  it('offers start date, priority, project and sub-issue progress as extras', () => {
     const optional = COLUMN_DEFS.filter((c) => !DEFAULT_VISIBLE_COLUMNS.includes(c.key)).map((c) => c.key);
-    expect(optional).toEqual(['start', 'priority', 'project', 'progress', 'id']);
+    expect(optional).toEqual(['start', 'priority', 'project', 'progress']);
   });
 });
 
 describe('normalizeVisibleColumns', () => {
   it('keeps the canonical order regardless of the order chosen', () => {
-    expect(normalizeVisibleColumns(['id', 'due', 'task', 'assignee'])).toEqual(['task', 'assignee', 'due', 'id']);
+    expect(normalizeVisibleColumns(['id', 'due', 'task', 'assignee'])).toEqual(['id', 'task', 'assignee', 'due']);
   });
 
   it('always keeps the task column', () => {
@@ -134,7 +145,56 @@ describe('persistence', () => {
 
   it('normalizes what it stores, so a bad selection can never be read back', () => {
     saveVisibleColumns(['id', 'task', 'nonsense' as ColumnKey]);
-    expect(localStorage.getItem('gantt_columns')).toBe('["task","id"]');
+    expect(localStorage.getItem('gantt_columns')).toBe('["id","task"]');
+  });
+
+  describe('adding the ID column to saved selections', () => {
+    it('adds ID once, in canonical position, to a selection saved before it was a default', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'assignee', 'status', 'due']));
+      expect(loadVisibleColumns()).toEqual(['id', 'task', 'assignee', 'status', 'due']);
+      expect(localStorage.getItem('gantt_columns')).toBe('["id","task","assignee","status","due"]');
+    });
+
+    it('adds ID to older selections that already had it last, without duplicating it', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'due', 'id']));
+      expect(loadVisibleColumns()).toEqual(['id', 'task', 'due']);
+    });
+
+    it('keeps ID hidden across reloads once the user has hidden it', () => {
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'due']));
+      expect(loadVisibleColumns()).toContain('id');
+      saveVisibleColumns(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+    });
+
+    it('keeps ID hidden when it was hidden right after a fresh install', () => {
+      expect(loadVisibleColumns()).toEqual(DEFAULT_VISIBLE_COLUMNS);
+      saveVisibleColumns(['task', 'due']);
+      expect(loadVisibleColumns()).toEqual(['task', 'due']);
+    });
+
+    it('leaves a fresh install on the defaults and marks the migration done', () => {
+      expect(loadVisibleColumns()).toEqual(DEFAULT_VISIBLE_COLUMNS);
+      expect(localStorage.getItem('gantt_columns')).toBeNull();
+      expect(localStorage.getItem('gantt_columns_id_added')).toBe('1');
+    });
+
+    it('does not touch a selection saved after the migration ran', () => {
+      localStorage.setItem('gantt_columns_id_added', '1');
+      localStorage.setItem('gantt_columns', JSON.stringify(['task', 'priority']));
+      expect(loadVisibleColumns()).toEqual(['task', 'priority']);
+    });
+  });
+
+  it('still returns a saved selection when storage can be read but not written', () => {
+    stubStorage({
+      getItem: (k: string) => (k === 'gantt_columns' ? JSON.stringify(['id', 'task', 'priority']) : null),
+      setItem: () => {
+        throw new Error('quota');
+      },
+    });
+    expect(loadVisibleColumns()).toEqual(['id', 'task', 'priority']);
   });
 
   it('keeps working when storage is unavailable', () => {
@@ -159,6 +219,81 @@ describe('totalColumnWidth', () => {
     expect(totalColumnWidth(visible, DEFAULT_COLUMN_WIDTHS)).toBe(
       DEFAULT_COLUMN_WIDTHS.task + DEFAULT_COLUMN_WIDTHS.due,
     );
+  });
+});
+
+describe('narrow screens', () => {
+  const selected: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'start', 'due', 'priority'];
+
+  // Tests run in the node environment, so stand in a minimal in-memory Storage
+  function stubStore(initial: Record<string, string> = {}) {
+    const store = new Map<string, string>(Object.entries(initial));
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    return store;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows only ID and Issue below the mobile breakpoint', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT - 1 })).toEqual(['id', 'task']);
+    expect(visibleColumnsForViewport(selected, { viewportWidth: 375 })).toEqual(NARROW_COLUMNS);
+    expect(visibleColumnsForViewport(selected, { isNarrow: true })).toEqual(['id', 'task']);
+  });
+
+  it('keeps ID on screen even when it was hidden from the saved selection', () => {
+    expect(visibleColumnsForViewport(['task', 'due'], { viewportWidth: 375 })).toEqual(['id', 'task']);
+  });
+
+  it('shows the full saved selection at and above the mobile breakpoint', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT })).toEqual(selected);
+    expect(visibleColumnsForViewport(selected, { viewportWidth: 1920 })).toEqual(selected);
+    expect(visibleColumnsForViewport(selected)).toEqual(selected);
+  });
+
+  // That none of this writes to storage is proved by the E2E freeze test, which checks that
+  // gantt_columns and gantt_column_widths stay unset across a 375px -> 1280px round trip
+  it('widening restores the full saved selection and widths', () => {
+    const stored = ['id', 'task', 'assignee', 'status', 'start', 'due', 'priority'] as ColumnKey[];
+    const savedWidths = { ...DEFAULT_COLUMN_WIDTHS, task: 350 };
+
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['id', 'task']);
+    expect(columnWidthsForViewport(savedWidths, { viewportWidth: 375 }).task).toBe(NARROW_COLUMN_WIDTHS.task);
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(stored);
+    expect(columnWidthsForViewport(savedWidths, { viewportWidth: 1280 }).task).toBe(350);
+    // The inputs are left as they were
+    expect(stored).toEqual(selected);
+    expect(savedWidths.task).toBe(350);
+  });
+
+  it('does not interact with the migration: a narrow first load still adds ID to storage', () => {
+    const store = stubStore({ gantt_columns: JSON.stringify(['task', 'due']) });
+    const stored = loadVisibleColumns();
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['id', 'task']);
+    expect(stored).toEqual(['id', 'task', 'due']);
+    expect(store.get('gantt_columns')).toBe('["id","task","due"]');
+    // ...and a later hide of ID is respected on a wide screen
+    saveVisibleColumns(['task', 'due']);
+    expect(visibleColumnsForViewport(loadVisibleColumns(), { viewportWidth: 1280 })).toEqual(['task', 'due']);
+  });
+
+  it('uses slimmer widths that leave room for the timeline on a phone', () => {
+    const widths = columnWidthsForViewport({ ...DEFAULT_COLUMN_WIDTHS, task: 450 }, { viewportWidth: 375 });
+    expect(widths.id).toBe(80);
+    expect(widths.task).toBe(200);
+    expect(widths.assignee).toBe(DEFAULT_COLUMN_WIDTHS.assignee);
+    expect(totalColumnWidth(NARROW_COLUMNS, widths)).toBe(280);
+    expect(375 - totalColumnWidth(NARROW_COLUMNS, widths)).toBeGreaterThanOrEqual(90);
+  });
+
+  it('pins ID and Issue side by side at 375px, past the 65% ratio', () => {
+    const widths = columnWidthsForViewport(DEFAULT_COLUMN_WIDTHS, { viewportWidth: 375 });
+    const result = computeStickyColumnOffsets(NARROW_COLUMNS, widths, { viewportWidth: 375 });
+    // 280px is 75% of 375px, so a ratio rule would have left ID scrolling under Issue
+    expect(280 / 375).toBeGreaterThan(MAX_FROZEN_WIDTH_RATIO);
+    expect(result.offsets).toEqual({ id: 0, task: 80 });
+    expect(result.lastFrozenKey).toBe('task');
   });
 });
 
@@ -211,6 +346,59 @@ describe('computeStickyColumnOffsets', () => {
     expect(result.lastFrozenKey).toBe('task');
     expect(result.offsets.task).toBe(0);
     expect(result.offsets.assignee).toBeUndefined();
+  });
+
+  describe('with the ID column before the task column', () => {
+    const withId: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
+    const idWidths = { ...widths, id: 96 };
+
+    it('offsets every column cumulatively on desktop', () => {
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 1920 });
+      expect(result.onlyTaskFrozen).toBe(false);
+      expect(result.offsets.id).toBe(0);
+      expect(result.offsets.task).toBe(96);
+      expect(result.offsets.assignee).toBe(396);
+      expect(result.lastFrozenKey).toBe('due');
+    });
+
+    it('narrow fallback pins ID and task together when they fit', () => {
+      // 738 / 800 crowds the timeline, but the 396px pair is within 65% of it
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 800 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ id: 0, task: 96 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('narrow fallback pins task alone at left: 0 when ID and task would crowd the timeline', () => {
+      // A resized Issue column makes the pair 546px, over 65% of 800
+      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 450 }, { viewportWidth: 800 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ task: 0 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('still pins ID and task together when the pair sits exactly on the 65% limit', () => {
+      // 396 is exactly 65% of 396 / 0.65 (= 609.23...), so the pair is allowed
+      const result = computeStickyColumnOffsets(withId, idWidths, {
+        isNarrow: false,
+        viewportWidth: 396 / MAX_FROZEN_WIDTH_RATIO,
+      });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ id: 0, task: 96 });
+    });
+
+    it('falls back to task alone when a wider Issue column tips the pair over the limit', () => {
+      const viewportWidth = 396 / MAX_FROZEN_WIDTH_RATIO;
+      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 301 }, { isNarrow: false, viewportWidth });
+      expect(result.offsets).toEqual({ task: 0 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('fallback pins just task at left: 0 when ID is hidden', () => {
+      const result = computeStickyColumnOffsets(visible, idWidths, { viewportWidth: 800 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ task: 0 });
+    });
   });
 
   it('correctly sets lastFrozenKey for customized visible column lists', () => {

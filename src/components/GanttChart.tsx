@@ -15,6 +15,8 @@ import {
 } from '@/utils/timelineZoom';
 import {
   computeStickyColumnOffsets,
+  visibleColumnsForViewport,
+  columnWidthsForViewport,
   getColumnDef,
   loadColumnWidths,
   loadVisibleColumns,
@@ -124,8 +126,8 @@ export default function GanttChart({
   nonWorkDays,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
-  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
-  const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
+  const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  const [savedColWidths, setSavedColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
 
@@ -169,6 +171,18 @@ export default function GanttChart({
     };
   }, []);
 
+  // What is rendered: the saved selection minus columns that don't fit narrow screens
+  const visibleColumns = useMemo(
+    () => visibleColumnsForViewport(selectedColumns, { isNarrow: isNarrowViewport }),
+    [selectedColumns, isNarrowViewport],
+  );
+
+  // Narrow screens use their own widths; the saved ones are only edited by resizing on a wide screen
+  const colWidths = useMemo(
+    () => columnWidthsForViewport(savedColWidths, { isNarrow: isNarrowViewport }),
+    [savedColWidths, isNarrowViewport],
+  );
+
   const stickyColumnInfo = useMemo(
     () =>
       computeStickyColumnOffsets(visibleColumns, colWidths, {
@@ -187,10 +201,10 @@ export default function GanttChart({
   onDayWidthChangeRef.current = onDayWidthChange;
   const panCleanupRef = useRef<(() => void) | null>(null);
   const wheelCleanupRef = useRef<(() => void) | null>(null);
-  const baseWidthsRef = useRef<ColumnWidths>(colWidths);
-  /** Mirrors colWidths for the resize handlers, which persist on mouseup */
-  const liveWidthsRef = useRef<ColumnWidths>(colWidths);
-  liveWidthsRef.current = colWidths;
+  const baseWidthsRef = useRef<ColumnWidths>(savedColWidths);
+  /** Mirrors savedColWidths for the resize handlers, which persist on mouseup */
+  const liveWidthsRef = useRef<ColumnWidths>(savedColWidths);
+  liveWidthsRef.current = savedColWidths;
 
   // Right-clicking any header toggles the picker, so a second right-click closes it
   const togglePickerFromContextMenu = useCallback((e: React.MouseEvent) => {
@@ -202,7 +216,7 @@ export default function GanttChart({
     // Normalize up front so showing a column slots it into the canonical order
     // immediately, rather than appending until the next reload
     const normalized = normalizeVisibleColumns(next);
-    setVisibleColumns(normalized);
+    setSelectedColumns(normalized);
     saveVisibleColumns(normalized);
   }, []);
 
@@ -418,7 +432,7 @@ export default function GanttChart({
       let baseSet = false;
       return (delta: number) => {
         if (!baseSet) {
-          baseWidthsRef.current = { ...colWidths };
+          baseWidthsRef.current = { ...savedColWidths };
           baseSet = true;
           // Reset on mouseup, and persist the width the drag settled on. The live
           // widths come from a ref: saving inside a state updater would run twice
@@ -437,10 +451,10 @@ export default function GanttChart({
           [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth),
         };
         liveWidthsRef.current = next;
-        setColWidths(next);
+        setSavedColWidths(next);
       };
     },
-    [colWidths],
+    [savedColWidths],
   );
 
   // All computation must happen before early returns to respect Rules of Hooks
@@ -883,11 +897,17 @@ export default function GanttChart({
                     data-column-key={key}
                     data-frozen={isSticky ? 'true' : undefined}
                     className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
-                      isSticky ? 'sticky top-0 z-[10]' : 'sticky top-0 z-[5]'
+                      // Each header is its own stacking context, so the open picker menu, which is wider
+                      // than the first header, needs that header lifted above the ones that follow it
+                      i === 0 && pickerOpen
+                        ? 'sticky top-0 z-[20]'
+                        : isSticky
+                          ? 'sticky top-0 z-[10]'
+                          : 'sticky top-0 z-[5]'
                     } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
                       width: colWidths[key],
-                      minWidth: getColumnDef(key).minWidth,
+                      minWidth: Math.min(getColumnDef(key).minWidth, colWidths[key]),
                       maxWidth: colWidths[key],
                       left: isSticky ? stickyLeft : undefined,
                     }}
@@ -901,12 +921,13 @@ export default function GanttChart({
                         <ColumnPicker
                           open={pickerOpen}
                           onOpenChange={setPickerOpen}
-                          visible={visibleColumns}
+                          visible={selectedColumns}
+                          narrow={isNarrowViewport}
                           onChange={changeVisibleColumns}
                         />
                       )}
                     </span>
-                    <ResizeHandle onResize={makeResizeHandler(key)} />
+                    {!isNarrowViewport && <ResizeHandle onResize={makeResizeHandler(key)} />}
                   </th>
                 );
               })}
