@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AuthPage from '@/components/AuthPage';
 import FilterBar from '@/components/FilterBar';
@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
 import { usePlanningHistory } from '@/hooks/usePlanningHistory';
 import { useTheme } from '@/hooks/useTheme';
+import type { InlineEditHandlers } from '@/types';
 import {
   clearPendingOAuthProject,
   peekPendingOAuthProject,
@@ -94,6 +95,11 @@ function GanttView({
     rescheduleStart,
     updateMilestoneDate,
     cycleStatus,
+    loadTeamWorkflowStates,
+    loadAssignableUsers,
+    setTaskStatus,
+    setTaskAssignee,
+    renameTask,
     createRelation,
     removeRelation,
     reorderTask,
@@ -154,6 +160,39 @@ function GanttView({
     [cycleStatus, tasks, logStatusTransition],
   );
 
+  // Inline cell edits (status dropdown, assignee dropdown, title rename) log to planning history on success
+  const inlineEdit = useMemo<InlineEditHandlers>(
+    () => ({
+      loadWorkflowStates: loadTeamWorkflowStates,
+      loadAssignableUsers,
+      setStatus: async (taskUuid, state) => {
+        const task = allKnownTasks.find((t) => t.uuid === taskUuid);
+        const saved = await setTaskStatus(taskUuid, state);
+        if (task && saved) logStatusTransition(task.id, task.status, state.name);
+      },
+      setAssignee: async (taskUuid, user) => {
+        const task = allKnownTasks.find((t) => t.uuid === taskUuid);
+        const saved = await setTaskAssignee(taskUuid, user);
+        if (task && saved) logChange(task.id, 'assignee', task.assignee, user?.name ?? 'Unassigned');
+      },
+      renameTask: async (taskUuid, title) => {
+        const task = allKnownTasks.find((t) => t.uuid === taskUuid);
+        const saved = await renameTask(taskUuid, title);
+        if (task && saved) logChange(task.id, 'title', task.title, title.trim());
+      },
+    }),
+    [
+      allKnownTasks,
+      loadTeamWorkflowStates,
+      loadAssignableUsers,
+      setTaskStatus,
+      setTaskAssignee,
+      renameTask,
+      logStatusTransition,
+      logChange,
+    ],
+  );
+
   // Register the remove handler for DetailPanel's × buttons
   useEffect(() => {
     setRemoveRelationHandler(removeRelation);
@@ -191,6 +230,10 @@ function GanttView({
       if (e.defaultPrevented) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest('[role="dialog"]') || document.querySelector('[role="dialog"]')) return;
+      // Inline cell editors (title input, status/assignee menus) own the keyboard while open
+      if (target?.closest('[data-inline-edit], [data-inline-menu]') || document.querySelector('[data-inline-menu]')) {
+        return;
+      }
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) {
         if (e.key === 'Escape' && tag === 'INPUT') {
@@ -267,6 +310,7 @@ function GanttView({
           onReschedule={rescheduleWithHistory}
           onRescheduleStart={rescheduleStartWithHistory}
           onCycleStatus={cycleStatusWithHistory}
+          inlineEdit={inlineEdit}
           onCreateRelation={createRelation}
           onReorder={reorderTask}
           onUpdateMilestoneDate={updateMilestoneDate}
