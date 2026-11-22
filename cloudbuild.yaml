@@ -24,9 +24,6 @@ steps:
       - --image=us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA
       - --region=us-west2
 
-images:
-  - us-west2-docker.pkg.dev/$PROJECT_ID/ganttsmart/app:$SHORT_SHA
-
 options:
   # Required when the trigger runs as a user-managed service account (ganttsmart-build).
   logging: CLOUD_LOGGING_ONLY
