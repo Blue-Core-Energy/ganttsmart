@@ -556,6 +556,8 @@ export default function GanttRow({
               title={dueTitle}
               color={dueColor}
               onChange={(iso) => {
+                // Same explicit date is a no-op; an implicit (~) date still needs confirming as explicit
+                if (iso === task.due && !task.isDueImplicit) return;
                 void onReschedule(task.uuid, iso);
               }}
             >

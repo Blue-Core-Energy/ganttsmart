@@ -26,6 +26,7 @@ export default function DueDatePicker({ taskId, value, title, color, onChange, c
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<{ top: number; left: number } | null>(null);
 
   const close = useCallback((restoreFocus: boolean) => {
     setOpen(false);
@@ -46,6 +47,7 @@ export default function DueDatePicker({ taskId, value, title, color, onChange, c
       Math.max(VIEWPORT_MARGIN, t.left),
       Math.max(VIEWPORT_MARGIN, window.innerWidth - p.width - VIEWPORT_MARGIN),
     );
+    anchorRef.current = { top: t.top, left: t.left };
     setPos({ top, left });
   }, []);
 
@@ -63,17 +65,21 @@ export default function DueDatePicker({ taskId, value, title, color, onChange, c
     };
     const onScroll = (e: Event) => {
       if (popoverRef.current?.contains(e.target as Node)) return;
-      reposition();
+      // Close once the trigger has scrolled away from where the popover was anchored (sticky columns stay put)
+      const t = triggerRef.current?.getBoundingClientRect();
+      const a = anchorRef.current;
+      if (!t || !a || Math.abs(t.top - a.top) > 1 || Math.abs(t.left - a.left) > 1) close(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') close(true);
     };
-    document.addEventListener('mousedown', onMouseDown);
+    // Capture phase so interactive chart elements that stopPropagation() still dismiss the picker
+    document.addEventListener('mousedown', onMouseDown, true);
     document.addEventListener('keydown', onKeyDown);
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', onScroll, true);
     return () => {
-      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('mousedown', onMouseDown, true);
       document.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('resize', reposition);
       window.removeEventListener('scroll', onScroll, true);

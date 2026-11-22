@@ -2735,6 +2735,53 @@ test.describe('GanttSmart GCP app', () => {
     else expect(barAfter.width).toBeLessThan(barBefore.width);
     await expect(detailText).toHaveCount(0);
 
+    // 5b. Re-selecting the current explicit date closes the picker without a mutation
+    await dueCell101.click();
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveAttribute(
+      'data-day',
+      isoOffsetDays(newOffset),
+    );
+    await popover.locator(`[data-day="${isoOffsetDays(newOffset)}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(dueUpdates).toHaveLength(1);
+
+    // 5c. Opening another row's picker closes the first (clicks that stopPropagation still dismiss)
+    await dueCell101.click();
+    await expect(popover).toHaveCount(1);
+    await dueCell102.click();
+    await expect(popover).toHaveCount(1);
+    await expect(popover).toHaveAttribute('data-popover-task', 'COMM-102');
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+
+    // 5d. Mousedown on a task bar (which stops propagation) closes an open picker
+    await dueCell101.click();
+    await expect(popover).toHaveCount(1);
+    await bar101.click();
+    await expect(popover).toHaveCount(0);
+    await expect(detailText).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(detailText).toHaveCount(0);
+    expect(dueUpdates).toHaveLength(1);
+
+    // 5e. Scrolling the chart so the Due cell moves away closes the picker
+    await dueCell101.click();
+    await expect(popover).toHaveCount(1);
+    await dueCell101.evaluate((el) => {
+      let node: HTMLElement | null = el.parentElement;
+      while (node && !/auto|scroll/.test(getComputedStyle(node).overflowY)) node = node.parentElement;
+      if (!node) throw new Error('no scroll container');
+      const spacer = document.createElement('div');
+      spacer.style.height = '2000px';
+      node.appendChild(spacer);
+      node.scrollTop = 40;
+      setTimeout(() => spacer.remove(), 1000);
+    });
+    await expect(popover).toHaveCount(0);
+    expect(dueUpdates).toHaveLength(1);
+    await page.waitForTimeout(1100);
+
     // 6. Implicit (project target) due dates are editable and become explicit
     await expect(page.locator('tr[data-task-id="COMM-102"] td').filter({ hasText: '~' })).toBeVisible();
     await dueCell102.click();
