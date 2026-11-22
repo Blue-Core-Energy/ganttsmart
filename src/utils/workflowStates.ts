@@ -34,6 +34,19 @@ export function sortCyclableWorkflowStates(states: WorkflowState[]): WorkflowSta
     .sort((a, b) => typeRank(a.type) - typeRank(b.type) || a.position - b.position || a.name.localeCompare(b.name));
 }
 
+const MENU_TYPE_ORDER: Record<string, number> = { ...WORKFLOW_TYPE_ORDER, canceled: 5, duplicate: 6 };
+
+/**
+ * Every workflow state of a team for the status dropdown, in progression order
+ * (triage -> backlog -> unstarted -> started -> completed -> canceled -> duplicate), then by `position` and name.
+ */
+export function sortWorkflowStatesForMenu(states: WorkflowState[]): WorkflowState[] {
+  const rank = (type: string) => MENU_TYPE_ORDER[normalizeType(type)] ?? 99;
+  return states
+    .slice()
+    .sort((a, b) => rank(a.type) - rank(b.type) || a.position - b.position || a.name.localeCompare(b.name));
+}
+
 /**
  * Find the matching WorkflowState for a task's current status.
  */

@@ -1,5 +1,12 @@
 import { backend } from '@/backend';
-import { PRIORITY_MAP, type Milestone, type Project, type Task, type WorkflowState } from '@/types';
+import {
+  PRIORITY_MAP,
+  type AssignableUser,
+  type Milestone,
+  type Project,
+  type Task,
+  type WorkflowState,
+} from '@/types';
 import { getFeedbackConfig, type FeedbackEnv, type FeedbackType } from '@/utils/feedback';
 import { isIgnoredIssueState, type IssueStateLike } from '@/utils/issues';
 import { buildProjectDeepLink } from '@/utils/projectDeepLink';
@@ -425,7 +432,7 @@ export async function fetchIssues(
             createdAt
             completedAt
             canceledAt
-            assignee { name }
+            assignee { id name }
             team { id }
             projectMilestone { id }
           }
@@ -443,7 +450,7 @@ export async function fetchIssues(
             createdAt
             completedAt
             canceledAt
-            assignee { name }
+            assignee { id name }
             team { id }
             projectMilestone { id }
           }
@@ -465,7 +472,7 @@ export async function fetchIssues(
     createdAt: string;
     completedAt: string | null;
     canceledAt?: string | null;
-    assignee: { name: string } | null;
+    assignee: { id?: string; name: string } | null;
     team: { id: string } | null;
     projectMilestone: { id: string } | null;
   }
@@ -541,7 +548,7 @@ export async function fetchIssues(
       completedAt?: string | null;
       canceledAt?: string | null;
       state?: { name?: string | null; type?: string | null } | null;
-      assignee?: { name: string } | null;
+      assignee?: { id?: string; name: string } | null;
       team?: { id: string } | null;
       project?: { id: string; name: string; targetDate?: string | null } | null;
     };
@@ -565,7 +572,7 @@ export async function fetchIssues(
           completedAt?: string | null;
           canceledAt?: string | null;
           state?: IssueStateLike | null;
-          assignee?: { name: string } | null;
+          assignee?: { id?: string; name: string } | null;
           team?: { id: string } | null;
           project?: { id: string; name: string; targetDate?: string | null } | null;
         };
@@ -600,7 +607,7 @@ export async function fetchIssues(
                       completedAt
                       canceledAt
                       state { name type }
-                      assignee { name }
+                      assignee { id name }
                       team { id }
                       project {
                         id
@@ -773,6 +780,7 @@ export async function fetchIssues(
       status: n.state?.name || '',
       statusType: n.state?.type || '',
       assignee: n.assignee?.name || 'Unassigned',
+      assigneeId: n.assignee?.id ?? null,
       teamId: n.team?.id || '',
       blocks: rel.blocks,
       blockedBy: rel.blockedBy,
@@ -846,6 +854,7 @@ export async function fetchIssues(
       status: ext.state?.name || '',
       statusType: ext.state?.type || '',
       assignee: ext.assignee?.name || 'Unassigned',
+      assigneeId: ext.assignee?.id ?? null,
       teamId: ext.team?.id || '',
       blocks: [...entry.blocksLocalIds],
       blockedBy: [...entry.blockedByLocalIds],
@@ -1032,6 +1041,135 @@ export async function updateIssueState(apiKey: string, issueId: string, stateId:
   if (res && res.success === false) {
     throw new Error('Linear did not confirm issue status update.');
   }
+}
+
+export async function updateIssueAssignee(apiKey: string, issueId: string, assigneeId: string | null): Promise<void> {
+  const data = await gql(
+    apiKey,
+    `mutation($id: String!, $assigneeId: String) {
+      issueUpdate(id: $id, input: { assigneeId: $assigneeId }) {
+        success
+      }
+    }`,
+    { id: issueId, assigneeId },
+  );
+  const res = data.issueUpdate as { success?: boolean } | undefined;
+  if (res && res.success === false) {
+    throw new Error('Linear did not confirm issue assignee update.');
+  }
+}
+
+export async function updateIssueTitle(apiKey: string, issueId: string, title: string): Promise<void> {
+  const trimmed = title.trim();
+  if (!trimmed) throw new Error('Issue title cannot be empty.');
+  const data = await gql(
+    apiKey,
+    `mutation($id: String!, $title: String!) {
+      issueUpdate(id: $id, input: { title: $title }) {
+        success
+      }
+    }`,
+    { id: issueId, title: trimmed },
+  );
+  const res = data.issueUpdate as { success?: boolean } | undefined;
+  if (res && res.success === false) {
+    throw new Error('Linear did not confirm issue title update.');
+  }
+}
+
+const ASSIGNABLE_USERS_PAGE_SIZE = 100;
+const ASSIGNABLE_USERS_MAX_PAGES = 5;
+const WORKSPACE_USERS_KEY = '__workspace__';
+const assignableUsersCache = new Map<string, Promise<AssignableUser[]>>();
+let assignableUsersCacheToken: string | null = null;
+
+interface UserNode {
+  id: string;
+  name?: string | null;
+  displayName?: string | null;
+  active?: boolean | null;
+}
+
+interface UserConnection {
+  nodes?: UserNode[];
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+}
+
+/** Drop deactivated users and sort by name; every query selects only scalar fields to stay far below Linear's complexity limit. */
+function toAssignableUsers(nodes: UserNode[]): AssignableUser[] {
+  const seen = new Set<string>();
+  const users: AssignableUser[] = [];
+  for (const n of nodes) {
+    if (!n?.id || n.active === false || seen.has(n.id)) continue;
+    seen.add(n.id);
+    const name = n.name || n.displayName || 'Unknown';
+    users.push({ id: n.id, name, displayName: n.displayName || name });
+  }
+  return users.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+async function fetchAssignableUsersUncached(apiKey: string, teamId: string): Promise<AssignableUser[]> {
+  const nodes: UserNode[] = [];
+  let after: string | null = null;
+  for (let page = 0; page < ASSIGNABLE_USERS_MAX_PAGES; page++) {
+    const data: Record<string, unknown> = teamId
+      ? await gql(
+          apiKey,
+          `query($teamId: String!, $after: String) {
+            team(id: $teamId) {
+              members(first: ${ASSIGNABLE_USERS_PAGE_SIZE}, after: $after) {
+                nodes { id name displayName active }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }`,
+          { teamId, after },
+        )
+      : await gql(
+          apiKey,
+          `query($after: String) {
+            users(first: ${ASSIGNABLE_USERS_PAGE_SIZE}, after: $after, filter: { active: { eq: true } }) {
+              nodes { id name displayName active }
+              pageInfo { hasNextPage endCursor }
+            }
+          }`,
+          { after },
+        );
+    const connection = (
+      teamId ? (data.team as { members?: UserConnection } | null)?.members : (data.users as UserConnection | undefined)
+    ) as UserConnection | undefined;
+    nodes.push(...(connection?.nodes ?? []));
+    const next: string | null | undefined = connection?.pageInfo?.endCursor;
+    if (!connection?.pageInfo?.hasNextPage || !next) break;
+    after = next;
+  }
+  return toAssignableUsers(nodes);
+}
+
+/**
+ * Active users that can be assigned to an issue: the members of the issue's team, or all active
+ * workspace users when the team is unknown. Cached per team for the session; failures are not cached.
+ * The cache belongs to one token, so switching workspaces in the same tab never shows a stale list.
+ */
+export function fetchAssignableUsers(apiKey: string, teamId: string): Promise<AssignableUser[]> {
+  if (assignableUsersCacheToken !== apiKey) {
+    assignableUsersCache.clear();
+    assignableUsersCacheToken = apiKey;
+  }
+  const key = teamId || WORKSPACE_USERS_KEY;
+  const cached = assignableUsersCache.get(key);
+  if (cached) return cached;
+  const request: Promise<AssignableUser[]> = fetchAssignableUsersUncached(apiKey, teamId).catch((e) => {
+    if (assignableUsersCache.get(key) === request) assignableUsersCache.delete(key);
+    throw e;
+  });
+  assignableUsersCache.set(key, request);
+  return request;
+}
+
+export function clearAssignableUsersCache(): void {
+  assignableUsersCache.clear();
+  assignableUsersCacheToken = null;
 }
 
 export async function createIssueRelation(apiKey: string, issueId: string, relatedIssueId: string): Promise<void> {

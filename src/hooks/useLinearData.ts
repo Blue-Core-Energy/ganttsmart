@@ -4,19 +4,22 @@ import {
   type ProjectExternalLink,
   createIssueRelation,
   createProjectExternalLink,
+  fetchAssignableUsers,
   fetchIssues,
   fetchProjectExternalLinks,
   fetchProjects,
   fetchWorkflowStates,
   findActiveExternalLink,
   removeIssueRelation,
+  updateIssueAssignee,
   updateIssueDueDate,
   updateIssueStartDate,
   updateIssueState,
+  updateIssueTitle,
   updateMilestoneTargetDate,
 } from '@/api/linear';
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
-import type { Filters, Milestone, Project, Task, WorkflowState } from '@/types';
+import type { AssignableUser, Filters, Milestone, Project, Task, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
@@ -592,6 +595,167 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     [linearToken, workflowStatesByTeam, workflowStates, tasks, externalTasks, allowExternalEdits, pushUndo],
   );
 
+  // Shared optimistic edit for a single issue (local or unlocked external): apply, persist,
+  // then record undo + toast; on failure restore the original field values and offer a retry.
+  const editTaskField = useCallback(
+    async ({
+      taskUuid,
+      apply,
+      fields,
+      persist,
+      undoPersist,
+      successMessage,
+      undoLabel,
+      failureMessage,
+    }: {
+      taskUuid: string;
+      apply: (task: Task) => Task;
+      /** Reads the fields touched by `apply`, so they can be restored without touching other edits */
+      fields: (task: Task) => Partial<Task>;
+      persist: () => Promise<void>;
+      undoPersist: (() => Promise<void>) | null;
+      successMessage: string;
+      undoLabel: string;
+      failureMessage: string;
+    }): Promise<boolean> => {
+      if (!linearToken) return false;
+      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
+      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
+      if (!task) return false;
+
+      if (fromExternal && !allowExternalEdits) {
+        toast('Unlock "Edit external" to modify cross-project issues', 'info');
+        return false;
+      }
+
+      const prevTasks = tasks;
+      const prevExternal = externalTasks;
+      const snapshot = fields(task);
+      const updateList = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? apply(t) : t));
+      const restore = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t));
+      if (fromExternal) setExternalTasks(updateList);
+      else setTasks(updateList);
+
+      pendingMutations.current++;
+      try {
+        await persist();
+        pushUndo(prevTasks, `${task.id} ${undoLabel}`, prevExternal);
+        toast(successMessage, 'success', {
+          label: 'Undo',
+          onClick: () => {
+            if (fromExternal) setExternalTasks(restore);
+            else setTasks(restore);
+            undoPersist?.().catch(() => {});
+          },
+        });
+        return true;
+      } catch (e) {
+        if (fromExternal) setExternalTasks(restore);
+        else setTasks(restore);
+        toastError(`${failureMessage}: ${(e as Error).message}`, () => {
+          void editTaskField({
+            taskUuid,
+            apply,
+            fields,
+            persist,
+            undoPersist,
+            successMessage,
+            undoLabel,
+            failureMessage,
+          });
+        });
+        return false;
+      } finally {
+        pendingMutations.current--;
+      }
+    },
+    [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+  );
+
+  // Workflow states for a team: cached, otherwise fetched on demand
+  const loadTeamWorkflowStates = useCallback(
+    async (teamId: string): Promise<WorkflowState[]> => {
+      const cached = teamId ? workflowStatesByTeam[teamId] : undefined;
+      if (cached && cached.length > 0) return cached;
+      if (!teamId || !linearToken) return workflowStates;
+      const fetched = await fetchWorkflowStates(linearToken, teamId);
+      setWorkflowStatesByTeam((prev) => ({ ...prev, [teamId]: fetched }));
+      return fetched;
+    },
+    [linearToken, workflowStatesByTeam, workflowStates],
+  );
+
+  const loadAssignableUsers = useCallback(
+    (teamId: string): Promise<AssignableUser[]> => fetchAssignableUsers(linearToken, teamId),
+    [linearToken],
+  );
+
+  // Optimistic status change to an explicitly chosen workflow state. Resolves true when persisted.
+  const setTaskStatus = useCallback(
+    async (taskUuid: string, nextState: WorkflowState): Promise<boolean> => {
+      const task = tasks.find((t) => t.uuid === taskUuid) || externalTasks.find((t) => t.uuid === taskUuid);
+      if (!task) return false;
+      if (task.status === nextState.name && task.statusType === nextState.type) return false;
+      const teamStates = (task.teamId && workflowStatesByTeam[task.teamId]) || workflowStates;
+      const prevState = findWorkflowStateForTask(task, teamStates);
+      const completedAtIso = new Date().toISOString();
+      return editTaskField({
+        taskUuid,
+        apply: (t) => applyWorkflowStateToTask(t, nextState, completedAtIso),
+        fields: (t) => ({ status: t.status, statusType: t.statusType, completedAt: t.completedAt }),
+        persist: () => updateIssueState(linearToken, taskUuid, nextState.id),
+        undoPersist: prevState ? () => updateIssueState(linearToken, taskUuid, prevState.id) : null,
+        successMessage: `Status → ${nextState.name}`,
+        undoLabel: 'status',
+        failureMessage: 'Failed to update status',
+      });
+    },
+    [tasks, externalTasks, workflowStatesByTeam, workflowStates, editTaskField, linearToken],
+  );
+
+  // Optimistic (re)assignment; `user === null` unassigns
+  const setTaskAssignee = useCallback(
+    async (taskUuid: string, user: AssignableUser | null): Promise<boolean> => {
+      const task = tasks.find((t) => t.uuid === taskUuid) || externalTasks.find((t) => t.uuid === taskUuid);
+      if (!task) return false;
+      const nextId = user?.id ?? null;
+      if ((task.assigneeId ?? null) === nextId && (nextId !== null || task.assignee === 'Unassigned')) return false;
+      const prevId = task.assigneeId ?? null;
+      return editTaskField({
+        taskUuid,
+        apply: (t) => ({ ...t, assignee: user?.name ?? 'Unassigned', assigneeId: nextId }),
+        fields: (t) => ({ assignee: t.assignee, assigneeId: t.assigneeId }),
+        persist: () => updateIssueAssignee(linearToken, taskUuid, nextId),
+        undoPersist: () => updateIssueAssignee(linearToken, taskUuid, prevId),
+        successMessage: user ? `Assigned to ${user.name}` : 'Unassigned',
+        undoLabel: 'assignee',
+        failureMessage: 'Failed to update assignee',
+      });
+    },
+    [tasks, externalTasks, editTaskField, linearToken],
+  );
+
+  // Optimistic rename; empty or unchanged titles are ignored
+  const renameTask = useCallback(
+    async (taskUuid: string, title: string): Promise<boolean> => {
+      const task = tasks.find((t) => t.uuid === taskUuid) || externalTasks.find((t) => t.uuid === taskUuid);
+      const nextTitle = title.trim();
+      if (!task || !nextTitle || nextTitle === task.title) return false;
+      const prevTitle = task.title;
+      return editTaskField({
+        taskUuid,
+        apply: (t) => ({ ...t, title: nextTitle }),
+        fields: (t) => ({ title: t.title }),
+        persist: () => updateIssueTitle(linearToken, taskUuid, nextTitle),
+        undoPersist: () => updateIssueTitle(linearToken, taskUuid, prevTitle),
+        successMessage: `Renamed ${task.id}`,
+        undoLabel: 'title',
+        failureMessage: 'Failed to rename issue',
+      });
+    },
+    [tasks, externalTasks, editTaskField, linearToken],
+  );
+
   // Create a "blocks" relation between two tasks (local or cross-project)
   const createRelation = useCallback(
     async (sourceTaskId: string, targetTaskId: string) => {
@@ -838,6 +1002,11 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     rescheduleStart,
     updateMilestoneDate,
     cycleStatus,
+    loadTeamWorkflowStates,
+    loadAssignableUsers,
+    setTaskStatus,
+    setTaskAssignee,
+    renameTask,
     createRelation,
     removeRelation,
     reorderTask,

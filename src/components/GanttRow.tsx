@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
-import type { Task, TimeScale } from '@/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AssignableUser, InlineEditHandlers, Task, TimeScale, WorkflowState } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
@@ -22,6 +22,8 @@ import {
   moveTaskDatesPreservingWorkdays,
 } from '@/utils/date';
 import { isTaskDone } from '@/utils/tasks';
+import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/workflowStates';
+import CellMenu, { type CellMenuOption } from './CellMenu';
 import { openDetailPanel } from './detailPanelStore';
 import DueDatePicker from './DueDatePicker';
 
@@ -41,6 +43,8 @@ interface Props {
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
   onCycleStatus?: (taskUuid: string) => Promise<void>;
+  /** Enables the status/assignee dropdowns and double-click title rename (never for read-only rows) */
+  inlineEdit?: InlineEditHandlers;
   onConnectStart?: (taskId: string, e: React.MouseEvent) => void;
   isConnecting?: boolean;
   depViolation?: string[]; // list of blocker IDs whose schedule is violated
@@ -68,6 +72,7 @@ export default function GanttRow({
   onReschedule,
   onRescheduleStart,
   onCycleStatus,
+  inlineEdit,
   onConnectStart,
   isConnecting,
   depViolation,
@@ -81,6 +86,7 @@ export default function GanttRow({
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
   const canCycleStatus = Boolean(onCycleStatus) && !isExternalReadOnly;
   const canConnect = Boolean(onConnectStart) && !isExternalReadOnly;
+  const canInlineEdit = Boolean(inlineEdit) && !isExternalReadOnly;
   const isDone = isTaskDone(task);
   const pCls = priorityClass(task.priorityVal);
   const dueDate = useMemo(() => new Date(task.due + 'T00:00:00'), [task.due]);
@@ -110,6 +116,94 @@ export default function GanttRow({
   const didDragRef = useRef(false);
 
   const isAnyDrag = isDragging || isDraggingStart || isMoving;
+
+  // Inline cell editing: status/assignee dropdowns (portaled menus) and double-click title rename
+  const [menu, setMenu] = useState<'status' | 'assignee' | null>(null);
+  const [menuErrors, setMenuErrors] = useState<{ status: string; assignee: string }>({ status: '', assignee: '' });
+  const menuLoadIdRef = useRef({ status: 0, assignee: 0 });
+  const [teamStates, setTeamStates] = useState<WorkflowState[] | null>(null);
+  const [teamUsers, setTeamUsers] = useState<AssignableUser[] | null>(null);
+  const statusAnchorRef = useRef<HTMLDivElement>(null);
+  const assigneeAnchorRef = useRef<HTMLDivElement>(null);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleDoneRef = useRef(false);
+  const isEditingTitle = editingTitle && canInlineEdit;
+
+  useEffect(() => {
+    if (!isEditingTitle) return;
+    titleInputRef.current?.focus();
+    titleInputRef.current?.select();
+  }, [isEditingTitle]);
+
+  const toggleMenu = (kind: 'status' | 'assignee') => {
+    if (!inlineEdit) return;
+    if (menu === kind) {
+      setMenu(null);
+      return;
+    }
+    setMenu(kind);
+    const loadId = ++menuLoadIdRef.current[kind];
+    setMenuErrors((prev) => ({ ...prev, [kind]: '' }));
+    const fail = (label: string) => (e: unknown) => {
+      // A newer load for the same menu supersedes this one
+      if (menuLoadIdRef.current[kind] !== loadId) return;
+      setMenuErrors((prev) => ({ ...prev, [kind]: `Failed to load ${label}: ${(e as Error).message}` }));
+    };
+    if (kind === 'status' && !teamStates) {
+      inlineEdit.loadWorkflowStates(task.teamId).then(setTeamStates).catch(fail('statuses'));
+    }
+    if (kind === 'assignee' && !teamUsers) {
+      inlineEdit.loadAssignableUsers(task.teamId).then(setTeamUsers).catch(fail('users'));
+    }
+  };
+
+  const statusMenuOptions = useMemo<CellMenuOption[]>(
+    () =>
+      sortWorkflowStatesForMenu(teamStates ?? []).map((s) => ({
+        value: s.id,
+        label: s.name,
+        icon: (
+          <span
+            className="w-2 h-2 rounded-full shrink-0"
+            style={{ backgroundColor: statusDotColors[s.type] || '#52525b' }}
+          />
+        ),
+      })),
+    [teamStates],
+  );
+  const activeStatusId = teamStates ? (findWorkflowStateForTask(task, teamStates)?.id ?? '') : '';
+
+  const assigneeMenuOptions = useMemo<CellMenuOption[]>(
+    () => [
+      { value: '', label: 'Unassigned', icon: <Avatar name="Unassigned" size="sm" /> },
+      ...(teamUsers ?? []).map((u) => ({
+        value: u.id,
+        label: u.name,
+        keywords: u.displayName,
+        icon: <Avatar name={u.name} size="sm" />,
+      })),
+    ],
+    [teamUsers],
+  );
+  const activeAssigneeId =
+    task.assigneeId ?? (teamUsers?.find((u) => u.name === task.assignee && task.assignee !== 'Unassigned')?.id || '');
+
+  const startTitleEdit = () => {
+    if (!canInlineEdit) return;
+    titleDoneRef.current = false;
+    setTitleDraft(task.title);
+    setEditingTitle(true);
+  };
+
+  const finishTitleEdit = (save: boolean) => {
+    if (titleDoneRef.current) return;
+    titleDoneRef.current = true;
+    setEditingTitle(false);
+    const next = titleDraft.trim();
+    if (save && inlineEdit && next && next !== task.title) void inlineEdit.renameTask(task.uuid, next);
+  };
 
   // Row reorder drag state (HTML5 DnD, initiated from the grip handle only)
   const [rowDragEnabled, setRowDragEnabled] = useState(false);
@@ -498,32 +592,157 @@ export default function GanttRow({
                 {/* Keep click-to-cycle reachable when the status column is hidden */}
                 {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
               </div>
-              <div
-                className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-                style={{ maxWidth: colWidths.task - 36 }}
-                title={task.title}
-              >
-                {task.title}
-              </div>
+              {isEditingTitle ? (
+                <input
+                  ref={titleInputRef}
+                  type="text"
+                  data-inline-edit="title"
+                  aria-label={`Rename ${task.id}`}
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  onBlur={() => finishTitleEdit(true)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      finishTitleEdit(true);
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      finishTitleEdit(false);
+                    }
+                  }}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                  className="w-full -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
+                  style={{ maxWidth: colWidths.task - 36 }}
+                />
+              ) : (
+                <div
+                  data-task-title={task.id}
+                  className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
+                  style={{ maxWidth: colWidths.task - 36 }}
+                  title={task.title}
+                  onDoubleClick={
+                    canInlineEdit
+                      ? (e) => {
+                          e.stopPropagation();
+                          startTitleEdit();
+                        }
+                      : undefined
+                  }
+                >
+                  {task.title}
+                </div>
+              )}
             </div>
           </div>
         );
 
       case 'assignee':
+        if (!canInlineEdit) {
+          return (
+            <div className="flex items-center gap-2 min-w-0" title={task.assignee}>
+              <Avatar name={task.assignee} size="sm" />
+              <span className="text-[11.5px] text-text-secondary truncate">{task.assignee}</span>
+            </div>
+          );
+        }
         return (
-          <div className="flex items-center gap-2 min-w-0" title={task.assignee}>
+          <div
+            ref={assigneeAnchorRef}
+            data-assignee-cell={task.id}
+            className="flex items-center gap-2 min-w-0 py-[18px] -my-[18px] cursor-pointer"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleMenu('assignee');
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             <Avatar name={task.assignee} size="sm" />
-            <span className="text-[11.5px] text-text-secondary truncate">{task.assignee}</span>
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={menu === 'assignee'}
+              aria-label={`Change assignee, currently ${task.assignee}`}
+              title={`${task.assignee} — click to change`}
+              className="text-[11.5px] text-text-secondary truncate min-w-0 text-left cursor-pointer outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent rounded"
+            >
+              {task.assignee}
+            </button>
+            {menu === 'assignee' && (
+              <CellMenu
+                anchorRef={assigneeAnchorRef}
+                options={assigneeMenuOptions}
+                value={activeAssigneeId}
+                searchable
+                searchPlaceholder="Search people…"
+                emptyMessage="No matching people"
+                loading={!teamUsers && !menuErrors.assignee}
+                error={menuErrors.assignee}
+                ariaLabel={`Assignee for ${task.id}`}
+                onClose={() => setMenu(null)}
+                onSelect={(id) => {
+                  const user = id ? (teamUsers?.find((u) => u.id === id) ?? null) : null;
+                  if (id && !user) return;
+                  void inlineEdit?.setAssignee(task.uuid, user);
+                }}
+              />
+            )}
           </div>
         );
 
       case 'status':
+        if (!canInlineEdit) {
+          return (
+            <div className="flex items-center gap-2 min-w-0">
+              {statusBubble}
+              <span className="text-[11.5px] text-text-secondary truncate" title={task.status}>
+                {task.status}
+              </span>
+            </div>
+          );
+        }
         return (
-          <div className="flex items-center gap-2 min-w-0">
+          <div
+            ref={statusAnchorRef}
+            data-status-cell={task.id}
+            className="flex items-center gap-2 min-w-0 py-[18px] -my-[18px] cursor-pointer"
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleMenu('status');
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
             {statusBubble}
-            <span className="text-[11.5px] text-text-secondary truncate" title={task.status}>
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={menu === 'status'}
+              aria-label={`Change status, currently ${task.status}`}
+              title={`${task.status} — click to change`}
+              className="text-[11.5px] text-text-secondary truncate min-w-0 text-left cursor-pointer outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent rounded"
+            >
               {task.status}
-            </span>
+            </button>
+            {menu === 'status' && (
+              <CellMenu
+                anchorRef={statusAnchorRef}
+                options={statusMenuOptions}
+                value={activeStatusId}
+                loading={!teamStates && !menuErrors.status}
+                error={menuErrors.status}
+                emptyMessage="No workflow states"
+                ariaLabel={`Status for ${task.id}`}
+                onClose={() => setMenu(null)}
+                onSelect={(id) => {
+                  const state = teamStates?.find((st) => st.id === id);
+                  if (state) void inlineEdit?.setStatus(task.uuid, state);
+                }}
+              />
+            )}
           </div>
         );
 
@@ -698,6 +917,8 @@ export default function GanttRow({
       }}
       onKeyDown={(e) => {
         const targetEl = e.target instanceof Element ? e.target : null;
+        // Keys typed in an inline editor or a portaled cell menu belong to that editor, not the row
+        if (targetEl && (!e.currentTarget.contains(targetEl) || targetEl.closest('[data-inline-edit]'))) return;
         const isInteractiveChild = Boolean(
           targetEl && targetEl !== e.currentTarget && targetEl.closest('button, a, input, select, textarea'),
         );

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Milestone, Task, TimeScale } from '@/types';
+import type { InlineEditHandlers, Milestone, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
@@ -43,6 +43,8 @@ interface Props {
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
   onCycleStatus?: (taskUuid: string) => Promise<void>;
+  /** Omit to keep status, assignee, and title read-only in the schedule table (shared views, exports) */
+  inlineEdit?: InlineEditHandlers;
   onCreateRelation?: (sourceTaskId: string, targetTaskId: string) => Promise<void>;
   onReorder?: (draggedUuid: string, targetUuid: string, placeAfter: boolean) => void;
   /** Omit to render milestones read-only (no dragging) — e.g. shared views */
@@ -102,6 +104,7 @@ export default function GanttChart({
   onReschedule,
   onRescheduleStart,
   onCycleStatus,
+  inlineEdit,
   onCreateRelation,
   onReorder,
   onUpdateMilestoneDate,
@@ -977,6 +980,7 @@ export default function GanttChart({
                 onReschedule={onReschedule}
                 onRescheduleStart={onRescheduleStart}
                 onCycleStatus={onCycleStatus}
+                inlineEdit={inlineEdit}
                 onConnectStart={onCreateRelation ? handleConnectStart : undefined}
                 isConnecting={isConnecting}
                 depViolation={depViolations.get(task.id)}

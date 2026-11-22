@@ -27,6 +27,8 @@ import {
   createFeedbackIssue,
   createProjectExternalLink,
   FeedbackTargetNotFoundError,
+  clearAssignableUsersCache,
+  fetchAssignableUsers,
   fetchIssues,
   fetchProjectExternalLinks,
   fetchWorkflowStates,
@@ -34,7 +36,9 @@ import {
   isRetryableNetworkError,
   resolveFeedbackTarget,
   testAuth,
+  updateIssueAssignee,
   updateIssueState,
+  updateIssueTitle,
 } from './linear';
 
 function jsonResponse(data: unknown): Response {
@@ -57,7 +61,7 @@ function makeIssueNode(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-11-01T00:00:00Z',
     completedAt: null,
     canceledAt: null,
-    assignee: { name: 'Alice' },
+    assignee: { id: 'user-1', name: 'Alice' },
     team: { id: 'team-1' },
     projectMilestone: null,
     ...overrides,
@@ -1342,6 +1346,180 @@ describe('workflowStates & updateIssueState', () => {
     await expect(updateIssueState('tok', 'uuid-1', 'st-3')).rejects.toThrow(
       'Linear did not confirm issue status update.',
     );
+  });
+});
+
+describe('inline issue edits (assignee, title) and assignable users', () => {
+  type Call = { query: string; variables?: Record<string, unknown> };
+
+  beforeEach(() => {
+    linearRequestMock.mockReset();
+    clearAssignableUsersCache();
+  });
+
+  it('fetchIssues exposes the assignee UUID and null when unassigned', async () => {
+    linearRequestMock.mockImplementation(async (_apiKey: string, body: { query: string }) => {
+      if (body.query.includes('project(id:')) {
+        expect(body.query).toContain('assignee { id name }');
+        return jsonResponse({
+          project: {
+            name: 'GanttSmart',
+            startDate: null,
+            targetDate: null,
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                makeIssueNode({ id: 'uuid-1', identifier: 'ENG-1' }),
+                makeIssueNode({ id: 'uuid-2', identifier: 'ENG-2', assignee: null }),
+              ],
+            },
+            doneIssues: { nodes: [] },
+          },
+        });
+      }
+      return jsonResponse({ issues: { nodes: [] } });
+    });
+
+    const result = await fetchIssues('token', 'proj-1');
+    expect(result.tasks.map((t) => [t.id, t.assignee, t.assigneeId])).toEqual([
+      ['ENG-1', 'Alice', 'user-1'],
+      ['ENG-2', 'Unassigned', null],
+    ]);
+  });
+
+  it('updateIssueAssignee sends the user id, null to unassign, and throws when success is false', async () => {
+    const calls: Call[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: Call) => {
+      calls.push(body);
+      return jsonResponse({ issueUpdate: { success: true } });
+    });
+
+    await updateIssueAssignee('tok', 'uuid-1', 'user-2');
+    await updateIssueAssignee('tok', 'uuid-1', null);
+    expect(calls[0].query).toContain('$assigneeId: String');
+    expect(calls[0].query).not.toContain('$assigneeId: String!');
+    expect(calls[0].variables).toEqual({ id: 'uuid-1', assigneeId: 'user-2' });
+    expect(calls[1].variables).toEqual({ id: 'uuid-1', assigneeId: null });
+
+    linearRequestMock.mockResolvedValueOnce(jsonResponse({ issueUpdate: { success: false } }));
+    await expect(updateIssueAssignee('tok', 'uuid-1', 'user-3')).rejects.toThrow(
+      'Linear did not confirm issue assignee update.',
+    );
+  });
+
+  it('updateIssueTitle trims the title, rejects empty titles, and throws when success is false', async () => {
+    const calls: Call[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: Call) => {
+      calls.push(body);
+      return jsonResponse({ issueUpdate: { success: true } });
+    });
+
+    await updateIssueTitle('tok', 'uuid-1', '  Better title  ');
+    expect(calls[0].query).toContain('$title: String!');
+    expect(calls[0].variables).toEqual({ id: 'uuid-1', title: 'Better title' });
+
+    await expect(updateIssueTitle('tok', 'uuid-1', '   ')).rejects.toThrow('Issue title cannot be empty.');
+    expect(calls).toHaveLength(1);
+
+    linearRequestMock.mockResolvedValueOnce(jsonResponse({ issueUpdate: { success: false } }));
+    await expect(updateIssueTitle('tok', 'uuid-1', 'Other')).rejects.toThrow(
+      'Linear did not confirm issue title update.',
+    );
+  });
+
+  it('fetchAssignableUsers queries team members with scalar fields only, drops inactive users, sorts, and caches per team', async () => {
+    const calls: Call[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: Call) => {
+      calls.push(body);
+      return jsonResponse({
+        team: {
+          members: {
+            nodes: [
+              { id: 'u-2', name: 'Zed Zane', displayName: 'zed', active: true },
+              { id: 'u-3', name: 'Gone Person', displayName: 'gone', active: false },
+              { id: 'u-1', name: 'Amy Adams', displayName: 'amy', active: true },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    });
+
+    const users = await fetchAssignableUsers('tok', 'team-1');
+    expect(users).toEqual([
+      { id: 'u-1', name: 'Amy Adams', displayName: 'amy' },
+      { id: 'u-2', name: 'Zed Zane', displayName: 'zed' },
+    ]);
+    expect(calls[0].query).toContain('team(id: $teamId)');
+    expect(calls[0].query).toContain('members(first: 100');
+    expect(calls[0].query).toContain('nodes { id name displayName active }');
+    expect(calls[0].variables).toEqual({ teamId: 'team-1', after: null });
+
+    await fetchAssignableUsers('tok', 'team-1');
+    expect(calls).toHaveLength(1);
+    await fetchAssignableUsers('tok', 'team-2');
+    expect(calls).toHaveLength(2);
+  });
+
+  it('fetchAssignableUsers does not reuse a cached team list across tokens', async () => {
+    const tokens: string[] = [];
+    linearRequestMock.mockImplementation(async (token: string) => {
+      tokens.push(token);
+      return jsonResponse({
+        team: {
+          members: {
+            nodes: [{ id: `user-of-${token}`, name: token, displayName: token, active: true }],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    });
+
+    expect((await fetchAssignableUsers('tok-a', 'team-1'))[0].id).toBe('user-of-tok-a');
+    expect((await fetchAssignableUsers('tok-b', 'team-1'))[0].id).toBe('user-of-tok-b');
+    expect(tokens).toEqual(['tok-a', 'tok-b']);
+  });
+
+  it('fetchAssignableUsers follows pagination and falls back to active workspace users without a team', async () => {
+    const calls: Call[] = [];
+    linearRequestMock.mockImplementation(async (_token: string, body: Call) => {
+      calls.push(body);
+      if (body.query.includes('users(')) {
+        return jsonResponse({
+          users: { nodes: [{ id: 'w-1', name: 'Wes', displayName: 'wes', active: true }], pageInfo: {} },
+        });
+      }
+      return jsonResponse({
+        team: {
+          members: {
+            nodes: [
+              { id: body.variables?.after ? 'u-2' : 'u-1', name: body.variables?.after ? 'B' : 'A', active: true },
+            ],
+            pageInfo: { hasNextPage: !body.variables?.after, endCursor: 'cursor-1' },
+          },
+        },
+      });
+    });
+
+    const paged = await fetchAssignableUsers('tok', 'team-9');
+    expect(paged.map((u) => u.id)).toEqual(['u-1', 'u-2']);
+    expect(calls[1].variables).toEqual({ teamId: 'team-9', after: 'cursor-1' });
+
+    const workspace = await fetchAssignableUsers('tok', '');
+    expect(workspace.map((u) => u.id)).toEqual(['w-1']);
+    expect(calls[2].query).toContain('filter: { active: { eq: true } }');
+  });
+
+  it('fetchAssignableUsers does not cache failures', async () => {
+    linearRequestMock.mockResolvedValueOnce(new Response('boom', { status: 400 }));
+    await expect(fetchAssignableUsers('tok', 'team-1')).rejects.toThrow('Linear API error (400)');
+
+    linearRequestMock.mockResolvedValueOnce(
+      jsonResponse({
+        team: { members: { nodes: [{ id: 'u-1', name: 'Amy', active: true }], pageInfo: { hasNextPage: false } } },
+      }),
+    );
+    await expect(fetchAssignableUsers('tok', 'team-1')).resolves.toHaveLength(1);
   });
 });
 

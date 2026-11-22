@@ -2197,6 +2197,359 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('edits status, assignee, and title inline from schedule table cells', async ({ page }) => {
+    const errors = trackErrors(page);
+    const updates: Array<Record<string, unknown>> = [];
+    let projectLoads = 0;
+    let failNextUpdate = false;
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: Record<string, unknown>;
+      } | null;
+      if (await defaultScheduleMock.handle(route, payload)) return;
+      const query = payload?.query ?? '';
+      const respond = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) {
+        await respond({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        projectLoads++;
+        await respond({
+          project: {
+            name: 'Demo Project',
+            startDate: isoOffsetDays(-10),
+            targetDate: isoOffsetDays(20),
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                {
+                  id: 'uuid-1',
+                  identifier: 'ENG-101',
+                  title: 'Design valve manifold',
+                  description: `${startTagOffsetDays(-2)}\nManifold details`,
+                  dueDate: isoOffsetDays(5),
+                  url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                  priority: 2,
+                  state: { name: 'In Progress', type: 'started' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  assignee: { id: 'user-andrew', name: 'Andrew Phillips' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                },
+                {
+                  id: 'uuid-2',
+                  identifier: 'ENG-102',
+                  title: 'Pressure test rig',
+                  description: `${startTagOffsetDays(1)}\nTest details`,
+                  dueDate: isoOffsetDays(9),
+                  url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                  priority: 3,
+                  state: { name: 'Todo', type: 'unstarted' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  assignee: { id: 'user-nate', name: 'Nate Jones' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                },
+              ],
+            },
+            doneIssues: { nodes: [] },
+          },
+        });
+        return;
+      }
+
+      if (query.includes('members(')) {
+        expect(payload?.variables?.teamId).toBe('team-1');
+        await respond({
+          team: {
+            members: {
+              nodes: [
+                { id: 'user-priya', name: 'Priya Shah', displayName: 'priya', active: true },
+                { id: 'user-nate', name: 'Nate Jones', displayName: 'nate', active: true },
+                { id: 'user-gone', name: 'Dana Departed', displayName: 'dana', active: false },
+                { id: 'user-andrew', name: 'Andrew Phillips', displayName: 'andrew', active: true },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await respond({ issues: { nodes: [] } });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await respond({
+          workflowStates: {
+            nodes: [
+              { id: 'st-dup', name: 'Duplicate', type: 'duplicate', position: 0 },
+              { id: 'st-done', name: 'Done', type: 'completed', position: 0 },
+              { id: 'st-can', name: 'Canceled', type: 'canceled', position: 0 },
+              { id: 'st-prog', name: 'In Progress', type: 'started', position: 0 },
+              { id: 'st-todo', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-back', name: 'Backlog', type: 'backlog', position: 0 },
+            ],
+          },
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        if (failNextUpdate) {
+          failNextUpdate = false;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ errors: [{ message: 'Permission denied' }] }),
+          });
+          return;
+        }
+        updates.push(payload?.variables ?? {});
+        await respond({ issueUpdate: { success: true } });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    const row101 = page.locator('tr[data-task-id="ENG-101"]');
+    const row102 = page.locator('tr[data-task-id="ENG-102"]');
+    const menu = page.locator('[data-inline-menu]');
+    const titleInput = page.locator('input[data-inline-edit="title"]');
+    await expect(row101).toBeVisible();
+
+    // ---- Status dropdown ----
+    await row101.getByRole('button', { name: 'Change status, currently In Progress' }).click();
+    await expect(menu).toBeVisible();
+    // Portaled to <body> so the table's overflow never clips it
+    expect(await menu.evaluate((el) => el.parentElement === document.body)).toBe(true);
+    await expect(menu.getByRole('option')).toHaveText([
+      'Backlog',
+      'Todo',
+      'In Progress',
+      'Done',
+      'Canceled',
+      'Duplicate',
+    ]);
+    await expect(menu.getByRole('option', { name: 'In Progress' })).toHaveAttribute('aria-selected', 'true');
+    await expect(menu.getByRole('option', { name: 'Todo' })).toHaveAttribute('aria-selected', 'false');
+    // Opening the menu neither opens DetailPanel nor starts a row drag
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+
+    await menu.getByRole('option', { name: 'Done' }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(row101).toHaveAttribute('data-task-done', 'true');
+    await expect(page.locator('[data-status-bubble="ENG-101"]')).toHaveAttribute('title', 'Done — click to cycle');
+    await expect(page.getByText('Status → Done')).toBeVisible();
+    expect(updates).toEqual([{ id: 'uuid-1', stateId: 'st-done' }]);
+
+    // Clicking the empty part of the cell opens the menu too; Escape closes it without side effects
+    const statusCell = page.locator('[data-status-cell="ENG-101"]');
+    const statusBox = (await statusCell.boundingBox())!;
+    await statusCell.click({ position: { x: statusBox.width - 6, y: 6 } });
+    await expect(menu).toBeVisible();
+    await expect(menu.getByRole('option', { name: 'Done' })).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    expect(updates).toHaveLength(1);
+
+    // Keyboard: arrows + Enter pick a state, and the row never sees those keys
+    await row101.getByRole('button', { name: 'Change status, currently Done' }).click();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('[data-status-bubble="ENG-101"]')).toHaveAttribute(
+      'title',
+      'In Progress — click to cycle',
+    );
+    expect(updates[1]).toEqual({ id: 'uuid-1', stateId: 'st-prog' });
+
+    // The status bubble still cycles without opening the menu
+    await page.locator('[data-status-bubble="ENG-102"]').click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
+      'title',
+      'In Progress — click to cycle',
+    );
+    expect(updates[2]).toEqual({ id: 'uuid-2', stateId: 'st-prog' });
+
+    // Failed mutation rolls the status back and shows an error toast
+    failNextUpdate = true;
+    await row102.getByRole('button', { name: 'Change status, currently In Progress' }).click();
+    await menu.getByRole('option', { name: 'Backlog' }).click();
+    await expect(page.getByText('Failed to update status: Permission denied')).toBeVisible();
+    await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
+      'title',
+      'In Progress — click to cycle',
+    );
+
+    // ---- Assignee dropdown ----
+    const loadsBeforeSearch = projectLoads;
+    await row102.getByRole('button', { name: 'Change assignee, currently Nate Jones' }).click();
+    await expect(menu).toBeVisible();
+    expect(await menu.evaluate((el) => el.parentElement === document.body)).toBe(true);
+    const search = menu.getByRole('combobox', { name: 'Search people…' });
+    await expect(search).toBeFocused();
+    await expect(menu.getByRole('option')).toContainText(['Unassigned', 'Andrew Phillips', 'Nate Jones', 'Priya Shah']);
+    await expect(menu.getByRole('option', { name: 'Nate Jones' })).toHaveAttribute('aria-selected', 'true');
+
+    // Typing shortcuts ('r' refreshes, 's' cycles status) must stay inside the search box
+    await search.fill('pr');
+    await expect(menu.getByRole('option')).toContainText(['Priya Shah']);
+    await expect(menu.getByRole('option')).toHaveCount(1);
+    await page.keyboard.type('s');
+    await expect(search).toHaveValue('prs');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.press('ArrowDown');
+    await expect(search).toBeFocused();
+    await expect(page.locator('tr[data-task-id="ENG-102"]')).not.toBeFocused();
+    expect(projectLoads).toBe(loadsBeforeSearch);
+    await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
+      'title',
+      'In Progress — click to cycle',
+    );
+
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await expect(row102.locator('[data-assignee-cell="ENG-102"]')).toContainText('Priya Shah');
+    await expect(page.getByText('Assigned to Priya Shah')).toBeVisible();
+    expect(updates[3]).toEqual({ id: 'uuid-2', assigneeId: 'user-priya' });
+
+    // "Unassigned" clears the assignee (sends null)
+    await row102.getByRole('button', { name: 'Change assignee, currently Priya Shah' }).click();
+    await menu.getByRole('option', { name: 'Unassigned' }).click();
+    await expect(row102.locator('[data-assignee-cell="ENG-102"]')).toContainText('Unassigned');
+    await expect(page.getByText('Unassigned', { exact: true }).first()).toBeVisible();
+    expect(updates[4]).toEqual({ id: 'uuid-2', assigneeId: null });
+
+    // Escape closes without changing anything; failures roll back
+    await row102.getByRole('button', { name: 'Change assignee, currently Unassigned' }).click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    expect(updates).toHaveLength(5);
+
+    failNextUpdate = true;
+    await row102.getByRole('button', { name: 'Change assignee, currently Unassigned' }).click();
+    await menu.getByRole('option', { name: 'Andrew Phillips' }).click();
+    await expect(page.getByText('Failed to update assignee: Permission denied')).toBeVisible();
+    await expect(row102.locator('[data-assignee-cell="ENG-102"]')).toContainText('Unassigned');
+
+    // Clicking outside closes an open menu
+    await row101.getByRole('button', { name: 'Change assignee, currently Andrew Phillips' }).click();
+    await expect(menu).toBeVisible();
+    await page.mouse.click(5, 300);
+    await expect(menu).toHaveCount(0);
+
+    // Opening another row's menu swaps the open menu instead of leaving two floating. A menu opens below
+    // its row, so the row above stays clickable while the menu is open.
+    const statusButton = (id: string) => page.locator(`[data-status-cell="${id}"] button[aria-haspopup="listbox"]`);
+    await statusButton('ENG-102').click();
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Status for ENG-102');
+    await statusButton('ENG-101').click();
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Status for ENG-101');
+    await row101.locator('[data-assignee-cell="ENG-101"] button[aria-haspopup="listbox"]').click();
+    await expect(menu).toHaveCount(1);
+    await expect(menu).toHaveAttribute('data-inline-menu', 'Assignee for ENG-101');
+
+    // Controls that stop propagation (task bar, status bubble) still dismiss an open menu
+    await page.locator('[data-task-bar="ENG-101"]').click();
+    await expect(menu).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    await statusButton('ENG-102').click();
+    await expect(menu).toHaveCount(1);
+    const bubbleBox = (await page.locator('[data-status-bubble="ENG-101"]').boundingBox())!;
+    await page.mouse.move(bubbleBox.x + bubbleBox.width / 2, bubbleBox.y + bubbleBox.height / 2);
+    await page.mouse.down();
+    await expect(menu).toHaveCount(0);
+    // Release elsewhere so the press does not count as a click that cycles the status
+    await page.mouse.move(5, 300);
+    await page.mouse.up();
+    expect(updates).toHaveLength(5);
+
+    // ---- Title rename ----
+    const title101 = page.locator('[data-task-title="ENG-101"]');
+    await title101.click();
+    await expect(titleInput).toHaveCount(0);
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+
+    // Double-click + Enter saves
+    await title101.dblclick();
+    await expect(titleInput).toBeFocused();
+    await expect(titleInput).toHaveValue('Design valve manifold');
+    await page.keyboard.press('ArrowDown');
+    await expect(titleInput).toBeFocused();
+    await titleInput.fill('Design valve manifold v2');
+    await page.keyboard.press('Enter');
+    await expect(titleInput).toHaveCount(0);
+    await expect(title101).toHaveText('Design valve manifold v2');
+    expect(updates[5]).toEqual({ id: 'uuid-1', title: 'Design valve manifold v2' });
+
+    // Escape cancels and restores the original title without a request
+    await title101.dblclick();
+    await titleInput.fill('Throwaway title');
+    await page.keyboard.press('Escape');
+    await expect(titleInput).toHaveCount(0);
+    await expect(title101).toHaveText('Design valve manifold v2');
+    expect(updates).toHaveLength(6);
+
+    // Empty and unchanged titles are ignored cleanly
+    await title101.dblclick();
+    await titleInput.fill('   ');
+    await page.keyboard.press('Enter');
+    await expect(title101).toHaveText('Design valve manifold v2');
+    await title101.dblclick();
+    await page.keyboard.press('Enter');
+    await expect(title101).toHaveText('Design valve manifold v2');
+    expect(updates).toHaveLength(6);
+
+    // Blur saves
+    const title102 = page.locator('[data-task-title="ENG-102"]');
+    await title102.dblclick();
+    await titleInput.fill('Pressure test rig (blur)');
+    await page.mouse.click(5, 300);
+    await expect(title102).toHaveText('Pressure test rig (blur)');
+    expect(updates[6]).toEqual({ id: 'uuid-2', title: 'Pressure test rig (blur)' });
+
+    // Failed rename rolls back
+    failNextUpdate = true;
+    await title102.dblclick();
+    await titleInput.fill('Will not stick');
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Failed to rename issue: Permission denied')).toBeVisible();
+    await expect(title102).toHaveText('Pressure test rig (blur)');
+
+    expect(errors).toEqual([]);
+  });
+
   test('renders cross-project dependency ghost rows inline, flags violations, supports reordering, write mode, and project jump', async ({
     page,
   }) => {
@@ -2440,6 +2793,13 @@ test.describe('GanttSmart GCP app', () => {
     // 2. Ghost row is read-only by default (status bubble is a static span, not a button)
     await expect(page.locator('button[data-status-bubble="CTRL-42"]')).toHaveCount(0);
     await expect(page.locator('span[data-status-bubble="CTRL-42"]')).toBeVisible();
+    // ...and so are its status, assignee, and title cells: no dropdown triggers, no inline rename
+    await expect(page.locator('[data-status-cell="CTRL-42"]')).toHaveCount(0);
+    await expect(page.locator('[data-assignee-cell="CTRL-42"]')).toHaveCount(0);
+    await page.locator('[data-task-title="CTRL-42"]').dblclick();
+    await expect(page.locator('input[data-inline-edit="title"]')).toHaveCount(0);
+    // A local row in the same table stays editable
+    await expect(page.locator('[data-status-cell="COMM-101"]')).toBeVisible();
 
     // 3. Ghost row can be moved up and down like a normal row (Alt+ArrowDown)
     await rows.nth(0).focus();
@@ -2452,6 +2812,8 @@ test.describe('GanttSmart GCP app', () => {
     await editExternalBtn.click();
     await expect(page.getByRole('button', { name: 'Editing external' })).toHaveAttribute('aria-pressed', 'true');
 
+    await expect(page.locator('[data-status-cell="CTRL-42"]')).toBeVisible();
+    await expect(page.locator('[data-assignee-cell="CTRL-42"]')).toBeVisible();
     const ctrlBubbleBtn = page.locator('button[data-status-bubble="CTRL-42"]');
     await expect(ctrlBubbleBtn).toBeVisible();
     await ctrlBubbleBtn.click();

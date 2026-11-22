@@ -10,6 +10,8 @@ export interface Task {
   status: string;
   statusType: string;
   assignee: string;
+  /** Linear user UUID of the assignee, or null when unassigned */
+  assigneeId?: string | null;
   url: string; // direct Linear URL
   teamId: string; // team UUID for workflow states
   blocks: string[];
@@ -52,6 +54,22 @@ export interface WorkflowState {
   name: string;
   type: string; // 'triage' | 'backlog' | 'unstarted' | 'started' | 'completed' | 'canceled' | 'duplicate'
   position: number;
+}
+
+/** A Linear user an issue can be assigned to */
+export interface AssignableUser {
+  id: string;
+  name: string;
+  displayName: string;
+}
+
+/** Handlers that enable editing status, assignee, and title directly from schedule table cells */
+export interface InlineEditHandlers {
+  loadWorkflowStates: (teamId: string) => Promise<WorkflowState[]>;
+  loadAssignableUsers: (teamId: string) => Promise<AssignableUser[]>;
+  setStatus: (taskUuid: string, state: WorkflowState) => Promise<void>;
+  setAssignee: (taskUuid: string, user: AssignableUser | null) => Promise<void>;
+  renameTask: (taskUuid: string, title: string) => Promise<void>;
 }
 
 export const PRIORITY_MAP: Record<number, string> = {
