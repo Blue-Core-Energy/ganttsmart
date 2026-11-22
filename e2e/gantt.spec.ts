@@ -1055,6 +1055,23 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Unscheduled active task')).toBeVisible();
     await expect(page.getByText('Unscheduled duplicate task')).toHaveCount(0);
 
+    // The section sits above the schedule table, keeps its count badge, and still collapses in place
+    const unscheduledSection = page.getByTestId('unscheduled-section');
+    const unscheduledToggle = unscheduledSection.getByRole('button', { name: /Unscheduled/ });
+    await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('1');
+    const sectionBox = await unscheduledSection.boundingBox();
+    const headerBox = await page.locator('thead').boundingBox();
+    const firstRowBox = await page.locator('[data-task-bar="ENG-101"]').boundingBox();
+    expect(sectionBox).not.toBeNull();
+    expect(sectionBox!.y + sectionBox!.height).toBeLessThanOrEqual(headerBox!.y + 1);
+    expect(headerBox!.y).toBeLessThan(firstRowBox!.y);
+    await unscheduledToggle.click();
+    await expect(page.getByText('Unscheduled active task')).toHaveCount(0);
+    await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('1');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await unscheduledToggle.click();
+    await expect(page.getByText('Unscheduled active task')).toBeVisible();
+
     // FilterBar count pill reflects only the 2 active scheduled tasks
     await expect(page.getByText('2/2', { exact: true })).toBeVisible();
 
@@ -5382,7 +5399,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(arrow('ENG-201', 'ENG-210')).toHaveCount(0);
 
     // The rolled-up arrow leaves the parent bar's right edge and enters the target bar's left edge
-    const chartBox = (await page.locator('#gantt-export-target > div').first().boundingBox())!;
+    const chartBox = (await page.getByTestId('gantt-chart-body').boundingBox())!;
     const parentBox = (await page.locator('[data-task-bar="ENG-200"]').boundingBox())!;
     const targetBox = (await page.locator('[data-task-bar="ENG-210"]').boundingBox())!;
     // Paths are `M x y` then H/V segments, so the last two numbers are the final vertical and the target x
