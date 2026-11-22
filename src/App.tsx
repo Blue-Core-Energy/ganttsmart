@@ -226,7 +226,6 @@ function GanttView({
         theme={theme}
         onThemeChange={setTheme}
         projectId={selectedProjectId}
-        tasks={filteredTasks}
         linearToken={linearToken}
         linearProjectUrl={linearProjectUrl}
         isLinkedInLinear={isLinkedInLinear}

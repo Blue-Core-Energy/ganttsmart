@@ -1,7 +1,6 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
-import type { Task } from '@/types';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import type { FeedbackType } from '@/utils/feedback';
 import { isSafeUrl } from '@/utils/url';
@@ -21,7 +20,6 @@ interface Props {
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
   projectId: string;
-  tasks: Task[];
   linearToken?: string;
   linearProjectUrl?: string | null;
   isLinkedInLinear?: boolean;
@@ -34,25 +32,6 @@ const iconBtn =
 
 const ghostBtn =
   'flex items-center gap-1.5 px-2 md:px-2.5 h-8 rounded-md text-xs font-medium text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors cursor-pointer whitespace-nowrap shrink-0';
-
-function formatRangeLabel(tasks: Task[]): string | null {
-  const dates: number[] = [];
-  for (const t of tasks) {
-    if (t.startDate) {
-      const d = new Date(t.startDate).getTime();
-      if (!Number.isNaN(d)) dates.push(d);
-    }
-    if (t.due) {
-      const d = new Date(t.due).getTime();
-      if (!Number.isNaN(d)) dates.push(d);
-    }
-  }
-  if (dates.length < 2) return null;
-  const min = new Date(Math.min(...dates));
-  const max = new Date(Math.max(...dates));
-  const fmt = (d: Date) => d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  return `${fmt(min)} – ${fmt(max)}`;
-}
 
 function SunIcon() {
   return (
@@ -201,7 +180,6 @@ export default memo(function Header({
   theme,
   onThemeChange,
   projectId,
-  tasks,
   linearToken,
   linearProjectUrl,
   isLinkedInLinear,
@@ -228,8 +206,6 @@ export default memo(function Header({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
-
-  const rangeLabel = useMemo(() => formatRangeLabel(tasks), [tasks]);
 
   const handleExport = async (format: 'png' | 'pdf') => {
     setShowExportMenu(false);
@@ -288,28 +264,6 @@ export default memo(function Header({
           </>
         )}
       </div>
-
-      {/* Center: sprint/date range badge */}
-      {rangeLabel && (
-        <div className="hidden lg:flex items-center gap-1.5 h-7 px-2.5 rounded-full bg-bg-hover border border-border-primary text-[11px] font-medium text-text-secondary whitespace-nowrap shrink-0">
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <line x1="16" y1="2" x2="16" y2="6" />
-            <line x1="8" y1="2" x2="8" y2="6" />
-            <line x1="3" y1="10" x2="21" y2="10" />
-          </svg>
-          <span className="font-mono tabular-nums">{rangeLabel}</span>
-        </div>
-      )}
 
       {/* Spacer */}
       <div className="flex-1" />
