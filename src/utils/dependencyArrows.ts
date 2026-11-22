@@ -35,10 +35,14 @@ export interface ArrowEndpoints {
 export interface ArrowPathOptions {
   /** Maximum corner radius for rounded elbows in px. Defaults to ARROW_CORNER_RADIUS (6). */
   cornerRadius?: number;
-  /** Horizontal offset applied to the vertical segment (for staggering unrelated arrows) */
-  midXOffset?: number;
-  /** Vertical offset applied to the horizontal return lane in backwards arrows (for staggering) */
-  laneYOffset?: number;
+  /** Absolute x of a forward arrow's vertical run. Defaults to the turn nearest the source bar. */
+  turnX?: number;
+  /** Absolute x of a backwards arrow's drop from the source bar to its lane */
+  exitX?: number;
+  /** Absolute x of a backwards arrow's run from its lane up/down into the target row */
+  entryX?: number;
+  /** Absolute y of a backwards arrow's horizontal lane */
+  laneY?: number;
 }
 
 export interface DependencyArrowEdge extends ArrowEndpoints {
@@ -49,7 +53,9 @@ export interface DependencyArrowEdge extends ArrowEndpoints {
 
 export interface RoutedDependencyArrow extends DependencyArrowEdge {
   path: string;
+  /** How far the arrow's vertical run was moved from its own default column (exit column for backwards arrows) */
   midXOffset: number;
+  /** How far the arrow's lane was moved from its default, away from the source bar */
   laneYOffset: number;
 }
 
@@ -206,6 +212,8 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
  *
  * Forward arrows turn close to the source bar (`fromX + ARROW_STUB`) so vertical drops
  * stay near bars instead of cutting across unrelated tasks in the middle of the chart.
+ * Explicit `turnX` / `exitX` / `entryX` / `laneY` options (assigned by `routeDependencyArrows`)
+ * are used as given, never recomputed.
  */
 export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints, options?: ArrowPathOptions): string {
   const dx = toX - fromX;
@@ -216,48 +224,101 @@ export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints, optio
     if (sameRow) {
       return `M ${round(fromX)} ${round(fromY)} H ${round(toX)}`;
     }
-    // Forward arrow: near-bar turn
-    // When dx >= ARROW_DIRECT_MIN_GAP (24px), turn at fromX + ARROW_STUB (near the source bar).
-    // When ARROW_STUB <= dx < ARROW_DIRECT_MIN_GAP (12px to 24px), turn at toX - ARROW_STUB
-    // to preserve at least ARROW_STUB for the final approach into the target arrowhead.
-    let baseMidX = dx >= ARROW_DIRECT_MIN_GAP ? fromX + ARROW_STUB : toX - ARROW_STUB;
-    if (options?.midXOffset) {
-      baseMidX += options.midXOffset;
-      baseMidX = Math.max(fromX + 4, Math.min(toX - 8, baseMidX));
-    }
+    const turnX = options?.turnX ?? defaultTurnX({ fromX, toX });
     const points: Point[] = [
       { x: fromX, y: fromY },
-      { x: baseMidX, y: fromY },
-      { x: baseMidX, y: toY },
+      { x: turnX, y: fromY },
+      { x: turnX, y: toY },
       { x: toX, y: toY },
     ];
     return buildRoundedPath(points, cornerRadius);
   }
 
   // Backwards or tight forward overlap: route around through the lane beside the source row
-  const baseLaneOffset = toY < fromY ? -ARROW_LANE_OFFSET : ARROW_LANE_OFFSET;
-  let laneY = fromY + baseLaneOffset;
-  if (options?.laneYOffset) {
-    laneY += options.laneYOffset;
-  }
+  const laneY = options?.laneY ?? fromY + laneDirection({ fromY, toY }) * ARROW_LANE_OFFSET;
+  const exitX = options?.exitX ?? fromX + ARROW_STUB;
+  const entryX = options?.entryX ?? toX - ARROW_STUB;
 
   const points: Point[] = [
     { x: fromX, y: fromY },
-    { x: fromX + ARROW_STUB, y: fromY },
-    { x: fromX + ARROW_STUB, y: laneY },
-    { x: toX - ARROW_STUB, y: laneY },
-    { x: toX - ARROW_STUB, y: toY },
+    { x: exitX, y: fromY },
+    { x: exitX, y: laneY },
+    { x: entryX, y: laneY },
+    { x: entryX, y: toY },
     { x: toX, y: toY },
   ];
   return buildRoundedPath(points, cornerRadius);
 }
 
 /**
+ * Column a forward arrow turns at. With room to spare it hugs the source bar; between one
+ * and two stubs of gap it sits a full stub short of the target to leave room for the arrowhead.
+ */
+function defaultTurnX({ fromX, toX }: { fromX: number; toX: number }): number {
+  return toX - fromX >= ARROW_DIRECT_MIN_GAP ? fromX + ARROW_STUB : toX - ARROW_STUB;
+}
+
+/** -1 when a backwards arrow's lane runs above its source bar, +1 when below */
+function laneDirection({ fromY, toY }: { fromY: number; toY: number }): 1 | -1 {
+  return toY < fromY ? -1 : 1;
+}
+
+/** A vertical run of an arrow, tagged with the endpoints that allow it to merge with others */
+interface VerticalSpan {
+  y1: number;
+  y2: number;
+  sourceId: string;
+  targetId: string;
+}
+
+/** A vertical run already fixed at its final x */
+interface PlacedSpan extends VerticalSpan {
+  x: number;
+}
+
+/**
+ * A set of vertical runs that must share one x (one source's exit trunk, one target's entry
+ * column) and is therefore shifted as a single unit when it collides with unrelated arrows.
+ */
+interface Column {
+  baseX: number;
+  /** Candidate x values (after shifting) are clamped into [minX, maxX] */
+  minX: number;
+  maxX: number;
+  /** Which way to try shifting first */
+  firstSign: 1 | -1;
+  maxSteps: number;
+  spans: VerticalSpan[];
+}
+
+/** A horizontal lane of a backwards arrow, shared by every backwards arrow of one source and side */
+interface Lane {
+  baseY: number;
+  /** +1 below the source bar, -1 above; staggering only ever moves away from the bar */
+  direction: 1 | -1;
+  sourceId: string;
+  /** One x-extent per arrow, tagged with its target */
+  spans: { x1: number; x2: number; targetId: string }[];
+}
+
+const overlapLength = (a1: number, a2: number, b1: number, b2: number) => Math.min(a2, b2) - Math.max(a1, b1);
+
+/** Overlap needed (in px) before two runs count as the same track */
+const MIN_TRACK_OVERLAP = 2;
+
+/** Arrows from one source, or into one target, are allowed to share a track exactly */
+const mayShareTrack = (a: { sourceId: string; targetId: string }, b: { sourceId: string; targetId: string }) =>
+  a.sourceId === b.sourceId || a.targetId === b.targetId;
+
+/**
  * Route multiple dependency arrows:
- * - Arrows sharing the same source (`sourceId`) share the exact same exit trunk and turn.
- * - Arrows sharing the same destination (`targetId`) converge onto the exact same final approach.
- * - Unrelated arrows (different sourceId AND different targetId) that would overlap along the same
- *   vertical column (`midX`) or horizontal lane (`laneY`) have their tracks staggered.
+ * - Forward arrows from the same source share one exit column (the tightest turn in the group).
+ * - Backwards arrows from the same source share one exit column and one lane per side; backwards
+ *   arrows into the same target share one entry column.
+ * - Any two vertical runs, forward or backwards, that overlap on the same column are staggered
+ *   unless they share a `sourceId` or a `targetId`. Candidates are tested against the final x of
+ *   every run already placed, and clamping happens before the test.
+ * - Overlapping backwards lanes are staggered away from the source bar.
  */
 export function routeDependencyArrows<T extends DependencyArrowEdge>(
   arrows: T[],
@@ -265,207 +326,231 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
 ): (T & { path: string; midXOffset: number; laneYOffset: number })[] {
   const cornerRadius = options?.cornerRadius ?? ARROW_CORNER_RADIUS;
   const staggerStep = options?.staggerStep ?? ARROW_STAGGER_STEP;
+  /** Tracks closer than this (px) read as one line */
+  const minSeparation = staggerStep - 1;
 
-  // 1. Group forward arrows by sourceId
-  interface ForwardGroup {
-    sourceId: string;
-    baseMidX: number;
-    minY: number;
-    maxY: number;
-    targets: Set<string>;
-    arrows: T[];
-  }
+  type Kind = 'straight' | 'forward' | 'backward';
+  const kindOf = (a: T): Kind => {
+    const dx = a.toX - a.fromX;
+    const sameRow = Math.abs(a.toY - a.fromY) < 0.05;
+    if (sameRow && dx >= 0) return 'straight';
+    if (dx >= ARROW_STUB && !sameRow) return 'forward';
+    return 'backward';
+  };
 
-  const forwardGroups = new Map<string, ForwardGroup>();
-  const backwardArrows: T[] = [];
-
+  const forwardBySource = new Map<string, T[]>();
+  const backward: T[] = [];
   for (const arrow of arrows) {
-    const dx = arrow.toX - arrow.fromX;
-    const sameRow = Math.abs(arrow.toY - arrow.fromY) < 0.05;
-
-    if (sameRow && dx >= 0) {
-      continue;
-    }
-
-    if (dx >= ARROW_STUB && !sameRow) {
-      const baseMidX = dx >= ARROW_DIRECT_MIN_GAP ? arrow.fromX + ARROW_STUB : arrow.toX - ARROW_STUB;
-      const arrowMinY = Math.min(arrow.fromY, arrow.toY);
-      const arrowMaxY = Math.max(arrow.fromY, arrow.toY);
-
-      let group = forwardGroups.get(arrow.sourceId);
-      if (!group) {
-        group = {
-          sourceId: arrow.sourceId,
-          baseMidX,
-          minY: arrowMinY,
-          maxY: arrowMaxY,
-          targets: new Set([arrow.targetId]),
-          arrows: [arrow],
-        };
-        forwardGroups.set(arrow.sourceId, group);
-      } else {
-        group.minY = Math.min(group.minY, arrowMinY);
-        group.maxY = Math.max(group.maxY, arrowMaxY);
-        group.targets.add(arrow.targetId);
-        group.arrows.push(arrow);
-      }
-    } else {
-      backwardArrows.push(arrow);
+    const kind = kindOf(arrow);
+    if (kind === 'forward') {
+      const list = forwardBySource.get(arrow.sourceId);
+      if (list) list.push(arrow);
+      else forwardBySource.set(arrow.sourceId, [arrow]);
+    } else if (kind === 'backward') {
+      backward.push(arrow);
     }
   }
 
-  // Assign midXOffset for each forward group
-  const forwardGroupList = Array.from(forwardGroups.values()).sort((a, b) => {
-    if (Math.abs(a.baseMidX - b.baseMidX) > 0.1) return a.baseMidX - b.baseMidX;
-    if (a.minY !== b.minY) return a.minY - b.minY;
-    return a.sourceId.localeCompare(b.sourceId);
+  // 1. Lanes: one per source and side, staggered away from the source bar
+  const laneKey = (a: T) => `${a.sourceId}|${laneDirection(a)}`;
+  const lanes = new Map<string, Lane>();
+  for (const arrow of backward) {
+    const key = laneKey(arrow);
+    const direction = laneDirection(arrow);
+    let lane = lanes.get(key);
+    if (!lane) {
+      lane = { baseY: arrow.fromY + direction * ARROW_LANE_OFFSET, direction, sourceId: arrow.sourceId, spans: [] };
+      lanes.set(key, lane);
+    }
+    const exitX = arrow.fromX + ARROW_STUB;
+    const entryX = arrow.toX - ARROW_STUB;
+    lane.spans.push({ x1: Math.min(exitX, entryX), x2: Math.max(exitX, entryX), targetId: arrow.targetId });
+  }
+
+  const laneList = Array.from(lanes.entries()).sort(([ka, a], [kb, b]) => {
+    if (Math.abs(a.baseY - b.baseY) > 0.1) return a.baseY - b.baseY;
+    const minXa = Math.min(...a.spans.map((s) => s.x1));
+    const minXb = Math.min(...b.spans.map((s) => s.x1));
+    if (minXa !== minXb) return minXa - minXb;
+    return ka.localeCompare(kb);
   });
 
-  const assignedForwardOffsets = new Map<string, number>();
-
-  for (let i = 0; i < forwardGroupList.length; i++) {
-    const group = forwardGroupList[i];
-    const conflicting = forwardGroupList.slice(0, i).filter((other) => {
-      if (other.sourceId === group.sourceId) return false;
-      const sharesTarget = Array.from(group.targets).some((t) => other.targets.has(t));
-      if (sharesTarget) return false;
-      if (Math.abs(other.baseMidX - group.baseMidX) > 4) return false;
-      const overlap = Math.min(group.maxY, other.maxY) - Math.max(group.minY, other.minY);
-      return overlap > 2;
-    });
-
-    if (conflicting.length === 0) {
-      assignedForwardOffsets.set(group.sourceId, 0);
-      continue;
-    }
-
-    let chosenOffset = 0;
-    for (let mult = 0; mult <= 5; mult++) {
-      const candidates = mult === 0 ? [0] : [mult * staggerStep, -mult * staggerStep];
-      let found = false;
-      for (const cand of candidates) {
-        const effectiveMidX = group.baseMidX + cand;
-        const hasCollision = conflicting.some((other) => {
-          const otherOffset = assignedForwardOffsets.get(other.sourceId) ?? 0;
-          const otherEffectiveMidX = other.baseMidX + otherOffset;
-          return Math.abs(effectiveMidX - otherEffectiveMidX) < staggerStep - 1;
-        });
-        if (!hasCollision) {
-          chosenOffset = cand;
-          found = true;
-          break;
-        }
+  const placedLanes: { y: number; x1: number; x2: number; sourceId: string; targetId: string }[] = [];
+  const laneY = new Map<string, number>();
+  for (const [key, lane] of laneList) {
+    const collides = (y: number) =>
+      lane.spans.some((span) =>
+        placedLanes.some(
+          (p) =>
+            !mayShareTrack(p, { sourceId: lane.sourceId, targetId: span.targetId }) &&
+            Math.abs(p.y - y) < minSeparation &&
+            overlapLength(span.x1, span.x2, p.x1, p.x2) > MIN_TRACK_OVERLAP,
+        ),
+      );
+    let chosen = lane.baseY;
+    for (let step = 0; step <= 3; step++) {
+      const candidate = lane.baseY + lane.direction * step * staggerStep;
+      if (!collides(candidate)) {
+        chosen = candidate;
+        break;
       }
-      if (found) break;
     }
-    assignedForwardOffsets.set(group.sourceId, chosenOffset);
+    laneY.set(key, chosen);
+    for (const span of lane.spans) {
+      placedLanes.push({ y: chosen, ...span, sourceId: lane.sourceId });
+    }
   }
 
-  // 2. Group backward arrows by sourceId
-  interface BackwardGroup {
-    sourceId: string;
-    baseLaneY: number;
-    minX: number;
-    maxX: number;
-    targets: Set<string>;
-    arrows: T[];
+  // 2. Vertical columns for forward turns, backwards exits and backwards entries share one system
+  const columns = new Map<string, Column>();
+
+  for (const [sourceId, group] of forwardBySource) {
+    const minToX = Math.min(...group.map((a) => a.toX));
+    const fromX = group[0].fromX;
+    // Every forward arrow from a source leaves along one trunk: the tightest valid turn in the group
+    const baseX = Math.min(...group.map((a) => defaultTurnX(a)));
+    columns.set(`forward|${sourceId}`, {
+      baseX,
+      minX: Math.min(baseX, fromX + 4),
+      maxX: Math.max(baseX, minToX - 8),
+      firstSign: 1,
+      maxSteps: 5,
+      spans: group.map((a) => ({
+        y1: Math.min(a.fromY, a.toY),
+        y2: Math.max(a.fromY, a.toY),
+        sourceId: a.sourceId,
+        targetId: a.targetId,
+      })),
+    });
   }
 
-  const backwardGroups = new Map<string, BackwardGroup>();
-  for (const arrow of backwardArrows) {
-    const baseLaneOffset = arrow.toY < arrow.fromY ? -ARROW_LANE_OFFSET : ARROW_LANE_OFFSET;
-    const baseLaneY = arrow.fromY + baseLaneOffset;
-    const arrowMinX = Math.min(arrow.toX - ARROW_STUB, arrow.fromX + ARROW_STUB);
-    const arrowMaxX = Math.max(arrow.toX - ARROW_STUB, arrow.fromX + ARROW_STUB);
+  for (const arrow of backward) {
+    const lY = laneY.get(laneKey(arrow))!;
 
-    let group = backwardGroups.get(arrow.sourceId);
-    if (!group) {
-      group = {
-        sourceId: arrow.sourceId,
-        baseLaneY,
-        minX: arrowMinX,
-        maxX: arrowMaxX,
-        targets: new Set([arrow.targetId]),
-        arrows: [arrow],
+    const exitKey = `exit|${arrow.sourceId}`;
+    const exitX = arrow.fromX + ARROW_STUB;
+    let exit = columns.get(exitKey);
+    if (!exit) {
+      exit = {
+        baseX: exitX,
+        minX: arrow.fromX + 4,
+        maxX: exitX + 3 * staggerStep,
+        firstSign: 1,
+        maxSteps: 4,
+        spans: [],
       };
-      backwardGroups.set(arrow.sourceId, group);
-    } else {
-      group.minX = Math.min(group.minX, arrowMinX);
-      group.maxX = Math.max(group.maxX, arrowMaxX);
-      group.targets.add(arrow.targetId);
-      group.arrows.push(arrow);
+      columns.set(exitKey, exit);
     }
-  }
-
-  const backwardGroupList = Array.from(backwardGroups.values()).sort((a, b) => {
-    if (Math.abs(a.baseLaneY - b.baseLaneY) > 0.1) return a.baseLaneY - b.baseLaneY;
-    if (a.minX !== b.minX) return a.minX - b.minX;
-    return a.sourceId.localeCompare(b.sourceId);
-  });
-
-  const assignedBackwardOffsets = new Map<string, number>();
-
-  for (let i = 0; i < backwardGroupList.length; i++) {
-    const group = backwardGroupList[i];
-    const conflicting = backwardGroupList.slice(0, i).filter((other) => {
-      if (other.sourceId === group.sourceId) return false;
-      const sharesTarget = Array.from(group.targets).some((t) => other.targets.has(t));
-      if (sharesTarget) return false;
-      if (Math.abs(other.baseLaneY - group.baseLaneY) > 4) return false;
-      const overlap = Math.min(group.maxX, other.maxX) - Math.max(group.minX, other.minX);
-      return overlap > 2;
+    exit.spans.push({
+      y1: Math.min(arrow.fromY, lY),
+      y2: Math.max(arrow.fromY, lY),
+      sourceId: arrow.sourceId,
+      targetId: arrow.targetId,
     });
 
-    if (conflicting.length === 0) {
-      assignedBackwardOffsets.set(group.sourceId, 0);
-      continue;
+    const entryKey = `entry|${arrow.targetId}`;
+    const entryX = arrow.toX - ARROW_STUB;
+    let entry = columns.get(entryKey);
+    if (!entry) {
+      entry = {
+        baseX: entryX,
+        minX: entryX - 4 * staggerStep,
+        maxX: arrow.toX - 8,
+        // Shifting left lengthens the final approach; shifting right would squeeze the arrowhead
+        firstSign: -1,
+        maxSteps: 4,
+        spans: [],
+      };
+      columns.set(entryKey, entry);
     }
-
-    let chosenOffset = 0;
-    for (let mult = 0; mult <= 3; mult++) {
-      const candidates = mult === 0 ? [0] : [mult * staggerStep, -mult * staggerStep];
-      let found = false;
-      for (const cand of candidates) {
-        const effectiveLaneY = group.baseLaneY + cand;
-        const hasCollision = conflicting.some((other) => {
-          const otherOffset = assignedBackwardOffsets.get(other.sourceId) ?? 0;
-          const otherEffectiveLaneY = other.baseLaneY + otherOffset;
-          return Math.abs(effectiveLaneY - otherEffectiveLaneY) < staggerStep - 1;
-        });
-        if (!hasCollision) {
-          chosenOffset = cand;
-          found = true;
-          break;
-        }
-      }
-      if (found) break;
-    }
-    assignedBackwardOffsets.set(group.sourceId, chosenOffset);
+    entry.spans.push({
+      y1: Math.min(lY, arrow.toY),
+      y2: Math.max(lY, arrow.toY),
+      sourceId: arrow.sourceId,
+      targetId: arrow.targetId,
+    });
   }
 
-  // 3. Build paths for all arrows
-  return arrows.map((arrow) => {
-    const dx = arrow.toX - arrow.fromX;
-    const sameRow = Math.abs(arrow.toY - arrow.fromY) < 0.05;
+  const columnList = Array.from(columns.entries()).sort(([ka, a], [kb, b]) => {
+    if (Math.abs(a.baseX - b.baseX) > 0.1) return a.baseX - b.baseX;
+    const minYa = Math.min(...a.spans.map((s) => s.y1));
+    const minYb = Math.min(...b.spans.map((s) => s.y1));
+    if (minYa !== minYb) return minYa - minYb;
+    return ka.localeCompare(kb);
+  });
 
+  const placed: PlacedSpan[] = [];
+  const columnX = new Map<string, number>();
+
+  for (const [key, column] of columnList) {
+    const collides = (x: number) =>
+      column.spans.some((span) =>
+        placed.some(
+          (p) =>
+            !mayShareTrack(p, span) &&
+            Math.abs(p.x - x) < minSeparation &&
+            overlapLength(span.y1, span.y2, p.y1, p.y2) > MIN_TRACK_OVERLAP,
+        ),
+      );
+
+    let chosen = column.baseX;
+    if (collides(column.baseX)) {
+      const tried = new Set<number>([column.baseX]);
+      search: for (let step = 1; step <= column.maxSteps; step++) {
+        for (const sign of [column.firstSign, -column.firstSign]) {
+          // Clamp first so the collision test sees the x that would actually be drawn
+          const candidate = Math.max(column.minX, Math.min(column.maxX, column.baseX + sign * step * staggerStep));
+          if (tried.has(candidate)) continue;
+          tried.add(candidate);
+          if (!collides(candidate)) {
+            chosen = candidate;
+            break search;
+          }
+        }
+      }
+      // Narrow ranges (tight gaps) may not fit whole steps: fall back to the nearest free pixel
+      if (chosen === column.baseX) {
+        const span = Math.ceil(column.maxX - column.minX);
+        for (let delta = 1; delta <= span; delta++) {
+          const free = [column.baseX + delta, column.baseX - delta].find(
+            (x) => x >= column.minX && x <= column.maxX && !collides(x),
+          );
+          if (free !== undefined) {
+            chosen = free;
+            break;
+          }
+        }
+      }
+    }
+
+    columnX.set(key, chosen);
+    for (const span of column.spans) placed.push({ ...span, x: chosen });
+  }
+
+  // 3. Build paths from the assigned tracks
+  return arrows.map((arrow) => {
+    const kind = kindOf(arrow);
     let midXOffset = 0;
     let laneYOffset = 0;
+    let pathOptions: ArrowPathOptions = { cornerRadius };
 
-    if (dx >= ARROW_STUB && !sameRow) {
-      midXOffset = assignedForwardOffsets.get(arrow.sourceId) ?? 0;
-    } else if (!sameRow || dx < 0) {
-      laneYOffset = assignedBackwardOffsets.get(arrow.sourceId) ?? 0;
+    if (kind === 'forward') {
+      const turnX = columnX.get(`forward|${arrow.sourceId}`)!;
+      midXOffset = turnX - defaultTurnX(arrow);
+      pathOptions = { cornerRadius, turnX };
+    } else if (kind === 'backward') {
+      const lane = lanes.get(laneKey(arrow))!;
+      const y = laneY.get(laneKey(arrow))!;
+      const exitX = columnX.get(`exit|${arrow.sourceId}`)!;
+      const entryX = columnX.get(`entry|${arrow.targetId}`)!;
+      laneYOffset = y - lane.baseY;
+      midXOffset = exitX - (arrow.fromX + ARROW_STUB);
+      pathOptions = { cornerRadius, exitX, entryX, laneY: y };
     }
-
-    const path = buildArrowPath(arrow, {
-      cornerRadius,
-      midXOffset,
-      laneYOffset,
-    });
 
     return {
       ...arrow,
-      path,
+      path: buildArrowPath(arrow, pathOptions),
       midXOffset,
       laneYOffset,
     };

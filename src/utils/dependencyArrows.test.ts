@@ -6,6 +6,7 @@ import {
   ARROW_STUB,
   buildArrowPath,
   routeDependencyArrows,
+  type DependencyArrowEdge,
   type ArrowEndpoints,
 } from './dependencyArrows';
 
@@ -167,6 +168,56 @@ describe('buildArrowPath', () => {
   });
 });
 
+/** Vertical runs (same x, different y) of a path routed with sharp corners */
+function verticals(path: string): { x: number; y1: number; y2: number }[] {
+  const pts = points(path);
+  const result: { x: number; y1: number; y2: number }[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].x === pts[i - 1].x && pts[i].y !== pts[i - 1].y) {
+      result.push({ x: pts[i].x, y1: Math.min(pts[i].y, pts[i - 1].y), y2: Math.max(pts[i].y, pts[i - 1].y) });
+    }
+  }
+  return result;
+}
+
+function horizontals(path: string): { y: number; x1: number; x2: number }[] {
+  const pts = points(path);
+  const result: { y: number; x1: number; x2: number }[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].y === pts[i - 1].y && pts[i].x !== pts[i - 1].x) {
+      result.push({ y: pts[i].y, x1: Math.min(pts[i].x, pts[i - 1].x), x2: Math.max(pts[i].x, pts[i - 1].x) });
+    }
+  }
+  return result;
+}
+
+const route = (arrows: DependencyArrowEdge[]) => routeDependencyArrows(arrows, { cornerRadius: 0 });
+
+/**
+ * Asserts the layout invariant: two vertical runs may only sit on top of each other when their
+ * arrows share a source or a target.
+ */
+function expectNoUnrelatedVerticalOverlap(routed: ReturnType<typeof route>) {
+  for (let i = 0; i < routed.length; i++) {
+    for (let j = i + 1; j < routed.length; j++) {
+      const a = routed[i];
+      const b = routed[j];
+      if (a.sourceId === b.sourceId || a.targetId === b.targetId) continue;
+      for (const va of verticals(a.path)) {
+        for (const vb of verticals(b.path)) {
+          const overlap = Math.min(va.y2, vb.y2) - Math.max(va.y1, vb.y1);
+          if (overlap > 2) {
+            expect(
+              Math.abs(va.x - vb.x),
+              `${a.sourceId}->${a.targetId} (x=${va.x}) vs ${b.sourceId}->${b.targetId} (x=${vb.x})`,
+            ).toBeGreaterThanOrEqual(ARROW_STAGGER_STEP - 1);
+          }
+        }
+      }
+    }
+  }
+}
+
 describe('routeDependencyArrows', () => {
   it('combines arrows with the same source to exit along the exact same trunk and turn', () => {
     const arrows = [
@@ -211,18 +262,6 @@ describe('routeDependencyArrows', () => {
     expect(Math.abs(routed[0].midXOffset - routed[1].midXOffset)).toBeGreaterThanOrEqual(ARROW_STAGGER_STEP);
   });
 
-  it('staggers horizontal lanes of unrelated backwards arrows that share the same laneY', () => {
-    // Both arrows have fromY = 50, toY > 50 => default laneY = 50 + 20 = 70
-    // Both arrows run horizontally across overlapping ranges
-    const arrows = [
-      { sourceId: 'task-1', targetId: 'task-2', fromX: 300, fromY: 50, toX: 100, toY: 94 },
-      { sourceId: 'task-3', targetId: 'task-4', fromX: 280, fromY: 50, toX: 80, toY: 150 },
-    ];
-    const routed = routeDependencyArrows(arrows);
-    expect(routed).toHaveLength(2);
-    expect(routed[0].laneYOffset).not.toBe(routed[1].laneYOffset);
-  });
-
   it('does not stagger arrows when vertical spans do not overlap', () => {
     // Arrow 1 spans y: 50 -> 100
     // Arrow 2 spans y: 150 -> 200 (no vertical overlap)
@@ -233,5 +272,161 @@ describe('routeDependencyArrows', () => {
     const routed = routeDependencyArrows(arrows);
     expect(routed[0].midXOffset).toBe(0);
     expect(routed[1].midXOffset).toBe(0);
+  });
+
+  it('staggers A->T1 and B->T3 even though A and B also share the target T2', () => {
+    const routed = route([
+      { sourceId: 'A', targetId: 'T1', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      { sourceId: 'A', targetId: 'T2', fromX: 100, fromY: 50, toX: 400, toY: 218 },
+      { sourceId: 'B', targetId: 'T2', fromX: 100, fromY: 106, toX: 400, toY: 218 },
+      { sourceId: 'B', targetId: 'T3', fromX: 100, fromY: 106, toX: 300, toY: 274 },
+    ]);
+    const [aT1, aT2, bT2, bT3] = routed.map((r) => verticals(r.path)[0]);
+
+    // One trunk per source
+    expect(aT1.x).toBe(aT2.x);
+    expect(bT2.x).toBe(bT3.x);
+    // A->T1 (50..162) and B->T3 (106..274) are unrelated and overlap, so they cannot share a column
+    expect(Math.abs(aT1.x - bT3.x)).toBeGreaterThanOrEqual(ARROW_STAGGER_STEP);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('checks candidates against the final x of every placed column, not their unshifted x', () => {
+    // A and B both want x = 112; C wants x = 118. B gets pushed to 118 and C must then move again.
+    const routed = route([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 218 },
+      { sourceId: 'B', targetId: 'TB', fromX: 100, fromY: 78, toX: 300, toY: 246 },
+      { sourceId: 'C', targetId: 'TC', fromX: 106, fromY: 106, toX: 300, toY: 274 },
+    ]);
+    const xs = routed.map((r) => verticals(r.path)[0].x);
+    expect(new Set(xs).size).toBe(3);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('keeps one shared trunk for a source with both wide and tight gaps', () => {
+    const routed = route([
+      { sourceId: 'A', targetId: 'wide', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      // 18px gap: direct turn would be at 106, not 112
+      { sourceId: 'A', targetId: 'tight', fromX: 100, fromY: 50, toX: 118, toY: 218 },
+    ]);
+    const [wide, tight] = routed.map((r) => verticals(r.path)[0]);
+    expect(wide.x).toBe(tight.x);
+    expect(wide.x).toBe(106);
+    // Each still enters its target with a full arrowhead's worth of approach
+    expect(routed[0].path.endsWith('H 300')).toBe(true);
+    expect(300 - wide.x).toBeGreaterThanOrEqual(ARROW_STUB);
+    expect(118 - tight.x).toBeGreaterThanOrEqual(ARROW_STUB);
+  });
+
+  it('draws the exact assigned column instead of recomputing it', () => {
+    const [routed] = routeDependencyArrows(
+      [{ sourceId: 'A', targetId: 'B', fromX: 100, fromY: 50, toX: 300, toY: 162 }],
+      {
+        cornerRadius: 0,
+      },
+    );
+    expect(routed.path).toBe('M 100 50 H 112 V 162 H 300');
+    expect(buildArrowPath({ fromX: 100, fromY: 50, toX: 300, toY: 162 }, { cornerRadius: 0, turnX: 130 })).toBe(
+      'M 100 50 H 130 V 162 H 300',
+    );
+  });
+
+  it('staggers the long entry runs (toX - stub) of backwards arrows into different targets', () => {
+    // Two targets in rows 3 and 4 start at the same x; sources are to their right in rows 1 and 2
+    const routed = route([
+      { sourceId: 'S1', targetId: 'T1', fromX: 400, fromY: 50, toX: 100, toY: 162 },
+      { sourceId: 'S2', targetId: 'T2', fromX: 420, fromY: 106, toX: 100, toY: 218 },
+    ]);
+    const entries = routed.map((r) => verticals(r.path).find((v) => v.x < 100)!);
+    expect(entries.some((e) => e.x === 100 - ARROW_STUB)).toBe(true);
+    expect(entries[0].x).not.toBe(entries[1].x);
+    // Shifts left, lengthening the approach rather than squeezing the arrowhead
+    expect(Math.max(...entries.map((e) => e.x))).toBeLessThanOrEqual(100 - ARROW_STUB);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('lets backwards arrows into one target share the entry column and exits from one source share the exit', () => {
+    const routed = route([
+      { sourceId: 'S1', targetId: 'T', fromX: 400, fromY: 50, toX: 100, toY: 218 },
+      { sourceId: 'S2', targetId: 'T', fromX: 420, fromY: 106, toX: 100, toY: 218 },
+    ]);
+    const entries = routed.map((r) => verticals(r.path).find((v) => v.x < 100)!);
+    expect(entries[0].x).toBe(entries[1].x);
+
+    const sameSource = route([
+      { sourceId: 'S', targetId: 'T1', fromX: 400, fromY: 50, toX: 100, toY: 162 },
+      { sourceId: 'S', targetId: 'T2', fromX: 400, fromY: 50, toX: 80, toY: 218 },
+    ]);
+    const exits = sameSource.map((r) => verticals(r.path)[0]);
+    expect(exits[0].x).toBe(412);
+    expect(exits[1].x).toBe(412);
+    expect(horizontals(sameSource[0].path).some((h) => h.y === 70)).toBe(true);
+    expect(horizontals(sameSource[1].path).some((h) => h.y === 70)).toBe(true);
+  });
+
+  it('staggers forward columns against backwards exit and entry columns in the same system', () => {
+    const routed = route([
+      // Forward column at 112 spanning rows 1-3
+      { sourceId: 'F', targetId: 'TF', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      // Backwards exit also wants 112 and drops from row 2 to its lane below (106..126)
+      { sourceId: 'B', targetId: 'TB', fromX: 100, fromY: 106, toX: 60, toY: 218 },
+      // Backwards entry at 288 collides with nothing, forward entry approach is horizontal
+      { sourceId: 'C', targetId: 'TC', fromX: 500, fromY: 50, toX: 300, toY: 218 },
+    ]);
+    const forwardX = verticals(routed[0].path)[0].x;
+    const exitX = verticals(routed[1].path)[0].x;
+    expect(forwardX).not.toBe(exitX);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('staggers overlapping backwards lanes away from the source bar, never toward it', () => {
+    // Below the bar: lanes at fromY + 20, then +26 — never fromY + 14
+    const below = route([
+      { sourceId: 'S1', targetId: 'T1', fromX: 400, fromY: 50, toX: 100, toY: 162 },
+      { sourceId: 'S2', targetId: 'T2', fromX: 250, fromY: 50, toX: 50, toY: 218 },
+    ]);
+    const belowLanes = below.map((r) =>
+      Math.max(
+        ...horizontals(r.path)
+          .map((h) => h.y)
+          .filter((y) => y > 50 && y < 100),
+      ),
+    );
+    expect(belowLanes).toContain(50 + ARROW_LANE_OFFSET);
+    expect(belowLanes).toContain(50 + ARROW_LANE_OFFSET + ARROW_STAGGER_STEP);
+    expect(Math.min(...belowLanes)).toBeGreaterThanOrEqual(50 + ARROW_LANE_OFFSET);
+
+    // Above the bar: lanes at fromY - 20, then -26
+    const above = route([
+      { sourceId: 'S1', targetId: 'T1', fromX: 400, fromY: 218, toX: 100, toY: 106 },
+      { sourceId: 'S2', targetId: 'T2', fromX: 250, fromY: 218, toX: 50, toY: 50 },
+    ]);
+    const aboveLanes = above.map((r) =>
+      Math.min(
+        ...horizontals(r.path)
+          .map((h) => h.y)
+          .filter((y) => y < 218 && y > 170),
+      ),
+    );
+    expect(aboveLanes).toContain(218 - ARROW_LANE_OFFSET);
+    expect(aboveLanes).toContain(218 - ARROW_LANE_OFFSET - ARROW_STAGGER_STEP);
+    expect(Math.max(...aboveLanes)).toBeLessThanOrEqual(218 - ARROW_LANE_OFFSET);
+  });
+
+  it('keeps clamped columns from landing on an occupied column', () => {
+    // 24px gap: the column can only move within 104..116. +6 clamps to 116, which is too close
+    // to A at 112, so B has to go the other way instead of being pushed onto A's track.
+    const routed = route([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 124, toY: 162 },
+      { sourceId: 'B', targetId: 'TB', fromX: 100, fromY: 78, toX: 124, toY: 218 },
+    ]);
+    const xs = routed.map((r) => verticals(r.path)[0].x);
+    expect(xs[0]).toBe(112);
+    expect(xs[1]).toBeLessThanOrEqual(106);
+    for (const r of routed) {
+      const pts = points(r.path);
+      expect(124 - pts[pts.length - 2].x).toBeGreaterThanOrEqual(ARROW_HEAD);
+    }
+    expectNoUnrelatedVerticalOverlap(routed);
   });
 });

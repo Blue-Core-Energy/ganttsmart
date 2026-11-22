@@ -997,8 +997,19 @@ test.describe('GanttSmart GCP app', () => {
     const hitTarget = exportTarget.locator('svg path[data-arrow-hit-target="ENG-100->ENG-101"]');
     await expect(hitTarget).toBeAttached();
 
-    // Dispatch click on the arrow's hit target
-    await hitTarget.dispatchEvent('click');
+    // Real pointer click at the midpoint of the arrow's path, so the browser's own hit-testing
+    // has to resolve the click through the stacked bars, rows and overlays to the arrow
+    const clickArrowMidpoint = async () => {
+      await hitTarget.scrollIntoViewIfNeeded();
+      const point = await hitTarget.evaluate((el) => {
+        const path = el as unknown as SVGPathElement;
+        const mid = path.getPointAtLength(path.getTotalLength() / 2);
+        const matrix = path.getScreenCTM()!;
+        return { x: mid.x * matrix.a + matrix.e, y: mid.y * matrix.d + matrix.f };
+      });
+      await page.mouse.click(point.x, point.y);
+    };
+    await clickArrowMidpoint();
 
     await expect(arrow).toHaveAttribute('data-selected', 'true');
     const row100 = page.locator('tr[data-task-id="ENG-100"]');
@@ -1022,7 +1033,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(row101).not.toHaveAttribute('data-highlighted', 'true');
 
     // Clicking arrow again selects it; clicking empty timeline background clears selection
-    await hitTarget.dispatchEvent('click');
+    await clickArrowMidpoint();
     await expect(arrow).toHaveAttribute('data-selected', 'true');
     await page
       .locator('[data-timeline-background]')

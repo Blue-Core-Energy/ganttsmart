@@ -137,8 +137,21 @@ export default function GanttChart({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // A selection only stays active while its dependency is still drawn: both tasks rendered and the
+  // source still blocks the target. Otherwise nothing stays dimmed or highlighted for a missing arrow.
+  const activeSelectedArrow = useMemo(() => {
+    if (!selectedArrow) return null;
+    const source = tasks.find((t) => t.id === selectedArrow.sourceId);
+    const targetRendered = tasks.some((t) => t.id === selectedArrow.targetId);
+    return source && targetRendered && source.blocks.includes(selectedArrow.targetId) ? selectedArrow : null;
+  }, [selectedArrow, tasks]);
+
   useEffect(() => {
-    if (!selectedArrow) return;
+    if (selectedArrow && !activeSelectedArrow) setSelectedArrow(null);
+  }, [selectedArrow, activeSelectedArrow]);
+
+  useEffect(() => {
+    if (!activeSelectedArrow) return;
     const onDocClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement | null;
       if (target?.closest('[data-arrow-hit-target]')) return;
@@ -146,12 +159,12 @@ export default function GanttChart({
     };
     document.addEventListener('click', onDocClick);
     return () => document.removeEventListener('click', onDocClick);
-  }, [selectedArrow]);
+  }, [activeSelectedArrow]);
 
   const highlightedTaskIds = useMemo(() => {
-    if (!selectedArrow) return undefined;
-    return new Set([selectedArrow.sourceId, selectedArrow.targetId]);
-  }, [selectedArrow]);
+    if (!activeSelectedArrow) return undefined;
+    return new Set([activeSelectedArrow.sourceId, activeSelectedArrow.targetId]);
+  }, [activeSelectedArrow]);
 
   const ganttRef = useRef<HTMLDivElement>(null);
   /** Date and pointer position to restore after a zoom, set by the wheel handler */
@@ -955,7 +968,7 @@ export default function GanttChart({
           depViolations={depViolations}
           dayWidth={dayWidth}
           fixedColsWidth={fixedColsWidth}
-          selectedArrow={selectedArrow}
+          selectedArrow={activeSelectedArrow}
           onSelectArrow={handleSelectArrow}
         />
 
