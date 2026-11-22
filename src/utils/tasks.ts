@@ -1,4 +1,5 @@
 import type { Filters, Task } from '@/types';
+import { isIgnoredTask } from '@/utils/issues';
 
 /** Whether a task is considered completed (statusType 'completed' or has completedAt, excluding canceled). */
 export function isTaskDone(task: Pick<Task, 'statusType' | 'completedAt'>): boolean {
@@ -100,6 +101,11 @@ export function computeDepViolations(tasks: Task[], today: Date): Map<string, st
   }
 
   return violations;
+}
+
+/** Count unscheduled tasks, excluding ignored (canceled/duplicate) ones, to match the Unscheduled section badge. */
+export function countUnscheduledTasks(tasks: Task[]): number {
+  return tasks.filter((t) => !isIgnoredTask(t)).length;
 }
 
 /** Compute summary KPI counts and date span across a task list. */

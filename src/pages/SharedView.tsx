@@ -187,7 +187,7 @@ export default function SharedView() {
           filteredCount={filteredTasks.length}
         />
 
-        <StatsRow tasks={filteredTasks} />
+        <StatsRow tasks={filteredTasks} unscheduledTasks={unscheduledTasks} />
         <Legend />
 
         <GanttChart

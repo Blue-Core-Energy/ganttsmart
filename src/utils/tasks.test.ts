@@ -6,6 +6,7 @@ import {
   buildTaskHierarchy,
   computeDepViolations,
   computeTaskStats,
+  countUnscheduledTasks,
   filterTasks,
   groupSubtasksUnderParents,
   hasActiveRowFilters,
@@ -232,6 +233,35 @@ describe('computeTaskStats', () => {
       completed: 1,
       span: 14,
     });
+  });
+});
+
+describe('countUnscheduledTasks', () => {
+  it('returns 0 when there are no unscheduled tasks so the summary card stays hidden', () => {
+    expect(countUnscheduledTasks([])).toBe(0);
+  });
+
+  it('counts every unscheduled task that is not ignored', () => {
+    const tasks = [
+      makeTask({ id: 'ENG-1', statusType: 'backlog' }),
+      makeTask({ id: 'ENG-2', statusType: 'unstarted' }),
+      makeTask({ id: 'ENG-3', statusType: 'started' }),
+    ];
+    expect(countUnscheduledTasks(tasks)).toBe(3);
+  });
+
+  it('excludes canceled and duplicate tasks', () => {
+    const tasks = [
+      makeTask({ id: 'ENG-1', statusType: 'backlog' }),
+      makeTask({ id: 'ENG-2', status: 'Rejected', statusType: 'canceled' }),
+      makeTask({ id: 'ENG-3', status: 'Duplicate', statusType: 'backlog' }),
+    ];
+    expect(countUnscheduledTasks(tasks)).toBe(1);
+  });
+
+  it('returns 0 when every unscheduled task is ignored', () => {
+    const tasks = [makeTask({ id: 'ENG-1', status: 'Duplicate', statusType: 'duplicate' })];
+    expect(countUnscheduledTasks(tasks)).toBe(0);
   });
 });
 

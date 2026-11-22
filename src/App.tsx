@@ -328,7 +328,7 @@ function GanttView({
         onAllowExternalEditsChange={setAllowExternalEdits}
       />
 
-      <StatsRow tasks={filteredTasks} />
+      <StatsRow tasks={filteredTasks} unscheduledTasks={unscheduledTasks} />
 
       <div className="flex-1 min-h-0 overflow-hidden print:overflow-visible">
         <GanttChart
