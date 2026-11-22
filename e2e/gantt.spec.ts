@@ -2747,12 +2747,14 @@ test.describe('GanttSmart GCP app', () => {
     await page.waitForTimeout(300);
     expect(dueUpdates).toHaveLength(1);
 
-    // 5c. Opening another row's picker closes the first (clicks that stopPropagation still dismiss)
-    await dueCell101.click();
-    await expect(popover).toHaveCount(1);
+    // 5c. Opening another row's picker closes the first (clicks that stopPropagation still dismiss).
+    // Open the lower row first so its downward-opening popover doesn't cover the upper row's Due cell.
     await dueCell102.click();
     await expect(popover).toHaveCount(1);
     await expect(popover).toHaveAttribute('data-popover-task', 'COMM-102');
+    await dueCell101.click();
+    await expect(popover).toHaveCount(1);
+    await expect(popover).toHaveAttribute('data-popover-task', 'COMM-101');
     await page.keyboard.press('Escape');
     await expect(popover).toHaveCount(0);
 
