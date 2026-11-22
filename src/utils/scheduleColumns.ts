@@ -14,6 +14,7 @@ export interface ColumnDef {
 
 /** Canonical left-to-right order. Showing or hiding a column never reorders the rest. */
 export const COLUMN_DEFS: ColumnDef[] = [
+  { key: 'id', label: 'ID', pickerLabel: 'Issue ID', defaultWidth: 96, minWidth: 70 },
   { key: 'task', label: 'Issue', defaultWidth: 300, minWidth: 220, required: true },
   { key: 'assignee', label: 'Assignee', defaultWidth: 128, minWidth: 90 },
   { key: 'status', label: 'Status', defaultWidth: 128, minWidth: 90 },
@@ -22,10 +23,9 @@ export const COLUMN_DEFS: ColumnDef[] = [
   { key: 'priority', label: 'Priority', defaultWidth: 96, minWidth: 80 },
   { key: 'project', label: 'Project', defaultWidth: 140, minWidth: 100 },
   { key: 'progress', label: 'Sub-issues', pickerLabel: 'Sub-issue progress', defaultWidth: 96, minWidth: 70 },
-  { key: 'id', label: 'ID', pickerLabel: 'Issue ID', defaultWidth: 96, minWidth: 70 },
 ];
 
-export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['task', 'assignee', 'status', 'due'];
+export const DEFAULT_VISIBLE_COLUMNS: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
 
 export type ColumnWidths = Record<ColumnKey, number>;
 
@@ -116,7 +116,7 @@ export const MOBILE_BREAKPOINT = 768;
 
 /**
  * Maximum fraction of viewport/container width that frozen columns may consume before
- * falling back to freezing only the primary task column.
+ * falling back to freezing only up to the primary task column.
  */
 export const MAX_FROZEN_WIDTH_RATIO = 0.65;
 
@@ -125,7 +125,7 @@ export interface StickyColumnOffsets {
   offsets: Partial<Record<ColumnKey, number>>;
   /** The rightmost column that is frozen */
   lastFrozenKey: ColumnKey;
-  /** Whether only the primary task column is frozen */
+  /** Whether the freeze is limited to the primary task column (plus any columns before it) */
   onlyTaskFrozen: boolean;
 }
 
@@ -135,7 +135,10 @@ export interface StickyColumnOffsets {
  * all visible schedule columns are pinned with cumulative left offsets.
  * On narrow/mobile viewports (< 768px) or when all frozen columns would take
  * more than MAX_FROZEN_WIDTH_RATIO of the viewport, falls back to freezing
- * ONLY the primary 'task' column at left: 0 so the timeline remains visible and reachable.
+ * ONLY the primary 'task' column so the timeline remains visible and reachable.
+ * The ID column sits before 'task', so the fallback pins it too (ID at 0, task after it)
+ * when that pair stays within the ratio. Otherwise 'task' is pinned at left: 0 on its own
+ * and ID scrolls away underneath it, rather than being left stranded in front of it.
  */
 export function computeStickyColumnOffsets(
   visibleColumns: ColumnKey[],
@@ -158,8 +161,20 @@ export function computeStickyColumnOffsets(
   const offsets: Partial<Record<ColumnKey, number>> = {};
 
   if (onlyTaskFrozen) {
-    if (visibleColumns.includes('task')) {
-      offsets.task = 0;
+    const taskIndex = visibleColumns.indexOf('task');
+    if (taskIndex >= 0) {
+      const leading = visibleColumns.slice(0, taskIndex + 1);
+      const leadingWidth = totalColumnWidth(leading, colWidths);
+      const leadingFits = !options?.viewportWidth || leadingWidth <= options.viewportWidth * MAX_FROZEN_WIDTH_RATIO;
+      if (taskIndex === 0 || !leadingFits) {
+        offsets.task = 0;
+      } else {
+        let left = 0;
+        for (const key of leading) {
+          offsets[key] = left;
+          left += colWidths[key];
+        }
+      }
     }
     return {
       offsets,

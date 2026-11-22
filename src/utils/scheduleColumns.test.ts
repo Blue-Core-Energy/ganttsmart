@@ -29,19 +29,25 @@ describe('column definitions', () => {
     expect(taskCol?.label).toBe('Issue');
   });
 
-  it('defaults to task, assignee, status and due date', () => {
-    expect(DEFAULT_VISIBLE_COLUMNS).toEqual(['task', 'assignee', 'status', 'due']);
+  it('defaults to ID, task, assignee, status and due date', () => {
+    expect(DEFAULT_VISIBLE_COLUMNS).toEqual(['id', 'task', 'assignee', 'status', 'due']);
   });
 
-  it('offers start date, priority, project, sub-issue progress and issue ID as extras', () => {
+  it('places the ID column before the task column', () => {
+    const keys = COLUMN_DEFS.map((c) => c.key);
+    expect(keys[0]).toBe('id');
+    expect(keys.indexOf('id')).toBeLessThan(keys.indexOf('task'));
+  });
+
+  it('offers start date, priority, project and sub-issue progress as extras', () => {
     const optional = COLUMN_DEFS.filter((c) => !DEFAULT_VISIBLE_COLUMNS.includes(c.key)).map((c) => c.key);
-    expect(optional).toEqual(['start', 'priority', 'project', 'progress', 'id']);
+    expect(optional).toEqual(['start', 'priority', 'project', 'progress']);
   });
 });
 
 describe('normalizeVisibleColumns', () => {
   it('keeps the canonical order regardless of the order chosen', () => {
-    expect(normalizeVisibleColumns(['id', 'due', 'task', 'assignee'])).toEqual(['task', 'assignee', 'due', 'id']);
+    expect(normalizeVisibleColumns(['id', 'due', 'task', 'assignee'])).toEqual(['id', 'task', 'assignee', 'due']);
   });
 
   it('always keeps the task column', () => {
@@ -134,7 +140,7 @@ describe('persistence', () => {
 
   it('normalizes what it stores, so a bad selection can never be read back', () => {
     saveVisibleColumns(['id', 'task', 'nonsense' as ColumnKey]);
-    expect(localStorage.getItem('gantt_columns')).toBe('["task","id"]');
+    expect(localStorage.getItem('gantt_columns')).toBe('["id","task"]');
   });
 
   it('keeps working when storage is unavailable', () => {
@@ -211,6 +217,35 @@ describe('computeStickyColumnOffsets', () => {
     expect(result.lastFrozenKey).toBe('task');
     expect(result.offsets.task).toBe(0);
     expect(result.offsets.assignee).toBeUndefined();
+  });
+
+  describe('with the ID column before the task column', () => {
+    const withId: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
+    const idWidths = { ...widths, id: 96 };
+
+    it('offsets every column cumulatively on desktop', () => {
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 1920 });
+      expect(result.onlyTaskFrozen).toBe(false);
+      expect(result.offsets.id).toBe(0);
+      expect(result.offsets.task).toBe(96);
+      expect(result.offsets.assignee).toBe(396);
+      expect(result.lastFrozenKey).toBe('due');
+    });
+
+    it('narrow fallback pins ID and task together when they fit', () => {
+      const result = computeStickyColumnOffsets(withId, idWidths, { isNarrow: true, viewportWidth: 1280 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ id: 0, task: 96 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
+
+    it('narrow fallback pins task alone at left: 0 when ID and task would crowd the timeline', () => {
+      // 396 / 375 > 65%
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 375 });
+      expect(result.onlyTaskFrozen).toBe(true);
+      expect(result.offsets).toEqual({ task: 0 });
+      expect(result.lastFrozenKey).toBe('task');
+    });
   });
 
   it('correctly sets lastFrozenKey for customized visible column lists', () => {

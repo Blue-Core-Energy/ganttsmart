@@ -3900,13 +3900,16 @@ test.describe('GanttSmart GCP app', () => {
     const headers = page.locator('#gantt-export-target thead th');
     const headerLabels = async () => (await headers.allInnerTexts()).slice(0, -1).map((t) => t.split('\n')[0]);
 
-    // Default columns: issue, assignee, status, due date — priority is no longer shown
-    expect(await headerLabels()).toEqual(['ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
+    // Default columns: ID, issue, assignee, status, due date — priority is no longer shown
+    expect(await headerLabels()).toEqual(['ID', 'ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
+
+    // The ID column leads the row and holds the issue ID
+    await expect(page.locator('tr[data-task-id="ENG-101"] td').nth(0)).toContainText('ENG-101');
 
     // Assignee and status are real columns, not just icons in the task cell
-    const assigneeCell = page.locator('tr[data-task-id="ENG-101"] td').nth(1);
+    const assigneeCell = page.locator('tr[data-task-id="ENG-101"] td').nth(2);
     await expect(assigneeCell).toContainText('Andrew Phillips');
-    const statusCell = page.locator('tr[data-task-id="ENG-101"] td').nth(2);
+    const statusCell = page.locator('tr[data-task-id="ENG-101"] td').nth(3);
     await expect(statusCell).toContainText('In Progress');
     await expect(statusCell.locator('[data-status-bubble="ENG-101"]')).toBeVisible();
 
@@ -3916,6 +3919,12 @@ test.describe('GanttSmart GCP app', () => {
     await expect(picker).toBeVisible();
     await expect(picker.getByRole('checkbox', { name: 'Issue', exact: true })).toBeDisabled();
     await expect(picker.getByRole('checkbox', { name: 'Issue', exact: true })).toBeChecked();
+    await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeChecked();
+    // ID is listed ahead of Issue, matching the table order
+    const pickerLabels = await picker
+      .getByRole('checkbox')
+      .evaluateAll((els) => els.map((el) => (el as HTMLInputElement).closest('label')?.textContent?.trim()));
+    expect(pickerLabels.indexOf('Issue ID')).toBeLessThan(pickerLabels.indexOf('Issue'));
     await page.keyboard.press('Escape');
     await expect(picker).toHaveCount(0);
 
@@ -3924,10 +3933,11 @@ test.describe('GanttSmart GCP app', () => {
     await expect(picker).toBeVisible();
 
     // Every optional column can be shown, and lands in the canonical order
-    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress', 'Issue ID']) {
+    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress']) {
       await picker.getByRole('checkbox', { name: label }).check();
     }
     expect(await headerLabels()).toEqual([
+      'ID',
       'ISSUE',
       'ASSIGNEE',
       'STATUS',
@@ -3936,10 +3946,9 @@ test.describe('GanttSmart GCP app', () => {
       'PRIORITY',
       'PROJECT',
       'SUB-ISSUES',
-      'ID',
     ]);
     await expect(page.locator('tr[data-task-id="ENG-101"]')).toContainText('Demo Project');
-    await expect(page.locator('tr[data-task-id="ENG-101"] td').nth(8)).toContainText('ENG-101');
+    await expect(page.locator('tr[data-task-id="ENG-101"] td').nth(0)).toContainText('ENG-101');
 
     // ...and hidden again
     await picker.getByRole('checkbox', { name: 'Assignee' }).uncheck();
@@ -3956,20 +3965,20 @@ test.describe('GanttSmart GCP app', () => {
     for (const label of ['Assignee', 'Status', 'Start date', 'Due date', 'Priority', 'Project', 'Sub-issue progress']) {
       await picker.getByRole('checkbox', { name: label }).uncheck();
     }
-    expect(await headerLabels()).toEqual(['ISSUE', 'ID']);
+    expect(await headerLabels()).toEqual(['ID', 'ISSUE']);
     await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeDisabled();
     await picker.getByRole('checkbox', { name: 'Due date' }).check();
     await expect(picker.getByRole('checkbox', { name: 'Issue ID' })).toBeEnabled();
 
     // Back to a full set for the resize and reload checks below
     await page.getByRole('button', { name: 'Reset to defaults' }).click();
-    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress', 'Issue ID']) {
+    for (const label of ['Start date', 'Priority', 'Project', 'Sub-issue progress']) {
       await picker.getByRole('checkbox', { name: label }).check();
     }
     await page.keyboard.press('Escape');
 
     // Resizing works for a column that isn't shown by default
-    const statusHeader = headers.nth(2);
+    const statusHeader = headers.nth(3);
     const before = (await statusHeader.boundingBox())!;
     await page.mouse.move(before.x + before.width - 2, before.y + before.height / 2);
     await page.mouse.down();
@@ -3982,6 +3991,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.reload();
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     expect(await headerLabels()).toEqual([
+      'ID',
       'ISSUE',
       'ASSIGNEE',
       'STATUS',
@@ -3990,14 +4000,13 @@ test.describe('GanttSmart GCP app', () => {
       'PRIORITY',
       'PROJECT',
       'SUB-ISSUES',
-      'ID',
     ]);
-    expect((await headers.nth(2).boundingBox())!.width).toBeCloseTo(after.width, 0);
+    expect((await headers.nth(3).boundingBox())!.width).toBeCloseTo(after.width, 0);
 
     // Reset puts the defaults back
     await page.getByRole('button', { name: 'Choose columns' }).click();
     await page.getByRole('button', { name: 'Reset to defaults' }).click();
-    expect(await headerLabels()).toEqual(['ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
+    expect(await headerLabels()).toEqual(['ID', 'ISSUE', 'ASSIGNEE', 'STATUS', 'DUE']);
 
     expect(errors).toEqual([]);
   });
@@ -4127,8 +4136,8 @@ test.describe('GanttSmart GCP app', () => {
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
 
-    // 1. On desktop, all visible schedule columns (task, assignee, status, due) are frozen
-    for (const col of ['task', 'assignee', 'status', 'due']) {
+    // 1. On desktop, all visible schedule columns (id, task, assignee, status, due) are frozen
+    for (const col of ['id', 'task', 'assignee', 'status', 'due']) {
       await expect(page.locator(`th[data-column-key="${col}"]`)).toHaveAttribute('data-frozen', 'true');
       await expect(page.locator(`tr[data-task-id="ENG-101"] td[data-column-key="${col}"]`)).toHaveAttribute(
         'data-frozen',
@@ -4187,17 +4196,19 @@ test.describe('GanttSmart GCP app', () => {
     // Timeline bar must have scrolled left
     expect(barAfter.x).toBeCloseTo(barBefore.x - 250, 1);
 
-    // 2. On mobile/narrow viewport (< 768px), ONLY the primary 'task' column stays frozen
+    // 2. On mobile/narrow viewport (< 768px), only the leading ID and primary 'task' columns stay frozen
     await scrollContainer.evaluate((el) => {
       el.scrollLeft = 0;
     });
     await page.setViewportSize({ width: 640, height: 800 });
 
+    await expect(page.locator('th[data-column-key="id"]')).toHaveAttribute('data-frozen', 'true');
     await expect(page.locator('th[data-column-key="task"]')).toHaveAttribute('data-frozen', 'true');
     await expect(page.locator('th[data-column-key="assignee"]')).not.toHaveAttribute('data-frozen');
     await expect(page.locator('th[data-column-key="status"]')).not.toHaveAttribute('data-frozen');
     await expect(page.locator('th[data-column-key="due"]')).not.toHaveAttribute('data-frozen');
 
+    const idMobileBefore = (await page.locator('th[data-column-key="id"]').boundingBox())!;
     const taskMobileBefore = (await page.locator('th[data-column-key="task"]').boundingBox())!;
     const assigneeMobileBefore = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
 
@@ -4207,11 +4218,14 @@ test.describe('GanttSmart GCP app', () => {
     });
     await expect.poll(async () => scrollContainer.evaluate((el) => el.scrollLeft)).toBe(180);
 
+    const idMobileAfter = (await page.locator('th[data-column-key="id"]').boundingBox())!;
     const taskMobileAfter = (await page.locator('th[data-column-key="task"]').boundingBox())!;
     const assigneeMobileAfter = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
 
-    // Primary task column remains pinned at left: 0
+    // ID and the primary task column stay pinned side by side, with the task column right after ID
+    expect(idMobileAfter.x).toBeCloseTo(idMobileBefore.x, 1);
     expect(taskMobileAfter.x).toBeCloseTo(taskMobileBefore.x, 1);
+    expect(taskMobileAfter.x).toBeCloseTo(idMobileAfter.x + idMobileAfter.width, 1);
 
     // Extra columns scroll off to the left so the timeline stays reachable and visible
     expect(assigneeMobileAfter.x).toBeCloseTo(assigneeMobileBefore.x - 180, 1);
@@ -4906,7 +4920,10 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('tr[data-task-id="ENG-210"]')).toHaveAttribute('data-task-depth', '0');
 
     // Each level is indented further to the right in the task column
-    const idX = async (id: string) => (await page.locator(`tr[data-task-id="${id}"] a`).first().boundingBox())!.x;
+    const idX = async (id: string) =>
+      page.locator(`tr[data-task-id="${id}"] td[data-column-key="task"] [data-task-indent]`).evaluate((el) => {
+        return el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft);
+      });
     const [x200, x201, x203, x202, x210] = [
       await idX('ENG-200'),
       await idX('ENG-201'),
