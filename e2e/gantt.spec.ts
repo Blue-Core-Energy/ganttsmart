@@ -186,10 +186,7 @@ async function mockLinearIssues(page: Page, issues: MockIssue[]) {
   const descriptionOf = (i: MockIssue) => `${startTagOffsetDays(i.startOffset)}\n${i.title}`;
   const currentStartById = new Map(issues.map((i) => [i.id, isoOffsetDays(i.startOffset)]));
   const currentDueById = new Map(issues.map((i) => [i.id, isoOffsetDays(i.dueOffset)]));
-  const commentsByIssue = new Map<
-    string,
-    Array<{ id: string; body: string; createdAt: string; updatedAt: string }>
-  >();
+  const commentsByIssue = new Map<string, Array<{ id: string; body: string; createdAt: string; updatedAt: string }>>();
 
   await page.addInitScript(() => {
     localStorage.setItem('gantt_onboarding_done', '1');
