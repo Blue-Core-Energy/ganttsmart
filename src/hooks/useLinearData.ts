@@ -143,6 +143,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     return orderedAllTasks.filter((t) => (t.isExternal ? visibleExtIds.has(t.uuid) : visibleLocalIds.has(t.uuid)));
   }, [orderedAllTasks, filteredTasks, visibleExternalTasks]);
 
+  const visibleUuids = useMemo(() => new Set(displayTasks.map((t) => t.uuid)), [displayTasks]);
+
   const allKnownTasks = useMemo(
     () => [...tasks, ...unscheduledTasks, ...externalTasks, ...externalUnscheduledTasks],
     [tasks, unscheduledTasks, externalTasks, externalUnscheduledTasks],
@@ -154,13 +156,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   const reorderTask = useCallback(
     (draggedUuid: string, targetUuid: string, placeAfter: boolean) => {
       if (draggedUuid === targetUuid) return;
-      const order = reorderWithinHierarchy(
-        orderedAllTasks,
-        draggedUuid,
-        targetUuid,
-        placeAfter,
-        new Set(displayTasks.map((t) => t.uuid)),
-      );
+      const order = reorderWithinHierarchy(orderedAllTasks, draggedUuid, targetUuid, placeAfter, visibleUuids);
       if (!order) {
         toast('Sub-issues can only be reordered within their parent');
         return;
@@ -174,7 +170,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         }
       }
     },
-    [orderedAllTasks, displayTasks, selectedProjectId],
+    [orderedAllTasks, visibleUuids, selectedProjectId],
   );
 
   // Push to undo stack and show toast with Undo action

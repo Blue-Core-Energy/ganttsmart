@@ -414,6 +414,21 @@ describe('reorderWithinHierarchy', () => {
       expect(uuids(reorderWithinHierarchy(all, 'u-C', 'u-A1', true, visible))).toEqual(['A', 'A1', 'C', 'A2', 'B']);
     });
 
+    it('keeps a promoted sub-issue where it was dropped across consecutive reorders', () => {
+      const shown = (order: string[]) => {
+        const byUuid = new Map(all.map((t) => [t.uuid, t]));
+        const list = order.map((u) => byUuid.get(u)!).filter((t) => visible.has(t.uuid));
+        return ids(buildTaskHierarchy(list).tasks);
+      };
+      const first = reorderWithinHierarchy(all, 'u-A1', 'u-C', true, visible)!;
+      expect(shown(first)).toEqual(['A2', 'B', 'C', 'A1']);
+
+      const byUuid = new Map(all.map((t) => [t.uuid, t]));
+      const reordered = first.map((u) => byUuid.get(u)!);
+      const second = reorderWithinHierarchy(reordered, 'u-B', 'u-C', true, visible)!;
+      expect(shown(second)).toEqual(['A2', 'C', 'B', 'A1']);
+    });
+
     it('moves a visible parent together with its hidden sub-issues', () => {
       const hiddenChild = new Set(['u-A', 'u-B', 'u-C']);
       expect(uuids(reorderWithinHierarchy(all, 'u-A', 'u-C', true, hiddenChild))).toEqual(['B', 'C', 'A', 'A1', 'A2']);

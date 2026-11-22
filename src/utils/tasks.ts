@@ -257,20 +257,24 @@ export function reorderWithinHierarchy(
   visibleUuids?: ReadonlySet<string>,
 ): string[] | null {
   if (draggedUuid === targetUuid) return null;
-  const hierarchy = buildTaskHierarchy(tasks);
+  // A visible sub-issue whose parent is hidden is a top-level row on screen, so detach it before grouping;
+  // otherwise grouping would pull it back under the hidden parent and undo earlier moves. Hidden tasks keep
+  // their parent so a visible parent still moves with its hidden sub-issues.
+  let input = tasks;
+  if (visibleUuids) {
+    const hiddenIds = new Set(tasks.filter((t) => !visibleUuids.has(t.uuid)).map((t) => t.id));
+    input = tasks.map((t) =>
+      visibleUuids.has(t.uuid) && t.parentId && hiddenIds.has(t.parentId) ? { ...t, parentId: null } : t,
+    );
+  }
+  const hierarchy = buildTaskHierarchy(input);
   const byUuid = new Map(hierarchy.tasks.map((t) => [t.uuid, t]));
   const byId = new Map(hierarchy.tasks.map((t) => [t.id, t]));
   const dragged = byUuid.get(draggedUuid);
   const target = byUuid.get(targetUuid);
   if (!dragged || !target) return null;
 
-  // The parent as the user sees it: a hidden parent leaves its sub-issues at the top level
-  const shownParent = (t: Task): string | undefined => {
-    const parent = hierarchy.parentById.get(t.id);
-    if (!parent || !visibleUuids) return parent;
-    const parentTask = byId.get(parent);
-    return parentTask && visibleUuids.has(parentTask.uuid) ? parent : undefined;
-  };
+  const shownParent = (t: Task): string | undefined => hierarchy.parentById.get(t.id);
 
   const draggedParent = shownParent(dragged);
   let anchor: Task | undefined = target;
