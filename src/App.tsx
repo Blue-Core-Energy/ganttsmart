@@ -305,6 +305,8 @@ function GanttView({
         isLinkedInLinear={isLinkedInLinear}
         linkingToLinear={linkingToLinear}
         onAddToLinear={addProjectLinkToLinear}
+        onOpenNonWorkDays={() => setShowNonWorkDays(true)}
+        nonWorkDayCount={nonWorkDays.entries.length}
       />
 
       <FilterBar
@@ -324,8 +326,6 @@ function GanttView({
         onShowExternalChange={setShowExternal}
         allowExternalEdits={allowExternalEdits}
         onAllowExternalEditsChange={setAllowExternalEdits}
-        onOpenNonWorkDays={() => setShowNonWorkDays(true)}
-        nonWorkDayCount={nonWorkDays.entries.length}
       />
 
       <StatsRow tasks={filteredTasks} />
