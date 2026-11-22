@@ -1,9 +1,10 @@
 import type { Task } from '@/types';
 import { isIgnoredTask } from '@/utils/issues';
-import { computeTaskStats } from '@/utils/tasks';
+import { computeTaskStats, countUnscheduledTasks } from '@/utils/tasks';
 
 interface Props {
   tasks: Task[];
+  unscheduledTasks?: Task[];
 }
 
 function FlagIcon() {
@@ -61,6 +62,25 @@ function CalendarIcon() {
   );
 }
 
+function AlertIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="8" x2="12" y2="12" />
+      <line x1="12" y1="16" x2="12.01" y2="16" />
+    </svg>
+  );
+}
+
 function CheckIcon() {
   return (
     <svg
@@ -78,9 +98,10 @@ function CheckIcon() {
   );
 }
 
-export default function StatsRow({ tasks }: Props) {
+export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
   const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
-  if (!visibleTasks.length) return null;
+  const unscheduled = countUnscheduledTasks(unscheduledTasks);
+  if (!visibleTasks.length && !unscheduled) return null;
 
   const { active, inProgress, completed, span } = computeTaskStats(visibleTasks);
 
@@ -109,6 +130,16 @@ export default function StatsRow({ tasks }: Props) {
       color: 'var(--color-accent-light)',
       Icon: CalendarIcon,
     },
+    ...(unscheduled > 0
+      ? [
+          {
+            label: 'Unscheduled',
+            value: unscheduled,
+            color: 'var(--color-high)',
+            Icon: AlertIcon,
+          },
+        ]
+      : []),
   ];
 
   return (

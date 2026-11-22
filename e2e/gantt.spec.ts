@@ -1211,6 +1211,15 @@ test.describe('GanttSmart GCP app', () => {
     await unscheduledToggle.click();
     await expect(page.getByText('Unscheduled active task')).toBeVisible();
 
+    // Summary row counts only the active unscheduled issue, matching the Unscheduled section badge
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^1Unscheduled$/ })
+        .first(),
+    ).toBeVisible();
+    await expect(page.getByRole('button', { name: /Unscheduled\s*1/ })).toBeVisible();
+
     // FilterBar count pill reflects only the 2 active scheduled tasks
     await expect(page.getByText('2/2', { exact: true })).toBeVisible();
 
@@ -1423,6 +1432,9 @@ test.describe('GanttSmart GCP app', () => {
       .filter({ hasText: /^1Completed$/ })
       .first();
     await expect(completedStat).toBeVisible();
+
+    // No unscheduled issues, so the summary row has no Unscheduled card
+    await expect(page.getByText('Unscheduled', { exact: true })).toHaveCount(0);
 
     // Dependency arrow renders between completed blocker ENG-100 and active ENG-101
     const arrow = exportTarget.locator('svg path[marker-end="url(#dep-arrow)"]');
