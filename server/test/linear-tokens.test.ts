@@ -18,7 +18,7 @@ interface Reply {
  * A stub Linear token endpoint. By default every refresh succeeds (even for a refresh token it
  * has already rotated, as Linear's 30-minute grace period allows) and returns a new numbered set.
  */
-function stubLinear(reply?: () => Reply) {
+function stubLinear(reply?: () => Reply | Promise<Reply>) {
   let issued = 0;
   const refreshTokensSeen: string[] = [];
   const fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -26,7 +26,7 @@ function stubLinear(reply?: () => Reply) {
     refreshTokensSeen.push(form.get('refresh_token') ?? '');
     // Yield so concurrent callers really overlap.
     await new Promise((resolve) => setTimeout(resolve, 5));
-    const r = reply?.() ?? {
+    const r = (await reply?.()) ?? {
       status: 200,
       body: { access_token: `access-${++issued}`, refresh_token: `refresh-${issued}`, expires_in: 86399 },
     };
@@ -105,9 +105,17 @@ describe('createTokenService.getAccessToken', () => {
     // Linear says invalid_grant for refresh-0 because another instance already rotated it to
     // refresh-1 (and its grace period is over); that instance wrote the new set before we re-read.
     const rotated: LinearTokens = { accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: NOW + 60 * MINUTE };
-    const store = await storeWith(old(4 * MINUTE));
-    const { oauth, refreshTokensSeen } = stubLinear(() => {
-      void store.saveTokens(SUB, EMAIL, rotated);
+    const baseStore = await storeWith(old(4 * MINUTE));
+    // Memory store writes synchronously by default; inject an async delay so the save is truly asynchronous.
+    const store: Store = {
+      ...baseStore,
+      async saveTokens(sub, email, tokens) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return baseStore.saveTokens(sub, email, tokens);
+      },
+    };
+    const { oauth, refreshTokensSeen } = stubLinear(async () => {
+      await store.saveTokens(SUB, EMAIL, rotated);
       return { status: 400, body: { error: 'invalid_grant' } };
     });
     const tokens = createTokenService({ store, oauth, now: () => NOW });
