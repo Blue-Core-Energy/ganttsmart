@@ -126,8 +126,19 @@ export function totalColumnWidth(visible: ColumnKey[], widths: ColumnWidths): nu
 
 export const MOBILE_BREAKPOINT = 768;
 
-/** Columns hidden below MOBILE_BREAKPOINT, where the Issue column alone fills most of the screen */
-export const NARROW_HIDDEN_COLUMNS: ColumnKey[] = ['id'];
+/**
+ * The only columns shown below MOBILE_BREAKPOINT, in table order. ID rides along with Issue
+ * so the identifier stays visible on a phone, and the rest wait for a wider screen.
+ */
+export const NARROW_COLUMNS: ColumnKey[] = ['id', 'task'];
+
+/**
+ * Widths used instead of the saved ones below MOBILE_BREAKPOINT, so the pinned pair is 280px:
+ * on a 375px phone that leaves about 95px of timeline beside it (40px on a 320px one).
+ * ID's 80px still holds a nine-character identifier such as ENG-1234 in its 56px of content,
+ * and 200px leaves the Issue title roughly 120px next to the tree gutter.
+ */
+export const NARROW_COLUMN_WIDTHS: Partial<ColumnWidths> = { id: 80, task: 200 };
 
 export interface ViewportOptions {
   isNarrow?: boolean;
@@ -142,10 +153,15 @@ export function resolveIsNarrow(options?: ViewportOptions): boolean {
 
 /**
  * The columns to render. This is a display rule only: the saved selection is left alone,
- * so widening the window brings the hidden columns straight back.
+ * so widening the window brings the full selection straight back.
  */
 export function visibleColumnsForViewport(selected: ColumnKey[], options?: ViewportOptions): ColumnKey[] {
-  return resolveIsNarrow(options) ? selected.filter((k) => !NARROW_HIDDEN_COLUMNS.includes(k)) : selected;
+  return resolveIsNarrow(options) ? [...NARROW_COLUMNS] : selected;
+}
+
+/** The widths to render, with the narrow-screen widths applied. Saved widths are never changed. */
+export function columnWidthsForViewport(widths: ColumnWidths, options?: ViewportOptions): ColumnWidths {
+  return resolveIsNarrow(options) ? { ...widths, ...NARROW_COLUMN_WIDTHS } : widths;
 }
 
 /**
@@ -165,16 +181,17 @@ export interface StickyColumnOffsets {
 
 /**
  * Computes sticky `left` offsets for schedule columns.
- * On desktop (viewport >= 768px and columns don't crowd the timeline),
- * all visible schedule columns are pinned with cumulative left offsets.
- * On narrow/mobile viewports (< 768px) or when all frozen columns would take
- * more than MAX_FROZEN_WIDTH_RATIO of the viewport, falls back to freezing
- * ONLY the primary 'task' column so the timeline remains visible and reachable.
- * Callers hide the ID column below 768px (visibleColumnsForViewport), so there 'task' is
- * first and pins at left: 0. For wider screens that still crowd the timeline, ID sits
- * before 'task', so the fallback pins both (ID at 0, task after it) when that pair stays
- * within the ratio. Otherwise 'task' is pinned at left: 0 on its own and ID scrolls away
- * underneath it, rather than being left stranded in front of it.
+ * When the viewport is >= 768px and the columns don't crowd the timeline, all visible
+ * columns are pinned with cumulative left offsets.
+ *
+ * Otherwise only the columns up to and including 'task' are pinned, so the timeline stays
+ * reachable. Below 768px those are always ID and Issue (see NARROW_COLUMNS): they are the
+ * only columns shown, so nothing else needs to scroll but the timeline, and pinning the pair
+ * regardless of the 65% ratio is what keeps ID from being stranded under Issue. Between 768px
+ * and the full freeze, ID and Issue are pinned together only while the pair fits within
+ * MAX_FROZEN_WIDTH_RATIO of the viewport. If resized widths push it past that, Issue pins
+ * alone at left: 0 and ID scrolls away underneath it, rather than being left stranded in
+ * front of it. Issue also pins alone when nothing precedes it (ID hidden).
  */
 export function computeStickyColumnOffsets(
   visibleColumns: ColumnKey[],
@@ -197,7 +214,8 @@ export function computeStickyColumnOffsets(
     if (taskIndex >= 0) {
       const leading = visibleColumns.slice(0, taskIndex + 1);
       const leadingWidth = totalColumnWidth(leading, colWidths);
-      const leadingFits = !options?.viewportWidth || leadingWidth <= options.viewportWidth * MAX_FROZEN_WIDTH_RATIO;
+      const leadingFits =
+        isNarrow || !options?.viewportWidth || leadingWidth <= options.viewportWidth * MAX_FROZEN_WIDTH_RATIO;
       if (taskIndex === 0 || !leadingFits) {
         offsets.task = 0;
       } else {

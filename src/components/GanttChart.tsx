@@ -16,6 +16,7 @@ import {
 import {
   computeStickyColumnOffsets,
   visibleColumnsForViewport,
+  columnWidthsForViewport,
   getColumnDef,
   loadColumnWidths,
   loadVisibleColumns,
@@ -126,7 +127,7 @@ export default function GanttChart({
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
-  const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
+  const [savedColWidths, setSavedColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
 
@@ -176,6 +177,12 @@ export default function GanttChart({
     [selectedColumns, isNarrowViewport],
   );
 
+  // Narrow screens use their own widths; the saved ones are only edited by resizing on a wide screen
+  const colWidths = useMemo(
+    () => columnWidthsForViewport(savedColWidths, { isNarrow: isNarrowViewport }),
+    [savedColWidths, isNarrowViewport],
+  );
+
   const stickyColumnInfo = useMemo(
     () =>
       computeStickyColumnOffsets(visibleColumns, colWidths, {
@@ -194,10 +201,10 @@ export default function GanttChart({
   onDayWidthChangeRef.current = onDayWidthChange;
   const panCleanupRef = useRef<(() => void) | null>(null);
   const wheelCleanupRef = useRef<(() => void) | null>(null);
-  const baseWidthsRef = useRef<ColumnWidths>(colWidths);
-  /** Mirrors colWidths for the resize handlers, which persist on mouseup */
-  const liveWidthsRef = useRef<ColumnWidths>(colWidths);
-  liveWidthsRef.current = colWidths;
+  const baseWidthsRef = useRef<ColumnWidths>(savedColWidths);
+  /** Mirrors savedColWidths for the resize handlers, which persist on mouseup */
+  const liveWidthsRef = useRef<ColumnWidths>(savedColWidths);
+  liveWidthsRef.current = savedColWidths;
 
   // Right-clicking any header toggles the picker, so a second right-click closes it
   const togglePickerFromContextMenu = useCallback((e: React.MouseEvent) => {
@@ -425,7 +432,7 @@ export default function GanttChart({
       let baseSet = false;
       return (delta: number) => {
         if (!baseSet) {
-          baseWidthsRef.current = { ...colWidths };
+          baseWidthsRef.current = { ...savedColWidths };
           baseSet = true;
           // Reset on mouseup, and persist the width the drag settled on. The live
           // widths come from a ref: saving inside a state updater would run twice
@@ -444,10 +451,10 @@ export default function GanttChart({
           [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth),
         };
         liveWidthsRef.current = next;
-        setColWidths(next);
+        setSavedColWidths(next);
       };
     },
-    [colWidths],
+    [savedColWidths],
   );
 
   // All computation must happen before early returns to respect Rules of Hooks
@@ -900,7 +907,7 @@ export default function GanttChart({
                     } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
                       width: colWidths[key],
-                      minWidth: getColumnDef(key).minWidth,
+                      minWidth: Math.min(getColumnDef(key).minWidth, colWidths[key]),
                       maxWidth: colWidths[key],
                       left: isSticky ? stickyLeft : undefined,
                     }}
@@ -920,7 +927,7 @@ export default function GanttChart({
                         />
                       )}
                     </span>
-                    <ResizeHandle onResize={makeResizeHandler(key)} />
+                    {!isNarrowViewport && <ResizeHandle onResize={makeResizeHandler(key)} />}
                   </th>
                 );
               })}

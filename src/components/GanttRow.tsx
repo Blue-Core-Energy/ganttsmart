@@ -1061,7 +1061,7 @@ export default function GanttRow({
             } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
             style={{
               width: colWidths[key],
-              minWidth: getColumnDef(key).minWidth,
+              minWidth: Math.min(getColumnDef(key).minWidth, colWidths[key]),
               maxWidth: colWidths[key],
               left: isSticky ? stickyLeft : undefined,
             }}

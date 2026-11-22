@@ -13,6 +13,9 @@ import {
   totalColumnWidth,
   computeStickyColumnOffsets,
   visibleColumnsForViewport,
+  columnWidthsForViewport,
+  NARROW_COLUMNS,
+  NARROW_COLUMN_WIDTHS,
   MAX_FROZEN_WIDTH_RATIO,
   MOBILE_BREAKPOINT,
   type ColumnKey,
@@ -209,64 +212,83 @@ describe('totalColumnWidth', () => {
   });
 });
 
-describe('visibleColumnsForViewport', () => {
-  const selected: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
+describe('narrow screens', () => {
+  const selected: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'start', 'due', 'priority'];
 
-  it('hides the ID column below the mobile breakpoint', () => {
-    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT - 1 })).toEqual([
-      'task',
-      'assignee',
-      'status',
-      'due',
-    ]);
-    expect(visibleColumnsForViewport(selected, { isNarrow: true })).not.toContain('id');
+  // Tests run in the node environment, so stand in a minimal in-memory Storage
+  function stubStore(initial: Record<string, string> = {}) {
+    const store = new Map<string, string>(Object.entries(initial));
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    return store;
+  }
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('shows only ID and Issue below the mobile breakpoint', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT - 1 })).toEqual(['id', 'task']);
+    expect(visibleColumnsForViewport(selected, { viewportWidth: 375 })).toEqual(NARROW_COLUMNS);
+    expect(visibleColumnsForViewport(selected, { isNarrow: true })).toEqual(['id', 'task']);
   });
 
-  it('keeps the ID column at and above the mobile breakpoint', () => {
+  it('keeps ID on screen even when it was hidden from the saved selection', () => {
+    expect(visibleColumnsForViewport(['task', 'due'], { viewportWidth: 375 })).toEqual(['id', 'task']);
+  });
+
+  it('shows the full saved selection at and above the mobile breakpoint', () => {
     expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT })).toEqual(selected);
     expect(visibleColumnsForViewport(selected, { viewportWidth: 1920 })).toEqual(selected);
     expect(visibleColumnsForViewport(selected)).toEqual(selected);
   });
 
-  it('leaves Issue as the first column on narrow screens', () => {
-    expect(visibleColumnsForViewport(selected, { viewportWidth: 375 })[0]).toBe('task');
+  it('is a display rule only: widening restores everything and storage is never written', () => {
+    stubStore();
+    saveVisibleColumns(selected);
+    saveColumnWidths({ ...DEFAULT_COLUMN_WIDTHS, task: 350 });
+    const stored = loadVisibleColumns();
+    const storedWidths = loadColumnWidths();
+    const writes = vi.spyOn(localStorage, 'setItem');
+
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['id', 'task']);
+    expect(columnWidthsForViewport(storedWidths, { viewportWidth: 375 }).task).toBe(NARROW_COLUMN_WIDTHS.task);
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(selected);
+    expect(columnWidthsForViewport(storedWidths, { viewportWidth: 1280 }).task).toBe(350);
+
+    expect(writes).not.toHaveBeenCalled();
+    expect(stored).toEqual(selected);
+    expect(storedWidths.task).toBe(350);
+    expect(loadVisibleColumns()).toEqual(selected);
+    expect(loadColumnWidths().task).toBe(350);
   });
 
-  it('is a display rule only: it never changes the selection or what is stored', () => {
-    const store = new Map<string, string>();
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => void store.set(k, v),
-    });
-    try {
-      saveVisibleColumns(selected);
-      const stored = loadVisibleColumns();
-      const snapshot = new Map(store);
-      expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).not.toContain('id');
-      // Widening again restores ID without it ever having been unselected
-      expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(selected);
-      expect(stored).toEqual(selected);
-      expect(store).toEqual(snapshot);
-      expect(loadVisibleColumns()).toEqual(selected);
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it('does not interact with the migration: a narrow first load still adds ID to storage', () => {
+    const store = stubStore({ gantt_columns: JSON.stringify(['task', 'due']) });
+    const stored = loadVisibleColumns();
+    expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['id', 'task']);
+    expect(stored).toEqual(['id', 'task', 'due']);
+    expect(store.get('gantt_columns')).toBe('["id","task","due"]');
+    // ...and a later hide of ID is respected on a wide screen
+    saveVisibleColumns(['task', 'due']);
+    expect(visibleColumnsForViewport(loadVisibleColumns(), { viewportWidth: 1280 })).toEqual(['task', 'due']);
   });
 
-  it('does not interact with the saved-selection migration: a narrow first load still adds ID to storage', () => {
-    const store = new Map<string, string>([['gantt_columns', JSON.stringify(['task', 'due'])]]);
-    vi.stubGlobal('localStorage', {
-      getItem: (k: string) => store.get(k) ?? null,
-      setItem: (k: string, v: string) => void store.set(k, v),
-    });
-    try {
-      const stored = loadVisibleColumns();
-      expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['task', 'due']);
-      expect(stored).toEqual(['id', 'task', 'due']);
-      expect(store.get('gantt_columns')).toBe('["id","task","due"]');
-    } finally {
-      vi.unstubAllGlobals();
-    }
+  it('uses slimmer widths that leave room for the timeline on a phone', () => {
+    const widths = columnWidthsForViewport({ ...DEFAULT_COLUMN_WIDTHS, task: 450 }, { viewportWidth: 375 });
+    expect(widths.id).toBe(80);
+    expect(widths.task).toBe(200);
+    expect(widths.assignee).toBe(DEFAULT_COLUMN_WIDTHS.assignee);
+    expect(totalColumnWidth(NARROW_COLUMNS, widths)).toBe(280);
+    expect(375 - totalColumnWidth(NARROW_COLUMNS, widths)).toBeGreaterThanOrEqual(90);
+  });
+
+  it('pins ID and Issue side by side at 375px, past the 65% ratio', () => {
+    const widths = columnWidthsForViewport(DEFAULT_COLUMN_WIDTHS, { viewportWidth: 375 });
+    const result = computeStickyColumnOffsets(NARROW_COLUMNS, widths, { viewportWidth: 375 });
+    // 280px is 75% of 375px, so a ratio rule would have left ID scrolling under Issue
+    expect(280 / 375).toBeGreaterThan(MAX_FROZEN_WIDTH_RATIO);
+    expect(result.offsets).toEqual({ id: 0, task: 80 });
+    expect(result.lastFrozenKey).toBe('task');
   });
 });
 
