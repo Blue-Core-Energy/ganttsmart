@@ -7,6 +7,8 @@ interface Props {
   /** Names offered for per-person PTO (the people on the loaded project); any name can still be typed */
   assignees: string[];
   loaded: boolean;
+  /** Whether the calendar is team-wide (true) or private to the signed-in account (false) */
+  shared: boolean;
   /** Saves the entry. Rejects with a message to show in the form. */
   onAdd: (entry: NewNonWorkDay) => Promise<void>;
   onRemove: (id: string) => void | Promise<void>;
@@ -18,7 +20,7 @@ const inputCls =
 
 type Scope = 'company' | 'person';
 
-export default function NonWorkDaysDialog({ entries, assignees, loaded, onAdd, onRemove, onClose }: Props) {
+export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, onAdd, onRemove, onClose }: Props) {
   const [label, setLabel] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -106,7 +108,8 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, onAdd, o
           <div>
             <h2 className="text-base font-bold text-text-primary">Holidays / PTO</h2>
             <p className="text-xs text-text-secondary mt-0.5">
-              Days off are skipped when counting workdays and moving tasks. Everyone sees the same calendar.
+              Days off are skipped when counting workdays and moving tasks.{' '}
+              {shared ? 'Everyone on the team sees this shared calendar.' : 'Saved to your account calendar.'}
             </p>
           </div>
           <button

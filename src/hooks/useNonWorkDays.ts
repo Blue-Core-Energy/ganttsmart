@@ -5,8 +5,9 @@ import type { NewNonWorkDay, NonWorkDay } from '@/types';
 import { sortNonWorkDays } from '@/utils/nonWorkDays';
 
 /**
- * The shared holidays / PTO calendar. Loaded once, then again whenever the tab becomes visible so
- * entries a teammate added show up without a reload.
+ * The holidays / PTO calendar. Loaded once, then again whenever the tab becomes visible so entries
+ * a teammate added show up without a reload. Teammates share it only when
+ * `backend.capabilities.sharedNonWorkDays` is true (GCP); on Supabase each account has its own.
  */
 export function useNonWorkDays() {
   const [entries, setEntries] = useState<NonWorkDay[]>([]);

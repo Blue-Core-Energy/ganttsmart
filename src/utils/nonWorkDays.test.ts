@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { NonWorkDay, Task } from '@/types';
 import {
   buildNonWorkSpans,
@@ -7,6 +7,7 @@ import {
   MAX_NON_WORK_RANGE_DAYS,
   parseNonWorkDayInput,
   planNonWorkDaySnap,
+  saveScheduleSnap,
   sortNonWorkDays,
 } from './nonWorkDays';
 
@@ -83,6 +84,12 @@ describe('parseNonWorkDayInput', () => {
     });
     expect(parseNonWorkDayInput({ ...base, endDate: '2026-02-31' })).toHaveProperty('error');
     expect(parseNonWorkDayInput({ ...base, startDate: '2026-01-01', endDate: '2027-01-02' })).toHaveProperty('error');
+  });
+
+  it('rejects "Unassigned" as a person, in any case', () => {
+    for (const name of ['Unassigned', ' unassigned ', 'UNASSIGNED']) {
+      expect(parseNonWorkDayInput({ ...base, assigneeName: name })).toHaveProperty('error');
+    }
   });
 
   it('allows a range of exactly the maximum length', () => {
@@ -221,5 +228,42 @@ describe('planNonWorkDaySnap', () => {
     expect(planNonWorkDaySnap([roomToMove], [holiday], holiday)).toEqual([
       { task: roomToMove, startDate: '2026-11-27' },
     ]);
+  });
+});
+
+describe('saveScheduleSnap', () => {
+  const snap = { task: makeTask(), startDate: '2026-11-30', due: '2026-12-01' };
+
+  it('applies both fields when both save', async () => {
+    const result = await saveScheduleSnap(
+      snap,
+      vi.fn().mockResolvedValue(undefined),
+      vi.fn().mockResolvedValue(undefined),
+    );
+    expect(result).toEqual({ applied: snap, failed: false });
+  });
+
+  it('keeps the due date and drops only the start date when the start save fails', async () => {
+    const result = await saveScheduleSnap(
+      snap,
+      vi.fn().mockResolvedValue(undefined),
+      vi.fn().mockRejectedValue(new Error('x')),
+    );
+    expect(result).toEqual({ applied: { task: snap.task, due: '2026-12-01' }, failed: true });
+  });
+
+  it('applies nothing and skips the start save when the due save fails', async () => {
+    const saveStart = vi.fn();
+    const result = await saveScheduleSnap(snap, vi.fn().mockRejectedValue(new Error('x')), saveStart);
+    expect(result).toEqual({ applied: { task: snap.task }, failed: true });
+    expect(saveStart).not.toHaveBeenCalled();
+  });
+
+  it('saves only the start date for a start-only snap', async () => {
+    const saveDue = vi.fn();
+    const saveStart = vi.fn().mockResolvedValue(undefined);
+    const result = await saveScheduleSnap({ task: snap.task, startDate: '2026-11-30' }, saveDue, saveStart);
+    expect(saveDue).not.toHaveBeenCalled();
+    expect(result).toEqual({ applied: { task: snap.task, startDate: '2026-11-30' }, failed: false });
   });
 });

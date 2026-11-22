@@ -56,7 +56,8 @@ export const MAX_NON_WORK_SCAN_DAYS = 3660;
 /** Whether a custom entry (not the weekend) takes `isoDate` off for a person. */
 export function entryAppliesTo(entry: NonWorkDayRange, isoDate: string, assignee?: string | null): boolean {
   if (isoDate < entry.startDate || isoDate > entry.endDate) return false;
-  return !entry.assigneeName || entry.assigneeName === assignee;
+  if (!entry.assigneeName) return true;
+  return entry.assigneeName.trim().toLowerCase() === (assignee ?? '').trim().toLowerCase();
 }
 
 /** Whether `date` is a weekend or falls in a company-wide / matching per-assignee non-work entry. */

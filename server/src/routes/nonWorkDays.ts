@@ -93,6 +93,7 @@ export function nonWorkDayRoutes(deps: { store: Store }): Hono<AppEnv> {
       throw new InvalidInput('expected a JSON body');
     }
     const input = parseInput(body);
+    // Soft cap: the count and the insert are not atomic, so concurrent adds can overshoot slightly.
     if ((await store.listNonWorkDays()).length >= MAX_ENTRIES) {
       return c.json({ error: `the calendar is full (${MAX_ENTRIES} entries); remove some first` }, 409);
     }

@@ -186,6 +186,14 @@ describe('custom non-work days (holidays and PTO)', () => {
     expect(entryAppliesTo(pto, '2026-11-18', 'Alex')).toBe(false);
   });
 
+  it('entryAppliesTo compares assignee names ignoring case and surrounding spaces', () => {
+    const pto = { startDate: '2026-11-16', endDate: '2026-11-17', assigneeName: 'Alex Kim' };
+    expect(entryAppliesTo(pto, '2026-11-16', 'alex kim')).toBe(true);
+    expect(entryAppliesTo(pto, '2026-11-16', '  ALEX KIM ')).toBe(true);
+    expect(entryAppliesTo({ ...pto, assigneeName: ' Alex Kim ' }, '2026-11-16', 'Alex Kim')).toBe(true);
+    expect(entryAppliesTo(pto, '2026-11-16', 'Alex')).toBe(false);
+  });
+
   it('isNonWorkDay keeps weekends and adds holidays and the matching assignee PTO', () => {
     expect(isNonWorkDay(d('2026-11-14'))).toBe(true); // Sat, no calendar
     expect(isNonWorkDay(d('2026-11-26'))).toBe(false); // Thu, no calendar: backward compatible

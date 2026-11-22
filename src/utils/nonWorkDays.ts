@@ -39,6 +39,9 @@ export function parseNonWorkDayInput(input: {
     return { error: `A single entry can cover at most ${MAX_NON_WORK_RANGE_DAYS} days. Split it into several.` };
   }
   const assigneeName = input.assigneeName?.trim() || null;
+  if (assigneeName?.toLowerCase() === 'unassigned') {
+    return { error: 'Pick a teammate, or leave the person blank for a company-wide day off.' };
+  }
   return { value: { label, startDate: input.startDate, endDate, assigneeName } };
 }
 
@@ -105,6 +108,43 @@ export interface ScheduleSnap {
   task: Task;
   startDate?: string;
   due?: string;
+}
+
+/** What actually reached Linear for one snap: only the fields that saved, and whether any field failed. */
+export interface SnapSaveResult {
+  applied: ScheduleSnap;
+  failed: boolean;
+}
+
+/**
+ * Saves one snap, due date first. If the due date fails the start date is not attempted (a start
+ * pulled past its due date must not land alone). If the due date saves and the start date fails,
+ * `applied` keeps the due date so callers roll back only the start date and stay in sync with Linear.
+ */
+export async function saveScheduleSnap(
+  snap: ScheduleSnap,
+  saveDue: (due: string) => Promise<unknown>,
+  saveStart: (startDate: string) => Promise<unknown>,
+): Promise<SnapSaveResult> {
+  const applied: ScheduleSnap = { task: snap.task };
+  let failed = false;
+  if (snap.due) {
+    try {
+      await saveDue(snap.due);
+      applied.due = snap.due;
+    } catch {
+      return { applied, failed: true };
+    }
+  }
+  if (snap.startDate) {
+    try {
+      await saveStart(snap.startDate);
+      applied.startDate = snap.startDate;
+    } catch {
+      failed = true;
+    }
+  }
+  return { applied, failed };
 }
 
 /**

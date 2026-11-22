@@ -23,7 +23,7 @@ import type { AssignableUser, Filters, Milestone, NonWorkDay, Project, Task, Wor
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
-import { planNonWorkDaySnap, type ScheduleSnap } from '@/utils/nonWorkDays';
+import { planNonWorkDaySnap, saveScheduleSnap, type ScheduleSnap } from '@/utils/nonWorkDays';
 import { applyCustomOrder, filterTasks, isTaskDone, reorderWithinHierarchy } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
@@ -505,21 +505,38 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
       pendingMutations.current++;
       try {
-        const settled = await Promise.allSettled(
-          plan.map(async (p) => {
-            if (p.due) await updateIssueDueDate(linearToken, p.task.uuid, p.due);
-            if (p.startDate) await updateIssueStartDate(linearToken, p.task.uuid, p.startDate);
-          }),
+        const results = await Promise.all(
+          plan.map((p) =>
+            saveScheduleSnap(
+              p,
+              (due) => updateIssueDueDate(linearToken, p.task.uuid, due),
+              (start) => updateIssueStartDate(linearToken, p.task.uuid, start),
+            ),
+          ),
         );
-        const saved = plan.filter((_, i) => settled[i].status === 'fulfilled');
-        const failed = plan.filter((_, i) => settled[i].status === 'rejected');
+        const saved = results.filter((r) => r.applied.due || r.applied.startDate).map((r) => r.applied);
+        const failed = results.filter((r) => r.failed);
 
         if (failed.length > 0) {
-          const failedUuids = new Set(failed.map((p) => p.task.uuid));
+          // Roll back only the fields that did not save; a field that did save stays in the chart,
+          // Undo and history so they match Linear.
+          const failedByUuid = new Map(failed.map((r) => [r.applied.task.uuid, r.applied]));
           setTasks((prev) =>
-            prev.map((t) => (failedUuids.has(t.uuid) ? (prevTasks.find((o) => o.uuid === t.uuid) ?? t) : t)),
+            prev.map((t) => {
+              const applied = failedByUuid.get(t.uuid);
+              if (!applied) return t;
+              const original = applied.task;
+              const snap = planByUuid.get(t.uuid)!;
+              return {
+                ...t,
+                ...(snap.startDate && !applied.startDate ? { startDate: original.startDate } : {}),
+                ...(snap.due && !applied.due ? { due: original.due, isDueImplicit: original.isDueImplicit } : {}),
+              };
+            }),
           );
-          toastError(`Could not move ${failed.length} ${failed.length === 1 ? 'task' : 'tasks'} off ${added.label}`);
+          toastError(
+            `Could not fully move ${failed.length} ${failed.length === 1 ? 'task' : 'tasks'} off ${added.label}`,
+          );
         }
         if (saved.length === 0) return [];
 

@@ -54,8 +54,9 @@ export interface HistoryApi {
 }
 
 /**
- * The shared calendar of holidays, shutdowns and PTO. All methods throw on failure.
- * Entries are stored on the backend so everyone using it sees the same calendar.
+ * The calendar of holidays, shutdowns and PTO. All methods throw on failure.
+ * Entries are stored on the backend. Whether teammates see the same calendar depends on the backend:
+ * see `capabilities.sharedNonWorkDays`.
  */
 export interface NonWorkDaysApi {
   list(): Promise<NonWorkDay[]>;
@@ -69,6 +70,8 @@ export interface Backend {
     sharing: boolean;
     passwordLogin: boolean;
     marketingPages: boolean;
+    /** Whether the non-work-day calendar is one team-wide calendar (true) or one per signed-in account (false). */
+    sharedNonWorkDays: boolean;
     /** Whether the UI offers "Sign out". Absent means true. */
     signOut?: boolean;
   };

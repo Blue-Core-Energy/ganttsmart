@@ -7,7 +7,7 @@ const LINEAR_API = 'https://api.linear.app/graphql';
 
 export const backend: Backend = {
   kind: 'supabase',
-  capabilities: { sharing: true, passwordLogin: true, marketingPages: true },
+  capabilities: { sharing: true, passwordLogin: true, marketingPages: true, sharedNonWorkDays: false },
   useAuth: useSupabaseAuth,
   linearRequest(token, body) {
     return fetch(LINEAR_API, {

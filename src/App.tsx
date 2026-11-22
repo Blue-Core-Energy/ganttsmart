@@ -163,13 +163,15 @@ function GanttView({
   const handleAddNonWorkDay = useCallback(
     async (input: NewNonWorkDay) => {
       const added = await nonWorkDays.add(input);
-      void snapTasksToNonWorkDays([...nonWorkDays.entries, added], added).then((snapped) => {
-        if (snapped.length === 0) toastSuccess(`Added ${added.label}`);
-        for (const { task, startDate, due } of snapped) {
-          if (due) logChange(task.id, 'due_date', task.due, due);
-          if (startDate) logChange(task.id, 'start_date', task.startDate, startDate);
-        }
-      });
+      void snapTasksToNonWorkDays([...nonWorkDays.entries, added], added)
+        .then((snapped) => {
+          if (snapped.length === 0) toastSuccess(`Added ${added.label}`);
+          for (const { task, startDate, due } of snapped) {
+            if (due) logChange(task.id, 'due_date', task.due, due);
+            if (startDate) logChange(task.id, 'start_date', task.startDate, startDate);
+          }
+        })
+        .catch(() => {});
     },
     [nonWorkDays, snapTasksToNonWorkDays, logChange],
   );
@@ -364,6 +366,7 @@ function GanttView({
           entries={nonWorkDays.entries}
           assignees={assignees}
           loaded={nonWorkDays.loaded}
+          shared={backend.capabilities.sharedNonWorkDays}
           onAdd={handleAddNonWorkDay}
           onRemove={nonWorkDays.remove}
           onClose={closeNonWorkDays}
