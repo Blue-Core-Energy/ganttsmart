@@ -4963,7 +4963,11 @@ async function mockSubtaskProject(page: Page) {
   });
 
   await page.route('**/api/linear/graphql', async (route) => {
-    const payload = route.request().postDataJSON() as { query?: string } | null;
+    const payload = route.request().postDataJSON() as {
+      query?: string;
+      variables?: Record<string, unknown>;
+    } | null;
+    if (await defaultScheduleMock.handle(route, payload)) return;
     const query = payload?.query ?? '';
     const respond = (data: unknown) =>
       route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });

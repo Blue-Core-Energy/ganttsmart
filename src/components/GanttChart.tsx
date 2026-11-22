@@ -478,9 +478,7 @@ export default function GanttChart({
   // collapsed parents). Otherwise nothing stays dimmed or highlighted for a missing arrow.
   const activeSelectedArrow = useMemo(() => {
     if (!selectedArrow) return null;
-    return dependencyEdges.some(
-      (e) => e.sourceId === selectedArrow.sourceId && e.targetId === selectedArrow.targetId,
-    )
+    return dependencyEdges.some((e) => e.sourceId === selectedArrow.sourceId && e.targetId === selectedArrow.targetId)
       ? selectedArrow
       : null;
   }, [selectedArrow, dependencyEdges]);
