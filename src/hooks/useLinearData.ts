@@ -149,11 +149,18 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   );
 
   // Move a task (local or external ghost row) next to another in the display order and persist it.
-  // A parent moves with its sub-issues; a sub-issue can only move among its siblings.
+  // A parent moves with its sub-issues; a sub-issue can only move among its siblings. Sub-issues whose parent
+  // is filtered out are top-level rows on screen, so they move among the visible top-level rows.
   const reorderTask = useCallback(
     (draggedUuid: string, targetUuid: string, placeAfter: boolean) => {
       if (draggedUuid === targetUuid) return;
-      const order = reorderWithinHierarchy(orderedAllTasks, draggedUuid, targetUuid, placeAfter);
+      const order = reorderWithinHierarchy(
+        orderedAllTasks,
+        draggedUuid,
+        targetUuid,
+        placeAfter,
+        new Set(displayTasks.map((t) => t.uuid)),
+      );
       if (!order) {
         toast('Sub-issues can only be reordered within their parent');
         return;
@@ -167,7 +174,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         }
       }
     },
-    [orderedAllTasks, selectedProjectId],
+    [orderedAllTasks, displayTasks, selectedProjectId],
   );
 
   // Push to undo stack and show toast with Undo action

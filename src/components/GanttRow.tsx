@@ -687,13 +687,17 @@ export default function GanttRow({
                     onClick={(e) => e.stopPropagation()}
                     onDoubleClick={(e) => e.stopPropagation()}
                     className="w-full -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
-                    style={{ maxWidth: colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0) }}
+                    style={{
+                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
+                    }}
                   />
                 ) : (
                   <div
                     data-task-title={task.id}
                     className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-                    style={{ maxWidth: colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0) }}
+                    style={{
+                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
+                    }}
                     title={task.title}
                     onDoubleClick={
                       canInlineEdit

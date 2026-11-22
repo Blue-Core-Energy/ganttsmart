@@ -396,4 +396,27 @@ describe('reorderWithinHierarchy', () => {
     const deep = [node('A'), node('A1', 'A'), node('A1a', 'A1'), node('A2', 'A')];
     expect(uuids(reorderWithinHierarchy(deep, 'u-A1', 'u-A2', true))).toEqual(['A', 'A2', 'A1', 'A1a']);
   });
+
+  describe('with a filtered-out parent', () => {
+    // A is hidden (e.g. completed with "show completed" off), so A1 and A2 render as top-level rows
+    const all = [node('A'), node('A1', 'A'), node('A2', 'A'), node('B'), node('C')];
+    const visible = new Set(['u-A1', 'u-A2', 'u-B', 'u-C']);
+
+    it('sub-issue whose parent is filtered out can be moved among top-level rows', () => {
+      expect(uuids(reorderWithinHierarchy(all, 'u-A1', 'u-C', true, visible))).toEqual(['A', 'A2', 'B', 'C', 'A1']);
+      expect(uuids(reorderWithinHierarchy(all, 'u-A1', 'u-B', false, visible))).toEqual(['A', 'A2', 'A1', 'B', 'C']);
+      // Without the visible set it is still bound to its hidden parent
+      expect(reorderWithinHierarchy(all, 'u-A1', 'u-C', true)).toBeNull();
+    });
+
+    it('drops a top-level row next to a promoted sub-issue instead of the hidden parent block', () => {
+      expect(uuids(reorderWithinHierarchy(all, 'u-C', 'u-A2', false, visible))).toEqual(['A', 'A1', 'C', 'A2', 'B']);
+      expect(uuids(reorderWithinHierarchy(all, 'u-C', 'u-A1', true, visible))).toEqual(['A', 'A1', 'C', 'A2', 'B']);
+    });
+
+    it('moves a visible parent together with its hidden sub-issues', () => {
+      const hiddenChild = new Set(['u-A', 'u-B', 'u-C']);
+      expect(uuids(reorderWithinHierarchy(all, 'u-A', 'u-C', true, hiddenChild))).toEqual(['B', 'C', 'A', 'A1', 'A2']);
+    });
+  });
 });

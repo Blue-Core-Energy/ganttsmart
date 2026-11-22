@@ -508,10 +508,15 @@ export default function GanttChart({
     setCollapsedParents((prev) => {
       const next = new Set(prev);
       if (!next.delete(taskId)) next.add(taskId);
-      saveCollapsedParents(next);
       return next;
     });
   }, []);
+  const collapsedSavedRef = useRef(collapsedParents);
+  useEffect(() => {
+    if (collapsedSavedRef.current === collapsedParents) return;
+    collapsedSavedRef.current = collapsedParents;
+    saveCollapsedParents(collapsedParents);
+  }, [collapsedParents]);
 
   const { chartStart, totalDays } = useMemo(() => {
     if (!tasks.length) return { chartStart: today, totalDays: 0 };

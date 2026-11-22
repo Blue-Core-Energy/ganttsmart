@@ -784,7 +784,7 @@ describe('fetchIssues sub-issue parents', () => {
                   id: 'uuid-2',
                   identifier: 'ENG-2',
                   title: 'Child',
-                  parent: { id: 'uuid-1', identifier: 'ENG-1' },
+                  parent: { identifier: 'ENG-1' },
                 }),
                 // Older payloads (or issues outside the selection) may omit `parent` entirely
                 makeIssueNode({ id: 'uuid-3', identifier: 'ENG-3', title: 'Plain' }),
@@ -798,7 +798,7 @@ describe('fetchIssues sub-issue parents', () => {
                   title: 'Done child',
                   state: { name: 'Done', type: 'completed' },
                   completedAt: '2026-11-05T00:00:00Z',
-                  parent: { id: 'uuid-1', identifier: 'ENG-1' },
+                  parent: { identifier: 'ENG-1' },
                 }),
               ],
             },
@@ -820,17 +820,17 @@ describe('fetchIssues sub-issue parents', () => {
     expect(byId.get('ENG-4')?.parentId).toBe('ENG-1');
   });
 
-  it('selects parent { id identifier } on both project issue connections', async () => {
+  it('selects parent { identifier } on both project issue connections', async () => {
     const { queries } = await fetchWithParents();
     const projectQuery = queries.find((q) => q.includes('project(id:'))!;
-    expect(projectQuery.match(/parent \{ id identifier \}/g)).toHaveLength(2);
+    expect(projectQuery.match(/parent \{ identifier \}/g)).toHaveLength(2);
   });
 
   it('keeps the project issues query far below Linear 10,000 complexity limit with parent selected', async () => {
     const { queries } = await fetchWithParents();
     const projectQuery = queries.find((q) => q.includes('project(id:'))!;
     const withParent = estimateLinearQueryComplexity(projectQuery);
-    const withoutParent = estimateLinearQueryComplexity(projectQuery.replaceAll('parent { id identifier }', ''));
+    const withoutParent = estimateLinearQueryComplexity(projectQuery.replaceAll('parent { identifier }', ''));
     expect(withParent).toBeLessThan(10000);
     // parent is a single object per issue: a few percent of the query, not a multiplier
     expect(withParent - withoutParent).toBeLessThan(withoutParent * 0.25);

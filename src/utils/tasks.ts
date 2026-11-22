@@ -244,12 +244,17 @@ export function applyCollapsedParents(hierarchy: TaskHierarchy, collapsed: Reado
  * hierarchy intact: a parent moves together with its sub-issues, and a sub-issue can only move among its
  * siblings. Dropping on a row nested inside a sibling resolves to that sibling. Returns null when the move
  * would cross a parent boundary (or is a no-op).
+ *
+ * `tasks` may include rows that are filtered out of view. Pass `visibleUuids` (the rows actually shown) so a
+ * sub-issue whose parent is hidden counts as a top-level row, matching what the chart renders. Omit it to
+ * treat every task as visible.
  */
 export function reorderWithinHierarchy(
   tasks: Task[],
   draggedUuid: string,
   targetUuid: string,
   placeAfter: boolean,
+  visibleUuids?: ReadonlySet<string>,
 ): string[] | null {
   if (draggedUuid === targetUuid) return null;
   const hierarchy = buildTaskHierarchy(tasks);
@@ -259,18 +264,32 @@ export function reorderWithinHierarchy(
   const target = byUuid.get(targetUuid);
   if (!dragged || !target) return null;
 
-  const draggedParent = hierarchy.parentById.get(dragged.id);
+  // The parent as the user sees it: a hidden parent leaves its sub-issues at the top level
+  const shownParent = (t: Task): string | undefined => {
+    const parent = hierarchy.parentById.get(t.id);
+    if (!parent || !visibleUuids) return parent;
+    const parentTask = byId.get(parent);
+    return parentTask && visibleUuids.has(parentTask.uuid) ? parent : undefined;
+  };
+
+  const draggedParent = shownParent(dragged);
   let anchor: Task | undefined = target;
-  while (anchor && hierarchy.parentById.get(anchor.id) !== draggedParent) {
-    const up: string | undefined = hierarchy.parentById.get(anchor.id);
+  while (anchor && shownParent(anchor) !== draggedParent) {
+    const up: string | undefined = shownParent(anchor);
     anchor = up ? byId.get(up) : undefined;
   }
   if (!anchor || anchor.id === dragged.id) return null;
 
-  const depth = (t: Task) => hierarchy.depthById.get(t.id) ?? 0;
+  const isDescendantOf = (t: Task, ancestorId: string) => {
+    for (let up = hierarchy.parentById.get(t.id); up; up = hierarchy.parentById.get(up)) {
+      if (up === ancestorId) return true;
+    }
+    return false;
+  };
+  // A task's subtree is contiguous right after it, hidden descendants included
   const blockLength = (list: Task[], start: number) => {
     let len = 1;
-    while (start + len < list.length && depth(list[start + len]) > depth(list[start])) len++;
+    while (start + len < list.length && isDescendantOf(list[start + len], list[start].id)) len++;
     return len;
   };
 
