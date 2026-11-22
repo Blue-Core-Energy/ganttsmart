@@ -729,8 +729,14 @@ test.describe('GanttSmart GCP app', () => {
     await taskSearch.fill('manifold');
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
 
+    // The project switcher lives in the header breadcrumb, not in the filter bar
+    const header = page.locator('header');
+    const projectTrigger = header.getByRole('button', { name: 'Demo Project' });
+    await expect(projectTrigger).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Demo Project' })).toHaveCount(1);
+    await expect(page.locator('header + div').getByRole('button', { name: 'Demo Project' })).toHaveCount(0);
+
     // Open project dropdown — search input receives focus automatically
-    const projectTrigger = page.getByRole('button', { name: 'Demo Project' });
     await projectTrigger.click();
 
     const projectSearch = page.getByPlaceholder('Search projects…');
@@ -792,12 +798,12 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('button', { name: 'Valve Actuator' })).toBeVisible();
     await expect(page.locator('[data-task-bar="VLV-501"]')).toBeVisible();
 
-    // Tab from the search input closes the dropdown and moves focus to the next control (Filter)
+    // Tab from the search input closes the dropdown and moves focus to the next control (Sync)
     await page.getByRole('button', { name: 'Valve Actuator' }).click();
     await expect(projectSearch).toBeFocused();
     await page.keyboard.press('Tab');
     await expect(projectSearch).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Filter', exact: true })).toBeFocused();
+    await expect(header.getByRole('button', { name: 'Sync' })).toBeFocused();
 
     expect(errors).toEqual([]);
   });
@@ -1829,6 +1835,10 @@ test.describe('GanttSmart GCP app', () => {
     expect(mobileHeaderBox!.height).toBeLessThanOrEqual(54);
     const mobileOverflow = await page.locator('header').evaluate((el) => el.scrollWidth > el.clientWidth);
     expect(mobileOverflow).toBe(false);
+    // The breadcrumb project switcher stays reachable (and inside the header) on narrow screens
+    const mobileProjectBox = await page.locator('header').getByRole('button', { name: 'Demo Project' }).boundingBox();
+    expect(mobileProjectBox).not.toBeNull();
+    expect(mobileProjectBox!.x + mobileProjectBox!.width).toBeLessThanOrEqual(375);
 
     await page.getByRole('button', { name: 'Feedback' }).click();
     await expect(dialog).toBeVisible();

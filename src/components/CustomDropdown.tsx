@@ -22,7 +22,16 @@ interface Props {
   searchPlaceholder?: string;
   emptyMessage?: string;
   ariaLabel?: string;
+  /** 'select' is the bordered form control; 'breadcrumb' is a borderless text trigger for inline navigation */
+  variant?: 'select' | 'breadcrumb';
 }
+
+const triggerClasses = {
+  select:
+    'py-[7px] pl-2.5 pr-7 bg-bg-card border border-border-secondary rounded-md text-text-primary text-xs font-medium hover:border-text-muted focus:border-accent max-w-[200px] w-full',
+  breadcrumb:
+    'h-8 pl-2 pr-6 border border-transparent rounded-md text-text-secondary text-sm hover:bg-bg-hover hover:text-text-primary focus-visible:border-accent max-w-[240px] min-w-0',
+};
 
 const selectBgImage = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238b949e' d='M1 1l4 4 4-4'/%3E%3C/svg%3E")`;
 
@@ -38,6 +47,7 @@ export default function CustomDropdown({
   searchPlaceholder = 'Search…',
   emptyMessage = 'No matches found',
   ariaLabel,
+  variant = 'select',
 }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -193,7 +203,8 @@ export default function CustomDropdown({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
-        className="flex items-center gap-2 py-[7px] pl-2.5 pr-7 bg-bg-card border border-border-secondary rounded-md text-text-primary text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted focus:border-accent max-w-[200px] bg-no-repeat bg-[right_10px_center] bg-[length:10px_6px] w-full"
+        className={`flex items-center gap-2 cursor-pointer outline-none transition-colors bg-no-repeat bg-[right_10px_center] bg-[length:10px_6px] ${triggerClasses[variant]}`}
+        title={variant === 'breadcrumb' ? selected?.label : undefined}
         style={{ backgroundImage: selectBgImage }}
       >
         {selected ? (
