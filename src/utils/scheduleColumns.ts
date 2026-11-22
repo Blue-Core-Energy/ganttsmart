@@ -126,6 +126,28 @@ export function totalColumnWidth(visible: ColumnKey[], widths: ColumnWidths): nu
 
 export const MOBILE_BREAKPOINT = 768;
 
+/** Columns hidden below MOBILE_BREAKPOINT, where the Issue column alone fills most of the screen */
+export const NARROW_HIDDEN_COLUMNS: ColumnKey[] = ['id'];
+
+export interface ViewportOptions {
+  isNarrow?: boolean;
+  viewportWidth?: number;
+}
+
+export function resolveIsNarrow(options?: ViewportOptions): boolean {
+  return (
+    options?.isNarrow ?? (options?.viewportWidth !== undefined ? options.viewportWidth < MOBILE_BREAKPOINT : false)
+  );
+}
+
+/**
+ * The columns to render. This is a display rule only: the saved selection is left alone,
+ * so widening the window brings the hidden columns straight back.
+ */
+export function visibleColumnsForViewport(selected: ColumnKey[], options?: ViewportOptions): ColumnKey[] {
+  return resolveIsNarrow(options) ? selected.filter((k) => !NARROW_HIDDEN_COLUMNS.includes(k)) : selected;
+}
+
 /**
  * Maximum fraction of viewport/container width that frozen columns may consume before
  * falling back to freezing only up to the primary task column.
@@ -148,20 +170,18 @@ export interface StickyColumnOffsets {
  * On narrow/mobile viewports (< 768px) or when all frozen columns would take
  * more than MAX_FROZEN_WIDTH_RATIO of the viewport, falls back to freezing
  * ONLY the primary 'task' column so the timeline remains visible and reachable.
- * The ID column sits before 'task', so the fallback pins it too (ID at 0, task after it)
- * when that pair stays within the ratio. Otherwise 'task' is pinned at left: 0 on its own
- * and ID scrolls away underneath it, rather than being left stranded in front of it.
+ * Callers hide the ID column below 768px (visibleColumnsForViewport), so there 'task' is
+ * first and pins at left: 0. For wider screens that still crowd the timeline, ID sits
+ * before 'task', so the fallback pins both (ID at 0, task after it) when that pair stays
+ * within the ratio. Otherwise 'task' is pinned at left: 0 on its own and ID scrolls away
+ * underneath it, rather than being left stranded in front of it.
  */
 export function computeStickyColumnOffsets(
   visibleColumns: ColumnKey[],
   colWidths: ColumnWidths,
-  options?: {
-    isNarrow?: boolean;
-    viewportWidth?: number;
-  },
+  options?: ViewportOptions,
 ): StickyColumnOffsets {
-  const isNarrow =
-    options?.isNarrow ?? (options?.viewportWidth !== undefined ? options.viewportWidth < MOBILE_BREAKPOINT : false);
+  const isNarrow = resolveIsNarrow(options);
 
   const totalWidth = totalColumnWidth(visibleColumns, colWidths);
   const onlyTaskFrozen =

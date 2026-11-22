@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useId, useRef } from 'react';
-import { COLUMN_DEFS, DEFAULT_VISIBLE_COLUMNS, type ColumnKey } from '@/utils/scheduleColumns';
+import { COLUMN_DEFS, DEFAULT_VISIBLE_COLUMNS, NARROW_HIDDEN_COLUMNS, type ColumnKey } from '@/utils/scheduleColumns';
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** The saved selection, including columns a narrow screen is not showing */
   visible: ColumnKey[];
+  /** Narrow screens hide some columns, so those can't be toggled from here */
+  narrow?: boolean;
   onChange: (next: ColumnKey[]) => void;
 }
 
@@ -33,7 +36,7 @@ function ColumnsIcon() {
  * header, or from the button this renders in the first header cell — right-click
  * alone would be out of reach for keyboard and touch users.
  */
-export default function ColumnPicker({ open, onOpenChange, visible, onChange }: Props) {
+export default function ColumnPicker({ open, onOpenChange, visible, narrow = false, onChange }: Props) {
   const ref = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -75,7 +78,10 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
     onChange(visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key]);
   };
 
-  const optionalVisibleCount = COLUMN_DEFS.filter((d) => !d.required && visible.includes(d.key)).length;
+  const isNarrowHidden = (key: ColumnKey) => narrow && NARROW_HIDDEN_COLUMNS.includes(key);
+  const optionalVisibleCount = COLUMN_DEFS.filter(
+    (d) => !d.required && visible.includes(d.key) && !isNarrowHidden(d.key),
+  ).length;
 
   return (
     <span className="relative inline-flex" ref={ref}>
@@ -107,8 +113,9 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
             const checked = visible.includes(def.key);
             // The task column alone is unreadable, so the last optional column holds
             // rather than silently snapping the whole set back to the defaults
-            const isLastOptional = checked && !def.required && optionalVisibleCount === 1;
-            const locked = def.required || isLastOptional;
+            const hiddenWhenNarrow = isNarrowHidden(def.key);
+            const isLastOptional = checked && !def.required && !hiddenWhenNarrow && optionalVisibleCount === 1;
+            const locked = def.required || isLastOptional || hiddenWhenNarrow;
             return (
               <label
                 key={def.key}
@@ -118,9 +125,11 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
                 title={
                   def.required
                     ? 'The issue column is always shown'
-                    : isLastOptional
-                      ? 'Keep at least one column besides Issue'
-                      : undefined
+                    : hiddenWhenNarrow
+                      ? 'Not shown on narrow screens'
+                      : isLastOptional
+                        ? 'Keep at least one column besides Issue'
+                        : undefined
                 }
               >
                 <input
@@ -131,6 +140,7 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
                   className="w-3.5 h-3.5 accent-accent cursor-pointer disabled:cursor-default"
                 />
                 <span className="truncate">{def.pickerLabel ?? def.label}</span>
+                {hiddenWhenNarrow && <span className="ml-auto shrink-0 text-[10px] text-text-muted">wide screens</span>}
               </label>
             );
           })}

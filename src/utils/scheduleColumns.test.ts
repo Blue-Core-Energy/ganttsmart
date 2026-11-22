@@ -12,6 +12,7 @@ import {
   saveVisibleColumns,
   totalColumnWidth,
   computeStickyColumnOffsets,
+  visibleColumnsForViewport,
   MAX_FROZEN_WIDTH_RATIO,
   MOBILE_BREAKPOINT,
   type ColumnKey,
@@ -208,6 +209,67 @@ describe('totalColumnWidth', () => {
   });
 });
 
+describe('visibleColumnsForViewport', () => {
+  const selected: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
+
+  it('hides the ID column below the mobile breakpoint', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT - 1 })).toEqual([
+      'task',
+      'assignee',
+      'status',
+      'due',
+    ]);
+    expect(visibleColumnsForViewport(selected, { isNarrow: true })).not.toContain('id');
+  });
+
+  it('keeps the ID column at and above the mobile breakpoint', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: MOBILE_BREAKPOINT })).toEqual(selected);
+    expect(visibleColumnsForViewport(selected, { viewportWidth: 1920 })).toEqual(selected);
+    expect(visibleColumnsForViewport(selected)).toEqual(selected);
+  });
+
+  it('leaves Issue as the first column on narrow screens', () => {
+    expect(visibleColumnsForViewport(selected, { viewportWidth: 375 })[0]).toBe('task');
+  });
+
+  it('is a display rule only: it never changes the selection or what is stored', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    try {
+      saveVisibleColumns(selected);
+      const stored = loadVisibleColumns();
+      const snapshot = new Map(store);
+      expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).not.toContain('id');
+      // Widening again restores ID without it ever having been unselected
+      expect(visibleColumnsForViewport(stored, { viewportWidth: 1280 })).toEqual(selected);
+      expect(stored).toEqual(selected);
+      expect(store).toEqual(snapshot);
+      expect(loadVisibleColumns()).toEqual(selected);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not interact with the saved-selection migration: a narrow first load still adds ID to storage', () => {
+    const store = new Map<string, string>([['gantt_columns', JSON.stringify(['task', 'due'])]]);
+    vi.stubGlobal('localStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    });
+    try {
+      const stored = loadVisibleColumns();
+      expect(visibleColumnsForViewport(stored, { viewportWidth: 375 })).toEqual(['task', 'due']);
+      expect(stored).toEqual(['id', 'task', 'due']);
+      expect(store.get('gantt_columns')).toBe('["id","task","due"]');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe('computeStickyColumnOffsets', () => {
   const visible: ColumnKey[] = ['task', 'assignee', 'status', 'due'];
   const widths = { ...DEFAULT_COLUMN_WIDTHS, task: 300, assignee: 128, status: 128, due: 86 };
@@ -273,15 +335,16 @@ describe('computeStickyColumnOffsets', () => {
     });
 
     it('narrow fallback pins ID and task together when they fit', () => {
-      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 640 });
+      // 738 / 800 crowds the timeline, but the 396px pair is within 65% of it
+      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 800 });
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ id: 0, task: 96 });
       expect(result.lastFrozenKey).toBe('task');
     });
 
     it('narrow fallback pins task alone at left: 0 when ID and task would crowd the timeline', () => {
-      // 396 / 375 > 65%
-      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 375 });
+      // A resized Issue column makes the pair 546px, over 65% of 800
+      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 450 }, { viewportWidth: 800 });
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ task: 0 });
       expect(result.lastFrozenKey).toBe('task');
@@ -289,20 +352,23 @@ describe('computeStickyColumnOffsets', () => {
 
     it('still pins ID and task together when the pair sits exactly on the 65% limit', () => {
       // 396 is exactly 65% of 396 / 0.65 (= 609.23...), so the pair is allowed
-      const result = computeStickyColumnOffsets(withId, idWidths, { viewportWidth: 396 / MAX_FROZEN_WIDTH_RATIO });
+      const result = computeStickyColumnOffsets(withId, idWidths, {
+        isNarrow: false,
+        viewportWidth: 396 / MAX_FROZEN_WIDTH_RATIO,
+      });
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ id: 0, task: 96 });
     });
 
     it('falls back to task alone when a wider Issue column tips the pair over the limit', () => {
       const viewportWidth = 396 / MAX_FROZEN_WIDTH_RATIO;
-      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 301 }, { viewportWidth });
+      const result = computeStickyColumnOffsets(withId, { ...idWidths, task: 301 }, { isNarrow: false, viewportWidth });
       expect(result.offsets).toEqual({ task: 0 });
       expect(result.lastFrozenKey).toBe('task');
     });
 
     it('fallback pins just task at left: 0 when ID is hidden', () => {
-      const result = computeStickyColumnOffsets(visible, idWidths, { viewportWidth: 640 });
+      const result = computeStickyColumnOffsets(visible, idWidths, { viewportWidth: 800 });
       expect(result.onlyTaskFrozen).toBe(true);
       expect(result.offsets).toEqual({ task: 0 });
     });

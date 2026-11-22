@@ -15,6 +15,7 @@ import {
 } from '@/utils/timelineZoom';
 import {
   computeStickyColumnOffsets,
+  visibleColumnsForViewport,
   getColumnDef,
   loadColumnWidths,
   loadVisibleColumns,
@@ -124,7 +125,7 @@ export default function GanttChart({
   nonWorkDays,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
-  const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
   const [colWidths, setColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
@@ -169,6 +170,12 @@ export default function GanttChart({
     };
   }, []);
 
+  // What is rendered: the saved selection minus columns that don't fit narrow screens
+  const visibleColumns = useMemo(
+    () => visibleColumnsForViewport(selectedColumns, { isNarrow: isNarrowViewport }),
+    [selectedColumns, isNarrowViewport],
+  );
+
   const stickyColumnInfo = useMemo(
     () =>
       computeStickyColumnOffsets(visibleColumns, colWidths, {
@@ -202,7 +209,7 @@ export default function GanttChart({
     // Normalize up front so showing a column slots it into the canonical order
     // immediately, rather than appending until the next reload
     const normalized = normalizeVisibleColumns(next);
-    setVisibleColumns(normalized);
+    setSelectedColumns(normalized);
     saveVisibleColumns(normalized);
   }, []);
 
@@ -907,7 +914,8 @@ export default function GanttChart({
                         <ColumnPicker
                           open={pickerOpen}
                           onOpenChange={setPickerOpen}
-                          visible={visibleColumns}
+                          visible={selectedColumns}
+                          narrow={isNarrowViewport}
                           onChange={changeVisibleColumns}
                         />
                       )}

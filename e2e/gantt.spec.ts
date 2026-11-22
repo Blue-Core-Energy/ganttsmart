@@ -4208,21 +4208,44 @@ test.describe('GanttSmart GCP app', () => {
     // Timeline bar must have scrolled left
     expect(barAfter.x).toBeCloseTo(barBefore.x - 250, 1);
 
-    // 2. On mobile/narrow viewport (< 768px), only the leading ID and primary 'task' columns stay frozen
+    // 2. Between the breakpoint and a roomy desktop, the frozen set would crowd the timeline,
+    // so only ID and Issue stay pinned, side by side
     await scrollContainer.evaluate((el) => {
       el.scrollLeft = 0;
     });
-    await page.setViewportSize({ width: 640, height: 800 });
-
+    await page.setViewportSize({ width: 800, height: 800 });
     await expect(page.locator('th[data-column-key="id"]')).toHaveAttribute('data-frozen', 'true');
+    await expect(page.locator('th[data-column-key="task"]')).toHaveAttribute('data-frozen', 'true');
+    await expect(page.locator('th[data-column-key="assignee"]')).not.toHaveAttribute('data-frozen');
+    const idMidBox = (await page.locator('th[data-column-key="id"]').boundingBox())!;
+    const taskMidBox = (await page.locator('th[data-column-key="task"]').boundingBox())!;
+    expect(taskMidBox.x).toBeCloseTo(idMidBox.x + idMidBox.width, 1);
+
+    // 3. Below the 768px breakpoint the ID column is not rendered, so Issue is the first column,
+    // pinned at the left edge with the timeline already in view
+    await page.setViewportSize({ width: 375, height: 800 });
+    await expect(page.locator('th[data-column-key="id"]')).toHaveCount(0);
+    await expect(page.locator('tr[data-task-id="ENG-101"] td[data-column-key="id"]')).toHaveCount(0);
     await expect(page.locator('th[data-column-key="task"]')).toHaveAttribute('data-frozen', 'true');
     await expect(page.locator('th[data-column-key="assignee"]')).not.toHaveAttribute('data-frozen');
     await expect(page.locator('th[data-column-key="status"]')).not.toHaveAttribute('data-frozen');
     await expect(page.locator('th[data-column-key="due"]')).not.toHaveAttribute('data-frozen');
 
-    const idMobileBefore = (await page.locator('th[data-column-key="id"]').boundingBox())!;
+    const containerBox = (await scrollContainer.boundingBox())!;
     const taskMobileBefore = (await page.locator('th[data-column-key="task"]').boundingBox())!;
     const assigneeMobileBefore = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
+    expect(taskMobileBefore.x).toBeCloseTo(containerBox.x, 1);
+
+    // The row's accent border sits on the Issue cell, now the first column
+    await expect(page.locator('tr[data-task-id="ENG-101"] td[data-column-key="task"]')).toHaveCSS(
+      'border-left-width',
+      '2px',
+    );
+
+    // No space is left behind for the hidden ID column: the timeline starts right after the last column
+    const dueMobileBox = (await page.locator('th[data-column-key="due"]').boundingBox())!;
+    const timelineBox = (await page.locator('tr[data-task-id="ENG-101"] [data-timeline-background]').boundingBox())!;
+    expect(timelineBox.x).toBeCloseTo(dueMobileBox.x + dueMobileBox.width, 0);
 
     // Scroll horizontally on mobile
     await scrollContainer.evaluate((el) => {
@@ -4230,17 +4253,20 @@ test.describe('GanttSmart GCP app', () => {
     });
     await expect.poll(async () => scrollContainer.evaluate((el) => el.scrollLeft)).toBe(180);
 
-    const idMobileAfter = (await page.locator('th[data-column-key="id"]').boundingBox())!;
     const taskMobileAfter = (await page.locator('th[data-column-key="task"]').boundingBox())!;
     const assigneeMobileAfter = (await page.locator('th[data-column-key="assignee"]').boundingBox())!;
 
-    // ID and the primary task column stay pinned side by side, with the task column right after ID
-    expect(idMobileAfter.x).toBeCloseTo(idMobileBefore.x, 1);
+    // Primary task column remains pinned at left: 0
     expect(taskMobileAfter.x).toBeCloseTo(taskMobileBefore.x, 1);
-    expect(taskMobileAfter.x).toBeCloseTo(idMobileAfter.x + idMobileAfter.width, 1);
 
     // Extra columns scroll off to the left so the timeline stays reachable and visible
     expect(assigneeMobileAfter.x).toBeCloseTo(assigneeMobileBefore.x - 180, 1);
+
+    // 4. Hiding ID on narrow screens is display-only: widening restores it and storage is untouched
+    expect(await page.evaluate(() => localStorage.getItem('gantt_columns'))).toBeNull();
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await expect(page.locator('th[data-column-key="id"]')).toHaveAttribute('data-frozen', 'true');
+    expect(await page.evaluate(() => localStorage.getItem('gantt_columns'))).toBeNull();
 
     expect(errors).toEqual([]);
   });
