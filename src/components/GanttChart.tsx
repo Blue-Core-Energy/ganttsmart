@@ -840,7 +840,7 @@ export default function GanttChart({
                     data-frozen={isSticky ? 'true' : undefined}
                     className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
                       isSticky ? 'sticky top-0 z-[10]' : 'sticky top-0 z-[5]'
-                    } ${isLastFrozen ? 'border-r border-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
+                    } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
                       width: colWidths[key],
                       minWidth: getColumnDef(key).minWidth,
@@ -998,6 +998,7 @@ export default function GanttChart({
           return (
             <div
               key={m.id}
+              data-milestone-line={m.id}
               className="absolute pointer-events-none z-[4]"
               style={{
                 left: fixedColsWidth + milestoneX(m),

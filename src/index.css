@@ -242,20 +242,31 @@ tr:focus-visible {
 .gantt-sticky-cell {
   background-color: var(--color-bg-primary);
 }
-.group:hover .gantt-sticky-cell,
+.group:hover .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-accent) 3%, var(--color-bg-primary));
+}
 .group:focus-within .gantt-sticky-cell {
   background-color: color-mix(in srgb, var(--color-accent) 4%, var(--color-bg-primary));
 }
 .group[data-external-task] .gantt-sticky-cell {
   background-color: color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary));
 }
-.group[data-external-task]:hover .gantt-sticky-cell,
+.group[data-external-task]:hover .gantt-sticky-cell {
+  background-color: color-mix(
+    in srgb,
+    var(--color-accent) 3%,
+    color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary))
+  );
+}
 .group[data-external-task]:focus-within .gantt-sticky-cell {
   background-color: color-mix(
     in srgb,
     var(--color-accent) 4%,
     color-mix(in srgb, var(--color-bg-header) 35%, var(--color-bg-primary))
   );
+}
+.group[data-highlighted='true'] .gantt-sticky-cell {
+  background-color: color-mix(in srgb, var(--color-accent) 8%, var(--color-bg-primary));
 }
 
 /* Print styles */

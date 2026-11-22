@@ -637,7 +637,7 @@ export default function GanttRow({
       data-task-done={isDone ? 'true' : undefined}
       data-external-task={task.isExternal ? 'true' : undefined}
       data-highlighted={isHighlighted ? 'true' : undefined}
-      className={`group transition-[opacity,background-color,border-color] duration-150 hover:bg-accent/[0.03] ${isHighlighted ? '!bg-accent/[0.08]' : task.isExternal ? 'bg-bg-header/35' : ''} focus-within:bg-accent/[0.04] ${isRowDragging ? 'opacity-40' : isDone ? 'opacity-65 hover:opacity-100 focus-within:opacity-100' : ''} ${dropIndicatorCls}`}
+      className={`group transition-[background-color,border-color] duration-150 [&>td>*]:transition-opacity [&>td>*]:duration-150 hover:bg-accent/[0.03] ${isHighlighted ? '!bg-accent/[0.08]' : task.isExternal ? 'bg-bg-header/35' : ''} focus-within:bg-accent/[0.04] ${isRowDragging ? '[&>td>*]:opacity-40' : isDone ? '[&>td>*]:opacity-65 hover:[&>td>*]:opacity-100 focus-within:[&>td>*]:opacity-100' : ''} ${dropIndicatorCls}`}
       tabIndex={0}
       role="row"
       aria-label={`${task.id}: ${task.title}${task.isExternal ? `, from ${task.projectName || 'External project'}` : ''}, ${task.priority} priority, due ${formatDate(task.due)}, ${task.status}`}
@@ -733,9 +733,9 @@ export default function GanttRow({
               key === 'task' ? 'px-[18px]' : 'px-3'
             } ${isSticky ? 'sticky z-[6]' : ''} ${
               isFirstCol
-                ? `border-l-2 ${task.isExternal ? 'border-l-accent/45' : 'border-l-transparent'} group-hover:border-l-accent group-focus-within:border-l-accent`
+                ? `border-l-2 ${isHighlighted ? 'border-l-accent' : task.isExternal ? 'border-l-accent/45' : 'border-l-transparent'} group-hover:border-l-accent group-focus-within:border-l-accent`
                 : ''
-            } ${isLastFrozen ? 'border-r border-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
+            } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
             style={{
               width: colWidths[key],
               minWidth: getColumnDef(key).minWidth,
