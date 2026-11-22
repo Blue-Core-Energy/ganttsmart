@@ -660,22 +660,6 @@ export default function GanttRow({
                         {task.projectName || 'External'}
                       </span>
                     ))}
-                  {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
-                    <svg
-                      width="10"
-                      height="10"
-                      viewBox="0 0 16 16"
-                      fill="currentColor"
-                      className="text-text-muted shrink-0"
-                      aria-label={
-                        (task.blocks.length > 0 ? `Blocks ${task.blocks.length}` : '') +
-                        (task.blocks.length > 0 && task.blockedBy.length > 0 ? ' · ' : '') +
-                        (task.blockedBy.length > 0 ? `Blocked by ${task.blockedBy.length}` : '')
-                      }
-                    >
-                      <path d="M4.5 2A2.5 2.5 0 002 4.5v1a.5.5 0 001 0v-1A1.5 1.5 0 014.5 3h1a.5.5 0 000-1h-1zm6 0a.5.5 0 000 1h1A1.5 1.5 0 0113 4.5v1a.5.5 0 001 0v-1A2.5 2.5 0 0011.5 2h-1zm-8 8a.5.5 0 01.5.5v1A1.5 1.5 0 004.5 13h1a.5.5 0 010 1h-1A2.5 2.5 0 012 11.5v-1a.5.5 0 01.5-.5zm11 0a.5.5 0 01.5.5v1a2.5 2.5 0 01-2.5 2.5h-1a.5.5 0 010-1h1a1.5 1.5 0 001.5-1.5v-1a.5.5 0 01.5-.5z" />
-                    </svg>
-                  )}
                   {depViolation && depViolation.length > 0 && (
                     <span
                       className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
