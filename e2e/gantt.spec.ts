@@ -2489,6 +2489,284 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('edits due dates inline from the Due column without opening DetailPanel and keeps locked rows read-only', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const dueUpdates: Array<{ id: string; dueDate: string }> = [];
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string; dueDate?: string; teamId?: string };
+      } | null;
+      const query = payload?.query ?? '';
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              projects: {
+                nodes: [
+                  { id: 'proj-1', name: 'Commissioning' },
+                  { id: 'proj-2', name: 'Controls' },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Commissioning',
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-comm-1',
+                      identifier: 'COMM-101',
+                      title: 'Run commissioning loop check',
+                      description: `${startTagOffsetDays(2)}\nLoop check details`,
+                      dueDate: isoOffsetDays(10),
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-101',
+                      priority: 2,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-comm-2',
+                      identifier: 'COMM-102',
+                      title: 'Hand over documentation',
+                      description: `${startTagOffsetDays(3)}\nHandover details`,
+                      dueDate: null,
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-comm-1',
+                    identifier: 'COMM-101',
+                    relations: {
+                      nodes: [
+                        {
+                          type: 'blocked_by',
+                          relatedIssue: {
+                            id: 'uuid-ctrl-42',
+                            identifier: 'CTRL-42',
+                            title: 'Wire PLC cabinet',
+                            description: `${startTagOffsetDays(-3)}\nPLC cabinet wiring`,
+                            dueDate: isoOffsetDays(6),
+                            url: 'https://linear.app/bluecoreenergy/issue/CTRL-42',
+                            priority: 1,
+                            completedAt: null,
+                            canceledAt: null,
+                            state: { name: 'In Progress', type: 'started' },
+                            assignee: { name: 'Carol Vance' },
+                            team: { id: 'team-ctrl' },
+                            project: { id: 'proj-2', name: 'Controls', targetDate: isoOffsetDays(20) },
+                          },
+                        },
+                      ],
+                    },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: 'st-todo', name: 'Todo', type: 'unstarted', position: 0 }] } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        dueUpdates.push({
+          id: String(payload?.variables?.id ?? ''),
+          dueDate: String(payload?.variables?.dueDate ?? ''),
+        });
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    // A date in the same calendar month as `base` so the picker shows it without paging
+    const sameMonthNeighbor = (offset: number) => {
+      const base = localOffsetDate(offset);
+      const next = localOffsetDate(offset + 1);
+      return next.getMonth() === base.getMonth() ? offset + 1 : offset - 1;
+    };
+
+    await page.goto('/app');
+    const popover = page.locator('[data-popover="due-date"]');
+    const dueCell101 = page.locator('button[data-due-cell="COMM-101"]');
+    const dueCell102 = page.locator('button[data-due-cell="COMM-102"]');
+    const dueCellCtrl = page.locator('button[data-due-cell="CTRL-42"]');
+    const bar101 = page.locator('[data-task-bar="COMM-101"]');
+    const detailText = page.getByText('Loop check details');
+
+    await expect(bar101).toBeVisible();
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toBeVisible();
+
+    // 1. Locked external rows are strictly non-editable; local rows are editable
+    await expect(dueCell101).toBeVisible();
+    await expect(dueCell102).toBeVisible();
+    await expect(dueCellCtrl).toHaveCount(0);
+    await expect(page.locator('tr[data-task-id="CTRL-42"] button[aria-haspopup]')).toHaveCount(0);
+
+    // 2. Clicking the Due cell opens the picker (portalled to <body>), not DetailPanel
+    await dueCell101.click();
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('xpath=..')).toHaveJSProperty('tagName', 'BODY');
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveAttribute('data-day', isoOffsetDays(10));
+    await expect(detailText).toHaveCount(0);
+
+    // Keys typed inside the popover do not trigger global shortcuts (zoom) or row navigation
+    const widthBeforeKeys = (await bar101.boundingBox())!.width;
+    await page.keyboard.press('+');
+    await page.keyboard.press('r');
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(300);
+    expect((await bar101.boundingBox())!.width).toBe(widthBeforeKeys);
+    await expect(popover).toBeVisible();
+    await expect(detailText).toHaveCount(0);
+
+    // 3. Escape closes the picker without mutating anything or opening the panel
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    await expect(detailText).toHaveCount(0);
+    expect(dueUpdates).toEqual([]);
+
+    // 4. Clicking outside also closes it
+    await dueCell101.click();
+    await expect(popover).toBeVisible();
+    await page.mouse.click(700, 8);
+    await expect(popover).toHaveCount(0);
+
+    // 5. Picking a new date updates the cell, the bar, and sends the Linear mutation
+    const barBefore = (await bar101.boundingBox())!;
+    const newOffset = sameMonthNeighbor(10);
+    await dueCell101.click();
+    await popover.locator(`[data-day="${isoOffsetDays(newOffset)}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await expect(page.getByText('Due date updated')).toBeVisible();
+    expect(dueUpdates).toEqual([{ id: 'uuid-comm-1', dueDate: isoOffsetDays(newOffset) }]);
+    await expect.poll(async () => (await bar101.boundingBox())!.width).not.toBe(barBefore.width);
+    const barAfter = (await bar101.boundingBox())!;
+    if (newOffset > 10) expect(barAfter.width).toBeGreaterThan(barBefore.width);
+    else expect(barAfter.width).toBeLessThan(barBefore.width);
+    await expect(detailText).toHaveCount(0);
+
+    // 6. Implicit (project target) due dates are editable and become explicit
+    await expect(page.locator('tr[data-task-id="COMM-102"] td').filter({ hasText: '~' })).toBeVisible();
+    await dueCell102.click();
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveAttribute('data-day', isoOffsetDays(20));
+    const implicitTarget = sameMonthNeighbor(20);
+    await popover.locator(`[data-day="${isoOffsetDays(implicitTarget)}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await expect.poll(() => dueUpdates[1]).toEqual({ id: 'uuid-comm-2', dueDate: isoOffsetDays(implicitTarget) });
+    await expect(page.locator('tr[data-task-id="COMM-102"] td').filter({ hasText: '~' })).toHaveCount(0);
+    await expect(page.getByText('Handover details')).toHaveCount(0);
+
+    // 7. Unlocking external edits makes the external Due cell editable too
+    await page.getByRole('button', { name: 'Edit external' }).click();
+    await expect(dueCellCtrl).toBeVisible();
+    await dueCellCtrl.click();
+    await expect(popover).toBeVisible();
+    await popover.locator(`[data-day="${isoOffsetDays(sameMonthNeighbor(6))}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await expect
+      .poll(() => dueUpdates[2])
+      .toEqual({ id: 'uuid-ctrl-42', dueDate: isoOffsetDays(sameMonthNeighbor(6)) });
+    await expect(page.getByText('PLC cabinet wiring')).toHaveCount(0);
+
+    // 8. Locking again removes the editor
+    await page.getByRole('button', { name: 'Editing external' }).click();
+    await expect(dueCellCtrl).toHaveCount(0);
+    expect(dueUpdates).toHaveLength(3);
+
+    expect(errors).toEqual([]);
+  });
+
   test('preserves workday duration and skips weekends when moving a task bar across weekends', async ({ page }) => {
     const errors = trackErrors(page);
     const today = localOffsetDate(0);

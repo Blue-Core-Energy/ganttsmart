@@ -23,6 +23,7 @@ import {
 } from '@/utils/date';
 import { isTaskDone } from '@/utils/tasks';
 import { openDetailPanel } from './detailPanelStore';
+import DueDatePicker from './DueDatePicker';
 
 interface Props {
   task: Task;
@@ -536,25 +537,42 @@ export default function GanttRow({
           </span>
         );
 
-      case 'due':
+      case 'due': {
+        const dueTitle =
+          (hasStartDate ? `${formatDate(task.startDate!)} → ` : '') +
+          formatDate(task.due) +
+          (task.isDueImplicit ? ' (from project target)' : '') +
+          (isDone ? ' · Completed' : overdue ? ` · ${Math.abs(daysLeft)}d late` : ` · ${daysLeft}d left`);
+        const dueLabel = task.isDueImplicit ? (
+          <span className="italic opacity-75">~{formatDate(task.due)}</span>
+        ) : (
+          formatDate(task.due)
+        );
+        if (canDragDue && onReschedule) {
+          return (
+            <DueDatePicker
+              taskId={task.id}
+              value={task.due}
+              title={dueTitle}
+              color={dueColor}
+              onChange={(iso) => {
+                void onReschedule(task.uuid, iso);
+              }}
+            >
+              {dueLabel}
+            </DueDatePicker>
+          );
+        }
         return (
           <span
             className="text-[11.5px] font-mono tabular-nums whitespace-nowrap"
             style={{ color: dueColor }}
-            title={
-              (hasStartDate ? `${formatDate(task.startDate!)} → ` : '') +
-              formatDate(task.due) +
-              (task.isDueImplicit ? ' (from project target)' : '') +
-              (isDone ? ' · Completed' : overdue ? ` · ${Math.abs(daysLeft)}d late` : ` · ${daysLeft}d left`)
-            }
+            title={dueTitle}
           >
-            {task.isDueImplicit ? (
-              <span className="italic opacity-75">~{formatDate(task.due)}</span>
-            ) : (
-              formatDate(task.due)
-            )}
+            {dueLabel}
           </span>
         );
+      }
 
       case 'priority':
         return (
