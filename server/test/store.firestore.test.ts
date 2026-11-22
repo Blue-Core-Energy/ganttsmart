@@ -97,3 +97,29 @@ describe('createFirestoreStore.addBaselinesIfAbsent errors', () => {
 afterAll(async () => {
   await db?.terminate();
 });
+
+describe('createFirestoreStore days off collection name', () => {
+  // The feature is called Days Off, but the Firestore collection deliberately keeps its original
+  // name: Firestore cannot rename a collection, and a rename would orphan every stored entry (and
+  // lose edits on rollback). Do not change this without a data migration.
+  it('stays on the original nonWorkDays collection: the name is deliberately not renamed', async () => {
+    const names: string[] = [];
+    const mockDb = {
+      collection: (name: string) => {
+        names.push(name);
+        return {
+          get: async () => ({ docs: [] }),
+          add: async () => ({ id: 'new-id' }),
+          doc: () => ({ delete: async () => {} }),
+        };
+      },
+    };
+    const store = createFirestoreStore(mockDb as unknown as Firestore);
+
+    await store.listDaysOff();
+    await store.addDayOff('sub', { label: 'x', startDate: '2026-11-26', endDate: '2026-11-26', assigneeName: null });
+    await store.deleteDayOff('some-id');
+
+    expect(names).toEqual(['nonWorkDays', 'nonWorkDays', 'nonWorkDays']);
+  });
+});

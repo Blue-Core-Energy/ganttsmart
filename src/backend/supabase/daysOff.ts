@@ -29,7 +29,7 @@ function isMissingTable(error: { code?: string; message?: string }): boolean {
   );
 }
 
-const NOT_MIGRATED = 'Days Off are not set up on this Supabase project yet (apply migration 009).';
+const NOT_MIGRATED = 'Days Off is not set up on this Supabase project yet (apply migration 009).';
 
 async function getUserId(): Promise<string | null> {
   const {
@@ -39,8 +39,8 @@ async function getUserId(): Promise<string | null> {
 }
 
 // The table is still `non_work_days`, the feature's original name. It is kept on purpose: the name is
-// invisible to users and renaming it would need a migration that also copes with projects where 009
-// was never applied.
+// invisible to users, and renaming it would need a migration that also copes with projects where 009
+// was never applied, plus a coordinated deploy of the migration and this code.
 // Each Supabase account keeps its own calendar. Until the table exists the calendar reads as empty,
 // so the chart keeps working; adding an entry then fails with a message saying why.
 export const daysOff: DaysOffApi = {

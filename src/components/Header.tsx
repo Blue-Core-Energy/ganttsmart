@@ -492,7 +492,7 @@ export default memo(function Header({
                       onOpenDaysOff();
                     }}
                     className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
-                    title="Manage company-wide closures and one person's time off"
+                    title="Manage company-wide closures and each person's time off"
                   >
                     <span className="flex items-center gap-2">
                       <CalendarOffIcon />

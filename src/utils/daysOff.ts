@@ -65,6 +65,7 @@ export function formatDayOffRange(entry: Pick<DayOff, 'startDate' | 'endDate'>):
     : `${formatDateShort(entry.startDate)} – ${formatDateShort(entry.endDate)}`;
 }
 
+/** A shaded span of non-working time, built from Days Off entries (weekends are shaded separately). */
 export interface NonWorkSpan {
   id: string;
   label: string;

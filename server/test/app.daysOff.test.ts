@@ -273,8 +273,12 @@ describe('days off: legacy /api/non-work-days alias', () => {
     expect(Object.keys((await listed.json()) as object)).toEqual(['daysOff']);
   });
 
-  it('applies the same auth, origin and validation checks', async () => {
+  it('serves valid requests and applies the same auth, origin and validation checks', async () => {
     const { app } = setup();
+    // The 401 and 403 below come from the shared /api/* middleware and hold even without the alias,
+    // so first prove the alias itself answers: an authorised request must succeed.
+    expect((await app.request('/api/non-work-days', { headers: as() })).status).toBe(200);
+    expect((await app.request('/api/non-work-days', send('POST', THANKSGIVING))).status).toBe(201);
     expect((await app.request('/api/non-work-days')).status).toBe(401);
     const crossOrigin = await app.request('/api/non-work-days', {
       method: 'POST',
