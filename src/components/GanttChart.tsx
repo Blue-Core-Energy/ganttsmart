@@ -882,9 +882,7 @@ export default function GanttChart({
       id="gantt-export-target"
       className="h-full w-full bg-bg-primary overflow-auto print:overflow-visible print:border-0"
     >
-      {/* Unscheduled tasks section — above the table so it is seen first. It sits outside innerRef, so
-          the header measurement, milestone lines and arrow geometry (all relative to innerRef) are unchanged;
-          sticky left keeps it in view while the timeline scrolls horizontally. */}
+      {/* Unscheduled section sits above the table, outside innerRef, so chart geometry is unchanged */}
       {unscheduledTasks.length > 0 && (
         <div
           data-testid="unscheduled-section"
@@ -925,7 +923,10 @@ export default function GanttChart({
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
               <span className="font-medium">Unscheduled</span>
-              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">
+              <span
+                data-testid="unscheduled-count"
+                className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5"
+              >
                 {unscheduledTasks.length}
               </span>
               <span className="text-[11px] text-text-muted ml-1">— no due date set</span>
@@ -941,7 +942,7 @@ export default function GanttChart({
         </div>
       )}
 
-      <div ref={innerRef} className="relative" style={{ minWidth: '100%' }}>
+      <div ref={innerRef} data-testid="gantt-chart-body" className="relative" style={{ minWidth: '100%' }}>
         <table className="border-separate border-spacing-0" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
           <thead ref={theadRef}>
             <tr>
