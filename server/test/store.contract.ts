@@ -61,15 +61,37 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
         expect(await store.getTokens(alice)).toEqual(tokensB);
       });
 
-      it('swapTokens with nothing stored returns next without writing', async () => {
-        expect(await store.swapTokens(alice, 'refresh-a', tokensB)).toEqual(tokensB);
+      it('swapTokens with nothing stored returns null without writing', async () => {
+        expect(await store.swapTokens(alice, 'refresh-a', tokensB)).toBeNull();
         expect(await store.getTokens(alice)).toBeNull();
       });
 
-      it('swapTokens after clearTokens returns next without writing', async () => {
+      it('swapTokens after clearTokens returns null without writing', async () => {
         await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
         await store.clearTokens(alice);
-        expect(await store.swapTokens(alice, 'refresh-a', tokensB)).toEqual(tokensB);
+        expect(await store.swapTokens(alice, 'refresh-a', tokensB)).toBeNull();
+        expect(await store.getTokens(alice)).toBeNull();
+      });
+
+      it('clearTokens with matching expectedRefreshToken clears and returns true', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice, 'refresh-a')).toBe(true);
+        expect(await store.getTokens(alice)).toBeNull();
+      });
+
+      it('clearTokens with non-matching expectedRefreshToken does not clear and returns false', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice, 'stale-refresh')).toBe(false);
+        expect(await store.getTokens(alice)).toEqual(tokensA);
+      });
+
+      it('clearTokens with expectedRefreshToken on empty store returns false', async () => {
+        expect(await store.clearTokens(alice, 'refresh-a')).toBe(false);
+      });
+
+      it('clearTokens with no expectedRefreshToken clears unconditionally and returns true', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice)).toBe(true);
         expect(await store.getTokens(alice)).toBeNull();
       });
 

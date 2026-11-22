@@ -31,6 +31,7 @@ export interface LinearRouteDeps {
   oauth: LinearOAuth;
   tokens: TokenService;
   fetch: typeof fetch;
+  isProduction?: boolean;
 }
 
 /** Constant-time string comparison; strings of different lengths never match. */
@@ -92,14 +93,14 @@ function parseGraphQLRequest(text: string): GraphQLRequest | null {
 }
 
 export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
-  const { store, oauth, tokens, fetch: doFetch } = deps;
+  const { store, oauth, tokens, fetch: doFetch, isProduction = false } = deps;
   const routes = new Hono<AppEnv>();
 
   routes.get('/authorize', (c) => {
     const state = randomBytes(32).toString('hex');
     setCookie(c, STATE_COOKIE, state, {
       httpOnly: true,
-      secure: true,
+      secure: isProduction,
       sameSite: 'Lax',
       path: STATE_COOKIE_PATH,
       maxAge: STATE_MAX_AGE_S,
@@ -108,13 +109,18 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
     if (project) {
       setCookie(c, PROJECT_COOKIE, project, {
         httpOnly: true,
-        secure: true,
+        secure: isProduction,
         sameSite: 'Lax',
         path: STATE_COOKIE_PATH,
         maxAge: STATE_MAX_AGE_S,
       });
     } else if (getCookie(c, PROJECT_COOKIE) !== undefined) {
-      deleteCookie(c, PROJECT_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
+      deleteCookie(c, PROJECT_COOKIE, {
+        path: STATE_COOKIE_PATH,
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'Lax',
+      });
     }
     return c.redirect(oauth.authorizeUrl(state), 302);
   });
@@ -122,10 +128,15 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
   routes.get('/callback', async (c) => {
     const expected = getCookie(c, STATE_COOKIE);
     // The state is single use: clear it whatever happens next.
-    deleteCookie(c, STATE_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
+    deleteCookie(c, STATE_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: isProduction, sameSite: 'Lax' });
     const rawProject = getCookie(c, PROJECT_COOKIE);
     if (rawProject !== undefined) {
-      deleteCookie(c, PROJECT_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: true, sameSite: 'Lax' });
+      deleteCookie(c, PROJECT_COOKIE, {
+        path: STATE_COOKIE_PATH,
+        httpOnly: true,
+        secure: isProduction,
+        sameSite: 'Lax',
+      });
     }
     const project = sanitizeProjectParam(rawProject);
 
@@ -149,6 +160,14 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
     const { sub, email } = c.get('identity');
     try {
       const linearTokens = await oauth.exchangeCode(code);
+      const oldTokens = await store.getTokens(sub);
+      if (oldTokens) {
+        // Best effort: revoke previous tokens so reconnecting doesn't leave orphaned grants at Linear.
+        await Promise.allSettled([
+          oauth.revoke(oldTokens.accessToken),
+          oldTokens.refreshToken !== null ? oauth.revoke(oldTokens.refreshToken) : undefined,
+        ]);
+      }
       await store.saveTokens(sub, email, linearTokens);
     } catch (err) {
       log.error('Linear code exchange failed', { error: describeError(err) });
@@ -188,10 +207,11 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       });
 
     try {
-      let res = await callLinear(await tokens.getAccessToken(sub));
+      const initialToken = await tokens.getAccessToken(sub);
+      let res = await callLinear(initialToken);
       if (res.status === 401) {
         await res.body?.cancel().catch(() => {});
-        res = await callLinear(await tokens.getAccessToken(sub, { forceRefresh: true }));
+        res = await callLinear(await tokens.getAccessToken(sub, { forceRefresh: true, rejectedToken: initialToken }));
         if (res.status === 401) {
           await res.body?.cancel().catch(() => {});
           await store.clearTokens(sub);

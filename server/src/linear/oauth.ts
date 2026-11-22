@@ -124,7 +124,8 @@ export function createLinearOAuth(cfg: LinearOAuthConfig): LinearOAuth {
 
     async revoke(token) {
       try {
-        await post(REVOKE_URL, { token });
+        const res = await post(REVOKE_URL, { token });
+        await res.body?.cancel().catch(() => {});
       } catch {
         // Best effort: the caller clears its own copy regardless.
       }

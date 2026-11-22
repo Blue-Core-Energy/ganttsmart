@@ -72,6 +72,27 @@ describe('loadConfig', () => {
     );
   });
 
+  it('rejects http: APP_ORIGIN in production', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        IAP_AUDIENCE: '/projects/1/global/backendServices/2',
+        APP_ORIGIN: 'http://ganttsmart.bluecore.energy',
+      }),
+    ).toThrow(/APP_ORIGIN.*https/);
+  });
+
+  it('allows http: APP_ORIGIN outside production', () => {
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: 'development',
+      DEV_USER_EMAIL: 'dev@bluecore.energy',
+      APP_ORIGIN: 'http://localhost:8080',
+    });
+    expect(config.appOrigin).toBe('http://localhost:8080');
+  });
+
   it('requires IAP_AUDIENCE in production', () => {
     expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/IAP_AUDIENCE/);
   });

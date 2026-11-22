@@ -428,6 +428,66 @@ describe('static hosting', () => {
     await expect(res.text()).resolves.toBe(INDEX_HTML);
   });
 
+  it('caches index.html in memory after the first read', async () => {
+    const customDir = mkdtempSync(join(tmpdir(), 'ganttsmart-cache-'));
+    try {
+      writeFileSync(join(customDir, 'index.html'), '<html><body>Original</body></html>');
+      const customApp = createApp({
+        config: { ...baseConfig, staticDir: customDir },
+        identify,
+        store: createMemoryStore(),
+        oauth,
+      });
+      const firstRes = await customApp.request('/app');
+      expect(firstRes.status).toBe(200);
+      await expect(firstRes.text()).resolves.toBe('<html><body>Original</body></html>');
+
+      // Overwrite index.html on disk; customApp should serve cached content
+      writeFileSync(join(customDir, 'index.html'), '<html><body>Modified</body></html>');
+      const secondRes = await customApp.request('/app');
+      expect(secondRes.status).toBe(200);
+      await expect(secondRes.text()).resolves.toBe('<html><body>Original</body></html>');
+    } finally {
+      rmSync(customDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 404 when index.html is missing (ENOENT)', async () => {
+    const emptyDir = mkdtempSync(join(tmpdir(), 'ganttsmart-empty-'));
+    try {
+      const emptyApp = createApp({
+        config: { ...baseConfig, staticDir: emptyDir },
+        identify,
+        store: createMemoryStore(),
+        oauth,
+      });
+      const res = await emptyApp.request('/app');
+      expect(res.status).toBe(404);
+      await expect(res.text()).resolves.toBe('not found');
+    } finally {
+      rmSync(emptyDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 500 when index.html encounters a non-ENOENT read error', async () => {
+    const errDir = mkdtempSync(join(tmpdir(), 'ganttsmart-err-'));
+    try {
+      // A directory named index.html causes readFile to fail with EISDIR (non-ENOENT)
+      mkdirSync(join(errDir, 'index.html'));
+      const errApp = createApp({
+        config: { ...baseConfig, staticDir: errDir },
+        identify,
+        store: createMemoryStore(),
+        oauth,
+      });
+      const res = await errApp.request('/app');
+      expect(res.status).toBe(500);
+      await expect(res.text()).resolves.toBe('internal error');
+    } finally {
+      rmSync(errDir, { recursive: true, force: true });
+    }
+  });
+
   it.each(['/', '/index.html', '/app/projects/123'])('serves index.html for %s with no-cache', async (path) => {
     const { app } = setup();
     const res = await app.request(path);

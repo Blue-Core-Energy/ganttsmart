@@ -93,7 +93,16 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json({ email, linearConnected });
   });
 
-  app.route('/api/linear', linearRoutes({ store, oauth, tokens, fetch: deps.fetch ?? globalThis.fetch }));
+  app.route(
+    '/api/linear',
+    linearRoutes({
+      store,
+      oauth,
+      tokens,
+      fetch: deps.fetch ?? globalThis.fetch,
+      isProduction: config.isProduction,
+    }),
+  );
   app.route('/api/history', historyRoutes({ store }));
 
   // Unknown API routes are a JSON 404, never the SPA shell. This must stay after every /api route.
@@ -108,12 +117,23 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   // SPA fallback: client-side routes such as /app get the shell.
   const indexPath = join(root, 'index.html');
+  let cachedIndexHtml: string | null = null;
   app.get('*', async (c) => {
+    if (cachedIndexHtml !== null) {
+      c.header('Cache-Control', NO_CACHE);
+      return c.html(cachedIndexHtml);
+    }
     let html: string;
     try {
       html = await readFile(indexPath, 'utf8');
-    } catch {
-      return c.text('not found', 404);
+      cachedIndexHtml = html;
+    } catch (err) {
+      const code = typeof err === 'object' && err !== null && 'code' in err ? (err as { code: unknown }).code : null;
+      if (code === 'ENOENT') {
+        return c.text('not found', 404);
+      }
+      log.error('Failed to read SPA index.html', { error: describeError(err) });
+      return c.text('internal error', 500);
     }
     c.header('Cache-Control', NO_CACHE);
     return c.html(html);

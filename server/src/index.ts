@@ -4,13 +4,11 @@ import { createApp, type AppDeps } from './app.js';
 import { loadConfig } from './config.js';
 import { createDevIdentity, createIapVerifier } from './identity.js';
 import { createLinearOAuth } from './linear/oauth.js';
-import { describeError, log } from './log.js';
+import { log } from './log.js';
+import { createShutdownHandler } from './shutdown.js';
 import { createFirestoreStore } from './store/firestore.js';
 import { createMemoryStore } from './store/memory.js';
 import type { Store } from './store/types.js';
-
-/** Cloud Run allows 10 seconds after SIGTERM; exit before it kills the instance. */
-const SHUTDOWN_GRACE_MS = 8_000;
 
 const config = loadConfig(process.env);
 const devMode = config.devUserEmail !== null;
@@ -45,15 +43,7 @@ const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   });
 });
 
-function shutdown(signal: string): void {
-  log.info('shutting down', { signal });
-  // Stop accepting connections and let in-flight requests finish, but never hang past the grace period.
-  setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
-  server.close((err) => {
-    if (err) log.error('Error closing server', { error: describeError(err) });
-    process.exit(err ? 1 : 0);
-  });
-}
+const shutdown = createShutdownHandler(server);
 
 process.once('SIGTERM', () => shutdown('SIGTERM'));
 process.once('SIGINT', () => shutdown('SIGINT'));

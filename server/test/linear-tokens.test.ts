@@ -205,4 +205,79 @@ describe('createTokenService.getAccessToken', () => {
 
     expect(refreshTokensSeen.sort()).toEqual(['refresh-0', 'refresh-other']);
   });
+
+  it('revokes orphaned grant and throws LinearReauthRequired when disconnect happens during in-flight refresh', async () => {
+    const revoked: string[] = [];
+    let refreshResolve: () => void;
+    const refreshGate = new Promise<void>((resolve) => {
+      refreshResolve = resolve;
+    });
+
+    const oauth = {
+      authorizeUrl: () => '',
+      exchangeCode: async () => ({ accessToken: '', refreshToken: null, expiresAt: null }),
+      refresh: async () => {
+        await refreshGate;
+        return { accessToken: 'access-new-orphaned', refreshToken: 'refresh-new-orphaned', expiresAt: null };
+      },
+      revoke: async (token: string) => {
+        revoked.push(token);
+      },
+    };
+
+    const store = await storeWith(old(4 * MINUTE));
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    const inFlight = tokens.getAccessToken(SUB);
+    // User disconnects while refresh is in-flight:
+    await store.clearTokens(SUB);
+
+    // Let the in-flight refresh finish:
+    refreshResolve!();
+
+    await expect(inFlight).rejects.toBeInstanceOf(LinearReauthRequired);
+    expect(revoked.sort()).toEqual(['access-new-orphaned', 'refresh-new-orphaned']);
+    await expect(store.getTokens(SUB)).resolves.toBeNull();
+  });
+
+  it('starts a new refresh when forced caller joins an in-flight refresh that returns the rejected token', async () => {
+    let callCount = 0;
+    const { oauth } = stubLinear(() => {
+      callCount++;
+      return {
+        status: 200,
+        body: { access_token: `access-${callCount}`, refresh_token: `refresh-${callCount}`, expires_in: 86399 },
+      };
+    });
+    const store = await storeWith(old(4 * MINUTE));
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    // Call 1 starts an in-flight refresh that yields access-1:
+    const call1 = tokens.getAccessToken(SUB);
+    // Call 2 joins the in-flight refresh but has rejectedToken: 'access-1':
+    const call2 = tokens.getAccessToken(SUB, { forceRefresh: true, rejectedToken: 'access-1' });
+
+    const [res1, res2] = await Promise.all([call1, call2]);
+    expect(res1).toBe('access-1');
+    expect(res2).toBe('access-2');
+    expect(callCount).toBe(2);
+  });
+
+  it('does not wipe out newly reconnected tokens when invalid_grant races with a reconnect', async () => {
+    const reconnected: LinearTokens = {
+      accessToken: 'access-reconnected',
+      refreshToken: 'refresh-reconnected',
+      expiresAt: NOW + 60 * MINUTE,
+    };
+    const store = await storeWith(old(4 * MINUTE));
+    const { oauth } = stubLinear(() => {
+      // While refresh is in flight, user reconnects and saves new tokens:
+      void store.saveTokens(SUB, EMAIL, reconnected);
+      return { status: 400, body: { error: 'invalid_grant' } };
+    });
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+
+    await expect(tokens.getAccessToken(SUB)).resolves.toBe('access-reconnected');
+    await expect(store.getTokens(SUB)).resolves.toEqual(reconnected);
+  });
 });

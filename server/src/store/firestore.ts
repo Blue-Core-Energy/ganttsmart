@@ -28,6 +28,21 @@ function isAlreadyExists(err: unknown): boolean {
   return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === ALREADY_EXISTS;
 }
 
+/** Maximum number of concurrent baseline document creates sent to Firestore. */
+const MAX_CONCURRENT_CREATES = 20;
+
+async function runWithConcurrency<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let index = 0;
+  async function worker(): Promise<void> {
+    while (index < items.length) {
+      const i = index++;
+      await fn(items[i]);
+    }
+  }
+  const workers = Array.from({ length: Math.min(items.length, concurrency) }, () => worker());
+  await Promise.all(workers);
+}
+
 /**
  * Firestore-backed Store. Layout:
  * - users/{sub}: { email, linear: LinearTokens | null, updatedAt }
@@ -54,8 +69,21 @@ export function createFirestoreStore(db: Firestore): Store {
       );
     },
 
-    async clearTokens(sub) {
-      await userRef(sub).set({ linear: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    async clearTokens(sub, expectedRefreshToken) {
+      const ref = userRef(sub);
+      if (expectedRefreshToken === undefined) {
+        await ref.set({ linear: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+        return true;
+      }
+      return db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const stored = toTokens((snap.data() as UserDoc | undefined)?.linear);
+        if (stored === null || stored.refreshToken !== expectedRefreshToken) {
+          return false;
+        }
+        tx.update(ref, { linear: null, updatedAt: FieldValue.serverTimestamp() });
+        return true;
+      });
     },
 
     async swapTokens(sub, expectedRefreshToken, next) {
@@ -63,7 +91,7 @@ export function createFirestoreStore(db: Firestore): Store {
       return db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const stored = toTokens((snap.data() as UserDoc | undefined)?.linear);
-        if (stored === null) return toTokens(next) as LinearTokens;
+        if (stored === null) return null;
         if (stored.refreshToken !== expectedRefreshToken) return stored;
         tx.update(ref, { linear: toTokens(next), updatedAt: FieldValue.serverTimestamp() });
         return toTokens(next) as LinearTokens;
@@ -86,22 +114,20 @@ export function createFirestoreStore(db: Firestore): Store {
     async addBaselinesIfAbsent(sub, projectId, rows) {
       const collection = userRef(sub).collection('baselines');
       const now = new Date().toISOString();
-      await Promise.all(
-        rows.map(async (row) => {
-          const doc: BaselineDoc = {
-            issue_id: row.issue_id,
-            planned_start: row.planned_start,
-            planned_due: row.planned_due,
-            first_seen_at: now,
-            project_id: projectId,
-          };
-          try {
-            await collection.doc(row.issue_id).create(doc);
-          } catch (err) {
-            if (!isAlreadyExists(err)) throw err;
-          }
-        }),
-      );
+      await runWithConcurrency(rows, MAX_CONCURRENT_CREATES, async (row) => {
+        const doc: BaselineDoc = {
+          issue_id: row.issue_id,
+          planned_start: row.planned_start,
+          planned_due: row.planned_due,
+          first_seen_at: now,
+          project_id: projectId,
+        };
+        try {
+          await collection.doc(row.issue_id).create(doc);
+        } catch (err) {
+          if (!isAlreadyExists(err)) throw err;
+        }
+      });
     },
 
     async addChange(sub, change) {
