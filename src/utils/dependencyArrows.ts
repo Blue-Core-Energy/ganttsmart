@@ -21,6 +21,15 @@ export const ARROW_CORNER_RADIUS = 6;
 /** Offset step for staggering unrelated overlapping arrow tracks in px */
 export const ARROW_STAGGER_STEP = 6;
 
+/** Radius of the arc a vertical run uses to hop over a horizontal run of another arrow, in px */
+export const ARROW_HOP_RADIUS = 4;
+
+/** Free space kept between a hop and the end of its straight run (a corner or another hop), in px */
+const HOP_MARGIN = 1;
+
+/** A horizontal run must extend this far past a vertical run on both sides for it to count as a crossing */
+const CROSS_EPS = 1;
+
 export interface ArrowEndpoints {
   /** Right edge of the source bar */
   fromX: number;
@@ -43,6 +52,8 @@ export interface ArrowPathOptions {
   entryX?: number;
   /** Absolute y of a backwards arrow's horizontal lane */
   laneY?: number;
+  /** Crossing points on this arrow's vertical runs that it should hop over (see `findHops`) */
+  hops?: Point[];
 }
 
 export interface DependencyArrowEdge extends ArrowEndpoints {
@@ -59,23 +70,15 @@ export interface RoutedDependencyArrow extends DependencyArrowEdge {
   laneYOffset: number;
 }
 
-interface Point {
+export interface Point {
   x: number;
   y: number;
 }
 
 const round = (n: number) => Math.round(n * 10) / 10;
 
-/**
- * Build an SVG path with rounded 90-degree elbows between an orthogonal sequence of points.
- * Corner radii are clamped dynamically so adjacent corners on short segments never
- * collide, invert, or overshoot.
- */
-export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIUS): string {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M ${round(points[0].x)} ${round(points[0].y)}`;
-
-  // Filter out redundant consecutive duplicate points
+/** Drop repeated points and the middle points of collinear runs */
+function simplifyWaypoints(points: Point[]): Point[] {
   const pts: Point[] = [points[0]];
   for (let i = 1; i < points.length; i++) {
     const prev = pts[pts.length - 1];
@@ -86,7 +89,6 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
     pts.push(curr);
   }
 
-  // Simplify collinear segments (e.g. horizontal-horizontal or vertical-vertical)
   const simplified: Point[] = [];
   for (let i = 0; i < pts.length; i++) {
     if (i === 0 || i === pts.length - 1) {
@@ -102,6 +104,58 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
       simplified.push(curr);
     }
   }
+  return simplified;
+}
+
+/**
+ * Emit a vertical run from `y0` to `y1` at `x`, hopping to the right over each y in `hopYs`.
+ * Hops that would touch either end of the run (where a rounded corner starts) are dropped, and
+ * hops closer than a hop's own width are merged into one taller arc so arcs never overlap.
+ */
+function verticalWithHops(x: number, y0: number, y1: number, hopYs: number[]): string[] {
+  const dir = y1 > y0 ? 1 : -1;
+  const lo = Math.min(y0, y1);
+  const hi = Math.max(y0, y1);
+  const r = ARROW_HOP_RADIUS;
+  const fits = hopYs.filter((y) => y - r >= lo + HOP_MARGIN && y + r <= hi - HOP_MARGIN).sort((a, b) => dir * (a - b));
+
+  const clusters: { first: number; last: number }[] = [];
+  for (const y of fits) {
+    const current = clusters[clusters.length - 1];
+    if (current && dir * (y - current.last) < 2 * r + 2) current.last = y;
+    else clusters.push({ first: y, last: y });
+  }
+
+  const parts: string[] = [];
+  for (const { first, last } of clusters) {
+    const ry = Math.abs(last - first) / 2 + r;
+    // Hopping right: top-to-bottom is clockwise on screen (sweep 1), bottom-to-top is not (sweep 0)
+    parts.push(`V ${round(first - dir * r)}`);
+    parts.push(`A ${round(r)} ${round(ry)} 0 0 ${dir > 0 ? 1 : 0} ${round(x)} ${round(last + dir * r)}`);
+  }
+  parts.push(`V ${round(y1)}`);
+  return parts;
+}
+
+/**
+ * Build an SVG path with rounded 90-degree elbows between an orthogonal sequence of points.
+ * Corner radii are clamped dynamically so adjacent corners on short segments never
+ * collide, invert, or overshoot. Each point in `hops` that lies on a vertical run makes that
+ * run arc over it, so it reads as passing over rather than joining the line it crosses.
+ */
+export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIUS, hops: Point[] = []): string {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${round(points[0].x)} ${round(points[0].y)}`;
+
+  const simplified = simplifyWaypoints(points);
+
+  const vertical = (x: number, y0: number, y1: number) =>
+    verticalWithHops(
+      x,
+      y0,
+      y1,
+      hops.filter((h) => Math.abs(h.x - x) < 0.05).map((h) => h.y),
+    );
 
   if (simplified.length <= 1) {
     return `M ${round(points[0].x)} ${round(points[0].y)}`;
@@ -111,7 +165,10 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
       return `M ${round(simplified[0].x)} ${round(simplified[0].y)} H ${round(simplified[1].x)}`;
     }
     if (Math.abs(simplified[0].x - simplified[1].x) < 0.05) {
-      return `M ${round(simplified[0].x)} ${round(simplified[0].y)} V ${round(simplified[1].y)}`;
+      return [
+        `M ${round(simplified[0].x)} ${round(simplified[0].y)}`,
+        ...vertical(simplified[0].x, simplified[0].y, simplified[1].y),
+      ].join(' ');
     }
     return `M ${round(simplified[0].x)} ${round(simplified[0].y)} L ${round(simplified[1].x)} ${round(simplified[1].y)}`;
   }
@@ -170,7 +227,7 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
         if (Math.abs(curY - startY) < 0.05) {
           parts.push(`H ${round(startX)}`);
         } else if (Math.abs(curX - startX) < 0.05) {
-          parts.push(`V ${round(startY)}`);
+          parts.push(...vertical(curX, curY, startY));
         } else {
           parts.push(`L ${round(startX)} ${round(startY)}`);
         }
@@ -183,7 +240,7 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
       if (Math.abs(curY - vertex.y) < 0.05) {
         parts.push(`H ${round(vertex.x)}`);
       } else if (Math.abs(curX - vertex.x) < 0.05) {
-        parts.push(`V ${round(vertex.y)}`);
+        parts.push(...vertical(curX, curY, vertex.y));
       } else {
         parts.push(`L ${round(vertex.x)} ${round(vertex.y)}`);
       }
@@ -198,7 +255,7 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
     if (Math.abs(curY - dest.y) < 0.05) {
       parts.push(`H ${round(dest.x)}`);
     } else if (Math.abs(curX - dest.x) < 0.05) {
-      parts.push(`V ${round(dest.y)}`);
+      parts.push(...vertical(curX, curY, dest.y));
     } else {
       parts.push(`L ${round(dest.x)} ${round(dest.y)}`);
     }
@@ -208,30 +265,31 @@ export function buildRoundedPath(points: Point[], maxRadius = ARROW_CORNER_RADIU
 }
 
 /**
- * Build an orthogonal finish-to-start connector between two task bars with rounded elbows.
+ * Orthogonal waypoints of a finish-to-start connector between two task bars.
  *
  * Forward arrows turn close to the source bar (`fromX + ARROW_STUB`) so vertical drops
  * stay near bars instead of cutting across unrelated tasks in the middle of the chart.
  * Explicit `turnX` / `exitX` / `entryX` / `laneY` options (assigned by `routeDependencyArrows`)
  * are used as given, never recomputed.
  */
-export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints, options?: ArrowPathOptions): string {
+export function arrowWaypoints({ fromX, fromY, toX, toY }: ArrowEndpoints, options?: ArrowPathOptions): Point[] {
   const dx = toX - fromX;
   const sameRow = Math.abs(toY - fromY) < 0.05;
-  const cornerRadius = options?.cornerRadius ?? ARROW_CORNER_RADIUS;
 
   if (dx >= ARROW_STUB) {
     if (sameRow) {
-      return `M ${round(fromX)} ${round(fromY)} H ${round(toX)}`;
+      return [
+        { x: fromX, y: fromY },
+        { x: toX, y: toY },
+      ];
     }
     const turnX = options?.turnX ?? defaultTurnX({ fromX, toX });
-    const points: Point[] = [
+    return [
       { x: fromX, y: fromY },
       { x: turnX, y: fromY },
       { x: turnX, y: toY },
       { x: toX, y: toY },
     ];
-    return buildRoundedPath(points, cornerRadius);
   }
 
   // Backwards or tight forward overlap: route around through the lane beside the source row
@@ -239,7 +297,7 @@ export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints, optio
   const exitX = options?.exitX ?? fromX + ARROW_STUB;
   const entryX = options?.entryX ?? toX - ARROW_STUB;
 
-  const points: Point[] = [
+  return [
     { x: fromX, y: fromY },
     { x: exitX, y: fromY },
     { x: exitX, y: laneY },
@@ -247,7 +305,51 @@ export function buildArrowPath({ fromX, fromY, toX, toY }: ArrowEndpoints, optio
     { x: entryX, y: toY },
     { x: toX, y: toY },
   ];
-  return buildRoundedPath(points, cornerRadius);
+}
+
+/** Build an orthogonal finish-to-start connector between two task bars with rounded elbows. */
+export function buildArrowPath(endpoints: ArrowEndpoints, options?: ArrowPathOptions): string {
+  const cornerRadius = options?.cornerRadius ?? ARROW_CORNER_RADIUS;
+  return buildRoundedPath(arrowWaypoints(endpoints, options), cornerRadius, options?.hops);
+}
+
+/**
+ * Crossings where the vertical runs of each route pass over a horizontal run of a different
+ * route. A horizontal run only counts when the vertical run is strictly inside it, so a branch
+ * leaving a shared trunk, or arrows merging at one column, meet without a hop.
+ * Returns, per route, the points on its vertical runs to hop over (deduplicated by position).
+ */
+export function findHops(routes: Point[][]): Point[][] {
+  const simplified = routes.map((pts) => (pts.length > 0 ? simplifyWaypoints(pts) : []));
+
+  const horizontals = simplified.map((pts) => {
+    const runs: { y: number; xMin: number; xMax: number }[] = [];
+    for (let i = 1; i < pts.length; i++) {
+      if (Math.abs(pts[i].y - pts[i - 1].y) < 0.05 && Math.abs(pts[i].x - pts[i - 1].x) >= 0.05) {
+        runs.push({ y: pts[i].y, xMin: Math.min(pts[i].x, pts[i - 1].x), xMax: Math.max(pts[i].x, pts[i - 1].x) });
+      }
+    }
+    return runs;
+  });
+
+  return simplified.map((pts, a) => {
+    const found = new Map<string, Point>();
+    for (let i = 1; i < pts.length; i++) {
+      const x = pts[i].x;
+      if (Math.abs(x - pts[i - 1].x) >= 0.05) continue;
+      const yMin = Math.min(pts[i].y, pts[i - 1].y);
+      const yMax = Math.max(pts[i].y, pts[i - 1].y);
+      for (let b = 0; b < horizontals.length; b++) {
+        if (b === a) continue;
+        for (const h of horizontals[b]) {
+          if (h.xMin + CROSS_EPS < x && x < h.xMax - CROSS_EPS && yMin < h.y && h.y < yMax) {
+            found.set(`${round(x)}|${round(h.y)}`, { x, y: h.y });
+          }
+        }
+      }
+    }
+    return Array.from(found.values());
+  });
 }
 
 /**
@@ -528,7 +630,7 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
   }
 
   // 3. Build paths from the assigned tracks
-  return arrows.map((arrow) => {
+  const assigned = arrows.map((arrow) => {
     const kind = kindOf(arrow);
     let midXOffset = 0;
     let laneYOffset = 0;
@@ -548,11 +650,16 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
       pathOptions = { cornerRadius, exitX, entryX, laneY: y };
     }
 
-    return {
-      ...arrow,
-      path: buildArrowPath(arrow, pathOptions),
-      midXOffset,
-      laneYOffset,
-    };
+    return { arrow, midXOffset, laneYOffset, pathOptions };
   });
+
+  // 4. With every route fixed, make vertical runs hop over the horizontal runs they cross
+  const hops = findHops(assigned.map((a) => arrowWaypoints(a.arrow, a.pathOptions)));
+
+  return assigned.map(({ arrow, midXOffset, laneYOffset, pathOptions }, i) => ({
+    ...arrow,
+    path: buildArrowPath(arrow, { ...pathOptions, hops: hops[i] }),
+    midXOffset,
+    laneYOffset,
+  }));
 }

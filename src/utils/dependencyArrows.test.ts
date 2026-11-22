@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   ARROW_DIRECT_MIN_GAP,
+  ARROW_HOP_RADIUS,
   ARROW_LANE_OFFSET,
   ARROW_STAGGER_STEP,
   ARROW_STUB,
   buildArrowPath,
+  findHops,
   routeDependencyArrows,
   type DependencyArrowEdge,
   type ArrowEndpoints,
@@ -22,7 +24,7 @@ function points(path: string): { x: number; y: number }[] {
   const result: { x: number; y: number }[] = [];
   let x = 0;
   let y = 0;
-  for (const cmd of path.trim().split(/\s(?=[MHVLQ])/)) {
+  for (const cmd of path.trim().split(/\s(?=[MHVLQA])/)) {
     const [op, ...args] = cmd.split(/\s+/);
     if (op === 'M' || op === 'L') {
       [x, y] = args.map(Number);
@@ -39,6 +41,11 @@ function points(path: string): { x: number; y: number }[] {
       result.push({ x: nums[0], y: nums[1] });
       x = nums[2];
       y = nums[3];
+      result.push({ x, y });
+    } else if (op === 'A') {
+      // args: rx ry rotation large-arc sweep endX endY
+      x = Number(args[5]);
+      y = Number(args[6]);
       result.push({ x, y });
     }
   }
@@ -428,5 +435,253 @@ describe('routeDependencyArrows', () => {
       expect(124 - pts[pts.length - 2].x).toBeGreaterThanOrEqual(ARROW_HEAD);
     }
     expectNoUnrelatedVerticalOverlap(routed);
+  });
+});
+
+describe('crossing hops', () => {
+  const R = ARROW_HOP_RADIUS;
+  /** Straight arrow along one row: a pure horizontal run to cross */
+  const across = (id: string, y: number, fromX = 50, toX = 400): DependencyArrowEdge => ({
+    sourceId: `${id}-s`,
+    targetId: `${id}-t`,
+    fromX,
+    fromY: y,
+    toX,
+    toY: y,
+  });
+  const arcs = (path: string) => path.match(/A [^A-Z]+/g) ?? [];
+
+  /** Every y the path visits must move monotonically along the direction of each vertical run */
+  function expectNoInvertedVerticals(path: string) {
+    const pts = points(path);
+    for (let i = 2; i < pts.length; i++) {
+      const [p0, p1, p2] = [pts[i - 2], pts[i - 1], pts[i]];
+      if (p0.x === p1.x && p1.x === p2.x) {
+        expect(Math.sign(p1.y - p0.y) * Math.sign(p2.y - p1.y)).toBeGreaterThanOrEqual(0);
+      }
+    }
+  }
+
+  it('hops a downward vertical run to the right over a horizontal run it crosses', () => {
+    const [down, line] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      across('B', 106),
+    ]);
+    // Straight run 56 -> 156, hop centred on y = 106
+    expect(down.path).toBe(
+      `M 100 50 H 106 Q 112 50, 112 56 V ${106 - R} A ${R} ${R} 0 0 1 112 ${106 + R} V 156 Q 112 162, 118 162 H 300`,
+    );
+    // The line being crossed is untouched
+    expect(line.path).toBe('M 50 106 H 400');
+  });
+
+  it('hops an upward vertical run with the opposite sweep so it still bulges to the right', () => {
+    const [up] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 162, toX: 300, toY: 50 },
+      across('B', 106),
+    ]);
+    expect(up.path).toBe(
+      `M 100 162 H 106 Q 112 162, 112 156 V ${106 + R} A ${R} ${R} 0 0 0 112 ${106 - R} V 56 Q 112 50, 118 50 H 300`,
+    );
+  });
+
+  it('hops over the lane and entry runs of backwards arrows too', () => {
+    const [back, cross] = routeDependencyArrows([
+      { sourceId: 'S', targetId: 'T', fromX: 400, fromY: 50, toX: 100, toY: 218 },
+      across('B', 150, 60, 500),
+    ]);
+    // Exit column x = 412 passes through the lane at 70 only at its end; entry column (88) crosses y = 150
+    expect(arcs(back.path)).toHaveLength(1);
+    expect(back.path).toContain(`V ${150 - R} A ${R} ${R} 0 0 1 88 ${150 + R}`);
+    expect(arcs(cross.path)).toHaveLength(0);
+  });
+
+  it('emits a single hop when several arrows share a horizontal run at the same y', () => {
+    const [down] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      across('B', 106),
+      across('C', 106, 60, 380),
+    ]);
+    expect(arcs(down.path)).toHaveLength(1);
+
+    const hops = findHops([
+      [
+        { x: 112, y: 50 },
+        { x: 112, y: 162 },
+      ],
+      [
+        { x: 50, y: 106 },
+        { x: 400, y: 106 },
+      ],
+      [
+        { x: 60, y: 106 },
+        { x: 380, y: 106 },
+      ],
+    ]);
+    expect(hops[0]).toEqual([{ x: 112, y: 106 }]);
+    expect(hops[1]).toEqual([]);
+    expect(hops[2]).toEqual([]);
+  });
+
+  it('orders several hops along the direction of travel', () => {
+    const [down, , , up] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 218 },
+      across('B', 90),
+      across('C', 150),
+      { sourceId: 'D', targetId: 'TD', fromX: 500, fromY: 218, toX: 700, toY: 50 },
+    ]);
+    expect(arcs(down.path)).toHaveLength(2);
+    expect(down.path.indexOf(`V ${90 - R}`)).toBeLessThan(down.path.indexOf(`V ${150 - R}`));
+    expect(arcs(up.path)).toHaveLength(0);
+
+    const [upward] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 218, toX: 300, toY: 50 },
+      across('B', 90),
+      across('C', 150),
+    ]);
+    expect(upward.path.indexOf(`V ${150 + R}`)).toBeLessThan(upward.path.indexOf(`V ${90 + R}`));
+    expectNoInvertedVerticals(upward.path);
+  });
+
+  it('merges crossings closer than a hop is wide into one taller arc', () => {
+    const [down] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 218 },
+      across('B', 100),
+      across('C', 106),
+    ]);
+    // 6px apart is less than 2 * R + 2, so one half-ellipse covers y = 100 .. 106
+    expect(arcs(down.path)).toEqual([`A ${R} ${3 + R} 0 0 1 112 ${106 + R} `]);
+    expect(down.path).toContain(`V ${100 - R} A`);
+    expectNoInvertedVerticals(down.path);
+
+    // Exactly far enough apart keeps two separate hops
+    const [apart] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 218 },
+      across('B', 100),
+      across('C', 100 + 2 * R + 2),
+    ]);
+    expect(arcs(apart.path)).toHaveLength(2);
+    expectNoInvertedVerticals(apart.path);
+  });
+
+  it('does not hop where a branch leaves a shared trunk', () => {
+    const routed = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'T1', fromX: 100, fromY: 50, toX: 300, toY: 106 },
+      { sourceId: 'A', targetId: 'T2', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      { sourceId: 'A', targetId: 'T3', fromX: 100, fromY: 50, toX: 300, toY: 218 },
+    ]);
+    // T1 and T2 branch off the trunk that T3 continues down, starting exactly on its column
+    for (const r of routed) expect(r.path).not.toContain('A ');
+  });
+
+  it('does not hop where arrows merge into one target column or end on a vertical run', () => {
+    const merged = routeDependencyArrows([
+      { sourceId: 'S1', targetId: 'T', fromX: 400, fromY: 50, toX: 100, toY: 218 },
+      { sourceId: 'S2', targetId: 'T', fromX: 420, fromY: 106, toX: 100, toY: 218 },
+    ]);
+    for (const r of merged) expect(r.path).not.toContain('A ');
+
+    // A horizontal run that only reaches the vertical run (either end) is a junction, not a crossing
+    const column = [
+      { x: 112, y: 50 },
+      { x: 112, y: 162 },
+    ];
+    const endsAt = (x1: number, x2: number) => [
+      { x: x1, y: 106 },
+      { x: x2, y: 106 },
+    ];
+    expect(findHops([column, endsAt(50, 112)])[0]).toEqual([]);
+    expect(findHops([column, endsAt(112, 300)])[0]).toEqual([]);
+    expect(findHops([column, endsAt(50, 113)])[0]).toEqual([]);
+    expect(findHops([column, endsAt(50, 114)])[0]).toEqual([{ x: 112, y: 106 }]);
+  });
+
+  it('does not hop at the ends of a vertical run or over a run at the same level as its corners', () => {
+    const column = [
+      { x: 112, y: 50 },
+      { x: 112, y: 162 },
+    ];
+    // Strictly inside in y only: runs at the endpoints themselves are not crossings
+    const level = (y: number) => [
+      { x: 50, y },
+      { x: 300, y },
+    ];
+    expect(findHops([column, level(50)])[0]).toEqual([]);
+    expect(findHops([column, level(162)])[0]).toEqual([]);
+    expect(findHops([column, level(49)])[0]).toEqual([]);
+    expect(findHops([column, level(106)])[0]).toHaveLength(1);
+  });
+
+  it('skips hops that would run into a rounded corner, without inverting the path', () => {
+    const arrows = (y: number): DependencyArrowEdge[] => [
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      across('B', y),
+    ];
+    const plain = routeDependencyArrows([arrows(106)[0]])[0].path;
+    // Rounded corners eat 6px at each end, leaving 56..156; a hop needs R + 1 spare on both sides
+    for (const y of [52, 56, 60, 60.9, 151.1, 156, 160]) {
+      const [down] = routeDependencyArrows(arrows(y));
+      expect(down.path, `y=${y}`).toBe(plain);
+    }
+    for (const y of [61, 151]) {
+      const [down] = routeDependencyArrows(arrows(y));
+      expect(arcs(down.path), `y=${y}`).toHaveLength(1);
+      expectNoInvertedVerticals(down.path);
+    }
+
+    // A run too short to fit a hop at all keeps its plain path
+    const short = { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 66 };
+    for (const y of [54, 58, 62]) {
+      const [tight] = routeDependencyArrows([short, across('B', y)]);
+      expect(tight.path, `y=${y}`).toBe(routeDependencyArrows([short])[0].path);
+    }
+
+    // Sharp corners leave the whole run available
+    const [sharp] = routeDependencyArrows(
+      [{ sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 66 }, across('B', 58)],
+      { cornerRadius: 0 },
+    );
+    expect(sharp.path).toBe(`M 100 50 H 112 V ${58 - R} A ${R} ${R} 0 0 1 112 ${58 + R} V 66 H 300`);
+  });
+
+  it('keeps every hop clear of corners across a sweep of crossing heights', () => {
+    for (let y = 50; y <= 220; y += 0.5) {
+      for (const sourceY of [50, 218]) {
+        const targetY = sourceY === 50 ? 218 : 50;
+        const [a] = routeDependencyArrows([
+          { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: sourceY, toX: 300, toY: targetY },
+          across('B', y),
+          across('C', y + 7),
+        ]);
+        expectNoInvertedVerticals(a.path);
+        const pts = points(a.path);
+        for (const p of pts) {
+          expect(p.y).toBeGreaterThanOrEqual(50);
+          expect(p.y).toBeLessThanOrEqual(218);
+        }
+      }
+    }
+  });
+
+  it('leaves non-crossing arrows with no hops', () => {
+    const routed = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      across('B', 250),
+      { sourceId: 'C', targetId: 'TC', fromX: 500, fromY: 50, toX: 700, toY: 162 },
+    ]);
+    for (const r of routed) expect(r.path).not.toContain('A ');
+  });
+
+  it('crossing arrows keep source, target and offsets of the unhopped routing', () => {
+    const edges: DependencyArrowEdge[] = [
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 162 },
+      across('B', 106),
+    ];
+    const [withHop] = routeDependencyArrows(edges);
+    const [alone] = routeDependencyArrows([edges[0]]);
+    expect(withHop.midXOffset).toBe(alone.midXOffset);
+    expect(withHop.laneYOffset).toBe(alone.laneYOffset);
+    expect(points(withHop.path)[0]).toEqual({ x: 100, y: 50 });
+    expect(points(withHop.path).at(-1)).toEqual({ x: 300, y: 162 });
   });
 });
