@@ -435,6 +435,7 @@ export async function fetchIssues(
             assignee { id name }
             team { id }
             projectMilestone { id }
+            parent { identifier }
           }
         }
         doneIssues: issues(first: 100, filter: { completedAt: { null: false }, canceledAt: { null: true } }) {
@@ -453,6 +454,7 @@ export async function fetchIssues(
             assignee { id name }
             team { id }
             projectMilestone { id }
+            parent { identifier }
           }
         }
       }
@@ -475,6 +477,7 @@ export async function fetchIssues(
     assignee: { id?: string; name: string } | null;
     team: { id: string } | null;
     projectMilestone: { id: string } | null;
+    parent?: { identifier: string } | null;
   }
 
   interface MilestoneNode {
@@ -790,6 +793,7 @@ export async function fetchIssues(
       completedAt: n.completedAt || undefined,
       isDueImplicit: isDueImplicit || undefined,
       milestoneId: n.projectMilestone?.id ?? null,
+      parentId: n.parent?.identifier ?? null,
     };
   }
 

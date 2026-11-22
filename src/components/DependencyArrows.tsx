@@ -1,9 +1,14 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import type { Task } from '@/types';
-import { routeDependencyArrows, type DependencyArrowEdge, type RoutedDependencyArrow } from '@/utils/dependencyArrows';
+import {
+  routeDependencyArrows,
+  type DependencyArrowEdge,
+  type DependencyEdge,
+  type RoutedDependencyArrow,
+} from '@/utils/dependencyArrows';
 
 interface Props {
-  tasks: Task[];
+  /** Arrows to draw, already rolled up to the visible bars */
+  edges: DependencyEdge[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   depViolations?: Map<string, string[]>;
   /** Layout drivers — ensure arrows recompute on zoom or column changes even if table width stays viewport-padded */
@@ -71,7 +76,7 @@ function ArrowPathItem({ arrow: a, isSelected, hasSelection, onSelectArrow }: Ar
 }
 
 export default memo(function DependencyArrows({
-  tasks,
+  edges,
   containerRef,
   depViolations,
   dayWidth,
@@ -89,48 +94,34 @@ export default memo(function DependencyArrows({
     if (!container) return;
 
     const containerRect = container.getBoundingClientRect();
-    const taskById = new Map(tasks.map((t) => [t.id, t]));
-    const seenEdges = new Set<string>();
     const rawArrows: Arrow[] = [];
 
-    for (const task of tasks) {
-      if (task.blocks.length === 0) continue;
-
-      const fromBar = container.querySelector(`[data-task-bar="${task.id}"]`) as HTMLElement | null;
-      if (!fromBar) continue;
+    for (const edge of edges) {
+      const fromBar = container.querySelector(`[data-task-bar="${edge.sourceId}"]`) as HTMLElement | null;
+      const toBar = container.querySelector(`[data-task-bar="${edge.targetId}"]`) as HTMLElement | null;
+      if (!fromBar || !toBar) continue;
       const fromRect = fromBar.getBoundingClientRect();
+      const toRect = toBar.getBoundingClientRect();
 
-      for (const blockedId of task.blocks) {
-        const edgeKey = `${task.id}->${blockedId}`;
-        if (seenEdges.has(edgeKey)) continue;
-        seenEdges.add(edgeKey);
+      // Violated when any dependency behind this arrow has the blocked task starting before its blocker is due
+      const violated = edge.members.some((m) => depViolations?.get(m.targetId)?.includes(m.sourceId));
 
-        const toBar = container.querySelector(`[data-task-bar="${blockedId}"]`) as HTMLElement | null;
-        if (!toBar) continue;
-        const toRect = toBar.getBoundingClientRect();
-
-        // Check if this specific dependency is violated (blocked task starts before blocker is due)
-        const violated = depViolations?.get(blockedId)?.includes(task.id) ?? false;
-        const targetTask = taskById.get(blockedId);
-        const crossProject = Boolean(task.isExternal || targetTask?.isExternal);
-
-        rawArrows.push({
-          fromX: fromRect.right - containerRect.left,
-          fromY: fromRect.top + fromRect.height / 2 - containerRect.top,
-          toX: toRect.left - containerRect.left,
-          toY: toRect.top + toRect.height / 2 - containerRect.top,
-          sourceId: task.id,
-          targetId: blockedId,
-          violated,
-          crossProject,
-        });
-      }
+      rawArrows.push({
+        fromX: fromRect.right - containerRect.left,
+        fromY: fromRect.top + fromRect.height / 2 - containerRect.top,
+        toX: toRect.left - containerRect.left,
+        toY: toRect.top + toRect.height / 2 - containerRect.top,
+        sourceId: edge.sourceId,
+        targetId: edge.targetId,
+        violated,
+        crossProject: edge.crossProject,
+      });
     }
 
     const routed = routeDependencyArrows(rawArrows);
     setArrows(routed);
     setSize({ width: container.scrollWidth, height: container.scrollHeight });
-  }, [tasks, containerRef, depViolations, dayWidth, fixedColsWidth]);
+  }, [edges, containerRef, depViolations, dayWidth, fixedColsWidth]);
 
   useEffect(() => {
     // Initial compute after paint

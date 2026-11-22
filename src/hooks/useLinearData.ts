@@ -23,7 +23,7 @@ import type { AssignableUser, Filters, Milestone, Project, Task, WorkflowState }
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
-import { applyCustomOrder, filterTasks, isTaskDone } from '@/utils/tasks';
+import { applyCustomOrder, filterTasks, isTaskDone, reorderWithinHierarchy } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
@@ -143,22 +143,24 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     return orderedAllTasks.filter((t) => (t.isExternal ? visibleExtIds.has(t.uuid) : visibleLocalIds.has(t.uuid)));
   }, [orderedAllTasks, filteredTasks, visibleExternalTasks]);
 
+  const visibleUuids = useMemo(() => new Set(displayTasks.map((t) => t.uuid)), [displayTasks]);
+
   const allKnownTasks = useMemo(
     () => [...tasks, ...unscheduledTasks, ...externalTasks, ...externalUnscheduledTasks],
     [tasks, unscheduledTasks, externalTasks, externalUnscheduledTasks],
   );
 
   // Move a task (local or external ghost row) next to another in the display order and persist it.
+  // A parent moves with its sub-issues; a sub-issue can only move among its siblings. Sub-issues whose parent
+  // is filtered out are top-level rows on screen, so they move among the visible top-level rows.
   const reorderTask = useCallback(
     (draggedUuid: string, targetUuid: string, placeAfter: boolean) => {
       if (draggedUuid === targetUuid) return;
-      const order = orderedAllTasks.map((t) => t.uuid);
-      const from = order.indexOf(draggedUuid);
-      if (from === -1) return;
-      order.splice(from, 1);
-      const targetIdx = order.indexOf(targetUuid);
-      if (targetIdx === -1) return;
-      order.splice(placeAfter ? targetIdx + 1 : targetIdx, 0, draggedUuid);
+      const order = reorderWithinHierarchy(orderedAllTasks, draggedUuid, targetUuid, placeAfter, visibleUuids);
+      if (!order) {
+        toast('Sub-issues can only be reordered within their parent');
+        return;
+      }
       setCustomOrder(order);
       if (selectedProjectId) {
         try {
@@ -168,7 +170,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         }
       }
     },
-    [orderedAllTasks, selectedProjectId],
+    [orderedAllTasks, visibleUuids, selectedProjectId],
   );
 
   // Push to undo stack and show toast with Undo action

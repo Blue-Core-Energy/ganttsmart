@@ -32,6 +32,7 @@ import {
   readProjectParam,
   syncProjectQueryParam,
 } from '@/utils/projectDeepLink';
+import { hasActiveRowFilters } from '@/utils/tasks';
 
 function GanttView({
   linearToken,
@@ -321,6 +322,7 @@ function GanttView({
           allowExternalEdits={allowExternalEdits}
           onSelectProject={selectProject}
           projectName={projectName}
+          ignoreCollapsed={hasActiveRowFilters(filters)}
         />
       </div>
 

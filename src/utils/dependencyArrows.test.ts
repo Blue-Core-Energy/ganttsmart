@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Task } from '@/types';
 import {
   ARROW_DIRECT_MIN_GAP,
   ARROW_HOP_RADIUS,
@@ -7,9 +8,10 @@ import {
   ARROW_STUB,
   buildArrowPath,
   findHops,
+  resolveDependencyEdges,
   routeDependencyArrows,
-  type DependencyArrowEdge,
   type ArrowEndpoints,
+  type DependencyArrowEdge,
 } from './dependencyArrows';
 
 /** Mirrors the Tailwind sizes in GanttRow.tsx: `h-[28px]` bars in `h-[56px]` rows */
@@ -683,5 +685,106 @@ describe('crossing hops', () => {
     expect(withHop.laneYOffset).toBe(alone.laneYOffset);
     expect(points(withHop.path)[0]).toEqual({ x: 100, y: 50 });
     expect(points(withHop.path).at(-1)).toEqual({ x: 300, y: 162 });
+  });
+});
+
+describe('resolveDependencyEdges', () => {
+  function task(id: string, blocks: string[] = [], overrides: Partial<Task> = {}): Task {
+    return {
+      id,
+      uuid: `u-${id}`,
+      title: id,
+      description: '',
+      due: '2026-05-10',
+      startDate: null,
+      priorityVal: 2,
+      priority: 'High',
+      status: 'Todo',
+      statusType: 'unstarted',
+      assignee: 'Alice',
+      url: '',
+      teamId: 't',
+      blocks,
+      blockedBy: [],
+      progress: 0,
+      totalChildren: 0,
+      completedChildren: 0,
+      ...overrides,
+    };
+  }
+  const pairs = (edges: ReturnType<typeof resolveDependencyEdges>) => edges.map((e) => `${e.sourceId}->${e.targetId}`);
+
+  it('keeps every relation as-is when nothing is hidden', () => {
+    const edges = resolveDependencyEdges([task('A', ['B']), task('B'), task('C', ['B'])]);
+    expect(pairs(edges)).toEqual(['A->B', 'C->B']);
+    expect(edges[0].members).toEqual([{ sourceId: 'A', targetId: 'B' }]);
+  });
+
+  it('skips relations whose target is not in the list', () => {
+    expect(resolveDependencyEdges([task('A', ['GONE'])])).toEqual([]);
+  });
+
+  it('rolls a hidden source up to its collapsed parent', () => {
+    const tasks = [task('P'), task('P1', ['X']), task('X')];
+    expect(pairs(resolveDependencyEdges(tasks, new Map([['P1', 'P']])))).toEqual(['P->X']);
+  });
+
+  it('rolls a hidden target up to its collapsed parent', () => {
+    const tasks = [task('X', ['P1']), task('P'), task('P1')];
+    expect(pairs(resolveDependencyEdges(tasks, new Map([['P1', 'P']])))).toEqual(['X->P']);
+  });
+
+  it('rolls both ends up independently', () => {
+    const tasks = [task('P'), task('P1', ['Q1']), task('Q'), task('Q1')];
+    const hidden = new Map([
+      ['P1', 'P'],
+      ['Q1', 'Q'],
+    ]);
+    expect(pairs(resolveDependencyEdges(tasks, hidden))).toEqual(['P->Q']);
+  });
+
+  it('merges relations that land on the same pair of bars into one arrow', () => {
+    const tasks = [task('P'), task('P1', ['X']), task('P2', ['X']), task('X')];
+    const edges = resolveDependencyEdges(
+      tasks,
+      new Map([
+        ['P1', 'P'],
+        ['P2', 'P'],
+      ]),
+    );
+    expect(pairs(edges)).toEqual(['P->X']);
+    expect(edges[0].members).toEqual([
+      { sourceId: 'P1', targetId: 'X' },
+      { sourceId: 'P2', targetId: 'X' },
+    ]);
+  });
+
+  it('merges a rolled-up relation with an existing direct one', () => {
+    const tasks = [task('P', ['X']), task('P1', ['X']), task('X')];
+    const edges = resolveDependencyEdges(tasks, new Map([['P1', 'P']]));
+    expect(pairs(edges)).toEqual(['P->X']);
+    expect(edges[0].members).toHaveLength(2);
+  });
+
+  it('drops relations internal to a collapsed parent', () => {
+    const tasks = [task('P', ['P1']), task('P1', ['P2']), task('P2', ['P']), task('X')];
+    const hidden = new Map([
+      ['P1', 'P'],
+      ['P2', 'P'],
+    ]);
+    expect(resolveDependencyEdges(tasks, hidden)).toEqual([]);
+  });
+
+  it('flags an arrow as cross-project when any underlying relation involves an external task', () => {
+    const tasks = [task('P'), task('P1', ['X']), task('P2', ['X']), task('X'), task('E', ['P1'], { isExternal: true })];
+    const edges = resolveDependencyEdges(
+      tasks,
+      new Map([
+        ['P1', 'P'],
+        ['P2', 'P'],
+      ]),
+    );
+    expect(edges.find((e) => e.sourceId === 'E')?.crossProject).toBe(true);
+    expect(edges.find((e) => e.sourceId === 'P')?.crossProject).toBe(false);
   });
 });

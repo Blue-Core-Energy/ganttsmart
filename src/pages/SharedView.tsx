@@ -9,6 +9,7 @@ import Tooltip from '@/components/Tooltip';
 import { useSharedData } from '@/hooks/useSharedData';
 import { useTheme } from '@/hooks/useTheme';
 import { formatDate } from '@/utils/date';
+import { hasActiveRowFilters } from '@/utils/tasks';
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -203,6 +204,7 @@ export default function SharedView() {
           onDayWidthChange={setDayWidth}
           timeScale={timeScale}
           projectName={projectName}
+          ignoreCollapsed={hasActiveRowFilters(filters)}
         />
         <MilestonePanel />
         <Tooltip />

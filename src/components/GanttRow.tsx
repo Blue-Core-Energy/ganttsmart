@@ -53,9 +53,21 @@ interface Props {
   isExternalReadOnly?: boolean;
   onSelectProject?: (projectId: string) => void;
   isHighlighted?: boolean;
+  /** Nesting level under parent rows (0 = top level) */
+  depth?: number;
+  /** Number of sub-issue rows grouped under this task in the schedule */
+  childCount?: number;
+  /** Reserve the expand/collapse gutter, so rows line up whenever the schedule has any parent */
+  showTreeGutter?: boolean;
+  collapsed?: boolean;
+  /** The chevron is shown but inert — every matching row is revealed while filtering */
+  toggleLocked?: boolean;
+  onToggleCollapse?: (taskId: string) => void;
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
+/** Horizontal indent per nesting level, in px */
+const INDENT_PER_DEPTH = 18;
 
 export default function GanttRow({
   task,
@@ -81,6 +93,12 @@ export default function GanttRow({
   isExternalReadOnly = false,
   onSelectProject,
   isHighlighted = false,
+  depth = 0,
+  childCount = 0,
+  showTreeGutter = false,
+  collapsed = false,
+  toggleLocked = false,
+  onToggleCollapse,
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
@@ -511,6 +529,54 @@ export default function GanttRow({
     </span>
   );
 
+  /** Chevron for parents, an elbow connector for leaf sub-issues, empty space otherwise */
+  const treeGutter =
+    childCount > 0 ? (
+      <button
+        type="button"
+        data-collapse-toggle={task.id}
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${childCount} ${childCount === 1 ? 'sub-issue' : 'sub-issues'} of ${task.id}`}
+        title={
+          toggleLocked
+            ? 'Sub-issues stay expanded while filtering'
+            : `${collapsed ? 'Expand' : 'Collapse'} ${childCount} ${childCount === 1 ? 'sub-issue' : 'sub-issues'}`
+        }
+        disabled={toggleLocked}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleCollapse?.(task.id);
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+        className="w-[18px] h-[18px] -ml-0.5 shrink-0 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-bg-hover disabled:opacity-50 disabled:cursor-default disabled:hover:bg-transparent cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="transition-transform duration-150"
+          style={{ transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)' }}
+          aria-hidden="true"
+        >
+          <polyline points="9 18 15 12 9 6" />
+        </svg>
+      </button>
+    ) : depth > 0 ? (
+      <span
+        className="w-[18px] h-[18px] -ml-0.5 shrink-0 flex items-center justify-center text-border-secondary"
+        aria-hidden="true"
+      >
+        <span className="block w-2 h-2 border-l border-b border-current rounded-bl-sm -mt-1.5" />
+      </span>
+    ) : (
+      <span className="w-[18px] shrink-0 -ml-0.5" aria-hidden="true" />
+    );
+
   function renderCell(key: ColumnKey) {
     switch (key) {
       case 'task':
@@ -534,107 +600,118 @@ export default function GanttRow({
                 </svg>
               </span>
             )}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-1.5">
-                {/* The ID and sub-issue counts move out when they have a column of their own */}
-                {!showsColumn('id') && issueIdLink}
-                {task.isExternal &&
-                  !showsColumn('project') &&
-                  (task.projectId && onSelectProject ? (
-                    <button
-                      type="button"
-                      data-external-project-jump={task.projectId}
-                      onMouseDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onSelectProject(task.projectId!);
-                      }}
-                      className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
-                      title={`From ${task.projectName || 'External project'} — click to open project`}
-                    >
-                      <span className="truncate">{task.projectName || 'External'}</span>
-                    </button>
-                  ) : (
-                    <span
-                      className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
-                      title={`External issue · ${task.projectName || 'No Project'}`}
-                    >
-                      {task.projectName || 'External'}
-                    </span>
-                  ))}
-                {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
-                  <svg
-                    width="10"
-                    height="10"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    className="text-text-muted shrink-0"
-                    aria-label={
-                      (task.blocks.length > 0 ? `Blocks ${task.blocks.length}` : '') +
-                      (task.blocks.length > 0 && task.blockedBy.length > 0 ? ' · ' : '') +
-                      (task.blockedBy.length > 0 ? `Blocked by ${task.blockedBy.length}` : '')
-                    }
-                  >
-                    <path d="M4.5 2A2.5 2.5 0 002 4.5v1a.5.5 0 001 0v-1A1.5 1.5 0 014.5 3h1a.5.5 0 000-1h-1zm6 0a.5.5 0 000 1h1A1.5 1.5 0 0113 4.5v1a.5.5 0 001 0v-1A2.5 2.5 0 0011.5 2h-1zm-8 8a.5.5 0 01.5.5v1A1.5 1.5 0 004.5 13h1a.5.5 0 010 1h-1A2.5 2.5 0 012 11.5v-1a.5.5 0 01.5-.5zm11 0a.5.5 0 01.5.5v1a2.5 2.5 0 01-2.5 2.5h-1a.5.5 0 010-1h1a1.5 1.5 0 001.5-1.5v-1a.5.5 0 01.5-.5z" />
-                  </svg>
-                )}
-                {depViolation && depViolation.length > 0 && (
-                  <span
-                    className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
-                    title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
-                      <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
-                    </svg>
-                  </span>
-                )}
-                {!showsColumn('progress') && subIssueProgress}
-                {/* Keep click-to-cycle reachable when the status column is hidden */}
-                {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
-              </div>
-              {isEditingTitle ? (
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  data-inline-edit="title"
-                  aria-label={`Rename ${task.id}`}
-                  value={titleDraft}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  onBlur={() => finishTitleEdit(true)}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      finishTitleEdit(true);
-                    } else if (e.key === 'Escape') {
-                      e.preventDefault();
-                      finishTitleEdit(false);
-                    }
-                  }}
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                  className="w-full -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
-                  style={{ maxWidth: colWidths.task - 36 }}
-                />
-              ) : (
-                <div
-                  data-task-title={task.id}
-                  className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
-                  style={{ maxWidth: colWidths.task - 36 }}
-                  title={task.title}
-                  onDoubleClick={
-                    canInlineEdit
-                      ? (e) => {
+            <div
+              className="min-w-0 flex-1 flex items-center gap-1"
+              style={depth > 0 ? { paddingLeft: depth * INDENT_PER_DEPTH } : undefined}
+              data-task-indent={depth}
+            >
+              {showTreeGutter && treeGutter}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  {/* The ID and sub-issue counts move out when they have a column of their own */}
+                  {!showsColumn('id') && issueIdLink}
+                  {task.isExternal &&
+                    !showsColumn('project') &&
+                    (task.projectId && onSelectProject ? (
+                      <button
+                        type="button"
+                        data-external-project-jump={task.projectId}
+                        onMouseDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
                           e.stopPropagation();
-                          startTitleEdit();
-                        }
-                      : undefined
-                  }
-                >
-                  {task.title}
+                          onSelectProject(task.projectId!);
+                        }}
+                        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-accent/10 border border-accent/25 text-[9.5px] font-medium text-accent hover:bg-accent/20 transition-colors shrink min-w-0 max-w-[110px] truncate cursor-pointer"
+                        title={`From ${task.projectName || 'External project'} — click to open project`}
+                      >
+                        <span className="truncate">{task.projectName || 'External'}</span>
+                      </button>
+                    ) : (
+                      <span
+                        className="inline-flex items-center px-1.5 py-0.5 rounded bg-bg-hover border border-border-primary text-[9.5px] font-medium text-text-muted shrink min-w-0 max-w-[110px] truncate"
+                        title={`External issue · ${task.projectName || 'No Project'}`}
+                      >
+                        {task.projectName || 'External'}
+                      </span>
+                    ))}
+                  {(task.blocks.length > 0 || task.blockedBy.length > 0) && (
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 16 16"
+                      fill="currentColor"
+                      className="text-text-muted shrink-0"
+                      aria-label={
+                        (task.blocks.length > 0 ? `Blocks ${task.blocks.length}` : '') +
+                        (task.blocks.length > 0 && task.blockedBy.length > 0 ? ' · ' : '') +
+                        (task.blockedBy.length > 0 ? `Blocked by ${task.blockedBy.length}` : '')
+                      }
+                    >
+                      <path d="M4.5 2A2.5 2.5 0 002 4.5v1a.5.5 0 001 0v-1A1.5 1.5 0 014.5 3h1a.5.5 0 000-1h-1zm6 0a.5.5 0 000 1h1A1.5 1.5 0 0113 4.5v1a.5.5 0 001 0v-1A2.5 2.5 0 0011.5 2h-1zm-8 8a.5.5 0 01.5.5v1A1.5 1.5 0 004.5 13h1a.5.5 0 010 1h-1A2.5 2.5 0 012 11.5v-1a.5.5 0 01.5-.5zm11 0a.5.5 0 01.5.5v1a2.5 2.5 0 01-2.5 2.5h-1a.5.5 0 010-1h1a1.5 1.5 0 001.5-1.5v-1a.5.5 0 01.5-.5z" />
+                    </svg>
+                  )}
+                  {depViolation && depViolation.length > 0 && (
+                    <span
+                      className="inline-flex items-center gap-0.5 shrink-0 cursor-help text-high"
+                      title={`Starts before ${depViolation.length === 1 ? depViolation[0] + ' is' : depViolation.join(', ') + ' are'} due — dependency may be violated`}
+                    >
+                      <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8.893 1.5c-.183-.31-.52-.5-.887-.5s-.703.19-.886.5L.138 13.499a.98.98 0 00.016 1.001c.184.31.524.5.893.5h13.906c.37 0 .709-.19.893-.5a.98.98 0 00.016-1.001L8.893 1.5zM8 5c.535 0 .954.462.9.995l-.35 3.507a.552.552 0 01-1.1 0L7.1 5.995A.905.905 0 018 5zm.002 6.5a.75.75 0 110 1.5.75.75 0 010-1.5z" />
+                      </svg>
+                    </span>
+                  )}
+                  {!showsColumn('progress') && subIssueProgress}
+                  {/* Keep click-to-cycle reachable when the status column is hidden */}
+                  {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
                 </div>
-              )}
+                {isEditingTitle ? (
+                  <input
+                    ref={titleInputRef}
+                    type="text"
+                    data-inline-edit="title"
+                    aria-label={`Rename ${task.id}`}
+                    value={titleDraft}
+                    onChange={(e) => setTitleDraft(e.target.value)}
+                    onBlur={() => finishTitleEdit(true)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        finishTitleEdit(true);
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        finishTitleEdit(false);
+                      }
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
+                    onDoubleClick={(e) => e.stopPropagation()}
+                    className="w-full -my-0.5 px-1 py-0.5 rounded bg-bg-primary border border-accent text-[13px] font-medium leading-snug text-text-primary outline-none"
+                    style={{
+                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
+                    }}
+                  />
+                ) : (
+                  <div
+                    data-task-title={task.id}
+                    className={`text-[13px] font-medium leading-snug truncate ${isDone ? 'text-text-secondary line-through opacity-75' : 'text-text-primary'}`}
+                    style={{
+                      maxWidth: Math.max(0, colWidths.task - 36 - depth * INDENT_PER_DEPTH - (showTreeGutter ? 20 : 0)),
+                    }}
+                    title={task.title}
+                    onDoubleClick={
+                      canInlineEdit
+                        ? (e) => {
+                            e.stopPropagation();
+                            startTitleEdit();
+                          }
+                        : undefined
+                    }
+                  >
+                    {task.title}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         );
@@ -873,6 +950,7 @@ export default function GanttRow({
     <tr
       data-task-id={task.id}
       data-task-uuid={task.uuid}
+      data-task-depth={depth}
       data-task-done={isDone ? 'true' : undefined}
       data-external-task={task.isExternal ? 'true' : undefined}
       data-highlighted={isHighlighted ? 'true' : undefined}
@@ -936,9 +1014,13 @@ export default function GanttRow({
         if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && onReorder) {
           e.preventDefault();
           const row = e.currentTarget as HTMLElement;
-          const sibling = (
+          let sibling = (
             e.key === 'ArrowDown' ? row.nextElementSibling : row.previousElementSibling
           ) as HTMLElement | null;
+          // Moving a parent down steps over its own sub-issues, which travel with it
+          while (e.key === 'ArrowDown' && sibling && Number(sibling.dataset.taskDepth ?? 0) > depth) {
+            sibling = sibling.nextElementSibling as HTMLElement | null;
+          }
           const siblingUuid = sibling?.dataset.taskUuid;
           if (siblingUuid) {
             onReorder(task.uuid, siblingUuid, e.key === 'ArrowDown');

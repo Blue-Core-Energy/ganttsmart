@@ -20,6 +20,8 @@ export interface Task {
   totalChildren: number;
   completedChildren: number;
   completedAt?: string;
+  /** Display identifier of the parent issue (e.g., "ENG-100") when this is a sub-issue; matches another task's `id` */
+  parentId?: string | null;
   /** True when `due` was derived from project.targetDate (issue has no explicit due date) */
   isDueImplicit?: boolean;
   /** Linear project milestone this issue belongs to, if any */
