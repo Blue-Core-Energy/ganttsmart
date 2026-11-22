@@ -882,6 +882,65 @@ export default function GanttChart({
       id="gantt-export-target"
       className="h-full w-full bg-bg-primary overflow-auto print:overflow-visible print:border-0"
     >
+      {/* Unscheduled tasks section — above the table so it is seen first. It sits outside innerRef, so
+          the header measurement, milestone lines and arrow geometry (all relative to innerRef) are unchanged;
+          sticky left keeps it in view while the timeline scrolls horizontally. */}
+      {unscheduledTasks.length > 0 && (
+        <div
+          data-testid="unscheduled-section"
+          className="sticky left-0 border-b border-border-primary bg-bg-primary print:hidden"
+        >
+          <button
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-text-secondary hover:bg-bg-hover transition-colors"
+            onClick={() => setUnscheduledVisible((v) => !v)}
+          >
+            <div className="flex items-center gap-2">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-text-muted shrink-0 transition-transform duration-200"
+                style={{ transform: unscheduledVisible ? 'rotate(90deg)' : 'rotate(0deg)' }}
+              >
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-high"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span className="font-medium">Unscheduled</span>
+              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">
+                {unscheduledTasks.length}
+              </span>
+              <span className="text-[11px] text-text-muted ml-1">— no due date set</span>
+            </div>
+            <span className="text-xs text-text-muted">{unscheduledVisible ? 'Hide' : 'Show'}</span>
+          </button>
+
+          {unscheduledVisible && (
+            <div className="px-4 pb-4">
+              <UnscheduledList tasks={unscheduledTasks} onReschedule={onReschedule} />
+            </div>
+          )}
+        </div>
+      )}
+
       <div ref={innerRef} className="relative" style={{ minWidth: '100%' }}>
         <table className="border-separate border-spacing-0" style={{ width: fixedColsWidth + totalDays * dayWidth }}>
           <thead ref={theadRef}>
@@ -1128,60 +1187,6 @@ export default function GanttChart({
           />
         </svg>
       </div>
-
-      {/* Unscheduled tasks section */}
-      {unscheduledTasks.length > 0 && (
-        <div className="border-t border-border-primary print:hidden">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 text-sm text-text-secondary hover:bg-bg-hover transition-colors"
-            onClick={() => setUnscheduledVisible((v) => !v)}
-          >
-            <div className="flex items-center gap-2">
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-text-muted shrink-0 transition-transform duration-200"
-                style={{ transform: unscheduledVisible ? 'rotate(90deg)' : 'rotate(0deg)' }}
-              >
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-high"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              <span className="font-medium">Unscheduled</span>
-              <span className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5">
-                {unscheduledTasks.length}
-              </span>
-              <span className="text-[11px] text-text-muted ml-1">— no due date set</span>
-            </div>
-            <span className="text-xs text-text-muted">{unscheduledVisible ? 'Hide' : 'Show'}</span>
-          </button>
-
-          {unscheduledVisible && (
-            <div className="px-4 pb-4">
-              <UnscheduledList tasks={unscheduledTasks} onReschedule={onReschedule} />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
