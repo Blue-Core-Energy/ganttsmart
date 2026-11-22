@@ -11,7 +11,7 @@ export interface TokenService {
    * user is not connected or Linear rejected the refresh token; other failures are plain Errors
    * and leave the stored tokens alone.
    */
-  getAccessToken(sub: string, opts?: { forceRefresh?: boolean }): Promise<string>;
+  getAccessToken(sub: string, opts?: { forceRefresh?: boolean; rejectedToken?: string }): Promise<string>;
 }
 
 export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now?: () => number }): TokenService {
@@ -32,37 +32,73 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
       next = await oauth.refresh(refreshToken);
     } catch (err) {
       if (!(err instanceof LinearReauthRequired)) throw err;
-      // Another instance may have rotated the tokens after we read them; use theirs if so.
-      const current = await store.getTokens(sub);
-      if (current && current.refreshToken !== refreshToken) return current.accessToken;
-      return reauth(sub);
+      // Conditionally clear tokens only if the stored refresh token still matches the one that failed.
+      // If a concurrent reconnect or another rotation already updated it, do not wipe out the new tokens.
+      const cleared = await store.clearTokens(sub, refreshToken);
+      if (!cleared) {
+        const current = await store.getTokens(sub);
+        if (current && current.refreshToken !== refreshToken) return current.accessToken;
+      }
+      throw new LinearReauthRequired();
     }
     // Linear rotates refresh tokens; if a response ever omits one, keep using the old one.
     const saved = await store.swapTokens(sub, refreshToken, {
       ...next,
       refreshToken: next.refreshToken ?? refreshToken,
     });
+    if (saved === null) {
+      // User disconnected while refresh was in flight; revoke the orphaned grant.
+      await Promise.allSettled([
+        oauth.revoke(next.accessToken),
+        next.refreshToken !== null ? oauth.revoke(next.refreshToken) : undefined,
+      ]);
+      throw new LinearReauthRequired();
+    }
     return saved.accessToken;
   }
 
-  return {
+  /**
+   * Joins a refresh already in flight. If it yields the token the caller just had rejected, retries
+   * once without `rejectedToken` and with a forced refresh, so waiters don't cascade into repeated retries.
+   */
+  async function joinRefresh(
+    sub: string,
+    promise: Promise<string>,
+    opts?: { forceRefresh?: boolean; rejectedToken?: string },
+  ): Promise<string> {
+    const token = await promise;
+    if (opts?.rejectedToken && token === opts.rejectedToken) {
+      return service.getAccessToken(sub, { forceRefresh: true });
+    }
+    return token;
+  }
+
+  const service: TokenService = {
     async getAccessToken(sub, opts) {
       const pending = inFlight.get(sub);
-      if (pending) return pending;
+      if (pending) {
+        return joinRefresh(sub, pending, opts);
+      }
 
       const tokens = await store.getTokens(sub);
-      if (!tokens) return reauth(sub);
+      // Not connected (or disconnected meanwhile): don't clear, a concurrent reconnect must survive.
+      if (!tokens) throw new LinearReauthRequired();
 
+      const rejected = opts?.rejectedToken !== undefined && tokens.accessToken === opts.rejectedToken;
       const expiring = tokens.expiresAt !== null && tokens.expiresAt - now() < REFRESH_MARGIN_MS;
-      if (!opts?.forceRefresh && !expiring) return tokens.accessToken;
+      if (!opts?.forceRefresh && !expiring && !rejected) return tokens.accessToken;
       if (tokens.refreshToken === null) return reauth(sub);
 
       // Re-check: another call may have started a refresh while we awaited the store.
       const raced = inFlight.get(sub);
-      if (raced) return raced;
+      if (raced) {
+        return joinRefresh(sub, raced, opts);
+      }
       const promise = refresh(sub, tokens.refreshToken).finally(() => inFlight.delete(sub));
       inFlight.set(sub, promise);
       return promise;
     },
   };
+
+  return service;
 }

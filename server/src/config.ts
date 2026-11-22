@@ -36,7 +36,7 @@ function parsePort(raw: string | null): number {
   return port;
 }
 
-function parseOrigin(raw: string): string {
+function parseOrigin(raw: string, isProduction: boolean): string {
   let url: URL;
   try {
     url = new URL(raw);
@@ -45,6 +45,9 @@ function parseOrigin(raw: string): string {
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error('Invalid APP_ORIGIN: must be an absolute http(s) URL');
+  }
+  if (isProduction && url.protocol !== 'https:') {
+    throw new Error('Invalid APP_ORIGIN: must be an https URL in production');
   }
   return url.origin;
 }
@@ -81,7 +84,7 @@ export function loadConfig(env: Env): Config {
   return {
     port: parsePort(optional(env, 'PORT')),
     isProduction,
-    appOrigin: parseOrigin(required(env, 'APP_ORIGIN')),
+    appOrigin: parseOrigin(required(env, 'APP_ORIGIN'), isProduction),
     allowedDomain,
     iapAudience,
     devUserEmail,

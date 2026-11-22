@@ -272,9 +272,22 @@ describe('GET /api/linear/authorize', () => {
 
     const cookie = res.headers.get('set-cookie') ?? '';
     const attrs = cookie.split(';').map((s) => s.trim());
-    expect(attrs).toEqual(
-      expect.arrayContaining(['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/api/linear', 'Max-Age=600']),
-    );
+    expect(attrs).toEqual(expect.arrayContaining(['HttpOnly', 'SameSite=Lax', 'Path=/api/linear', 'Max-Age=600']));
+    expect(attrs).not.toContain('Secure');
+  });
+
+  it('includes Secure attribute on cookie when in production', async () => {
+    const prodApp = createApp({
+      config: { ...config, isProduction: true },
+      identify,
+      store: createMemoryStore(),
+      oauth: stubOAuth(),
+    });
+    const res = await prodApp.request('/api/linear/authorize', { headers: authed() });
+    expect(res.status).toBe(302);
+    const cookie = res.headers.get('set-cookie') ?? '';
+    const attrs = cookie.split(';').map((s) => s.trim());
+    expect(attrs).toContain('Secure');
   });
 
   it('uses a different state each time', async () => {
@@ -320,6 +333,93 @@ describe('GET /api/linear/callback', () => {
       expiresAt: null,
     });
     expectCookieCleared(res);
+  });
+
+  it('revokes previous tokens when reconnecting', async () => {
+    const { app, store, oauth } = setup();
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.status).toBe(302);
+    expect(oauth.revoked.sort()).toEqual(['old-access', 'old-refresh']);
+    await expect(store.getTokens(USER.sub)).resolves.toEqual({
+      accessToken: 'access-new',
+      refreshToken: 'refresh-new',
+      expiresAt: null,
+    });
+  });
+
+  it('still succeeds when revoking old tokens fails on reconnect', async () => {
+    const oauth = stubOAuth({
+      revoke: async () => {
+        throw new Error('revoke endpoint down');
+      },
+    });
+    const { app, store } = setup({ oauth });
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/app');
+    await expect(store.getTokens(USER.sub)).resolves.toEqual({
+      accessToken: 'access-new',
+      refreshToken: 'refresh-new',
+      expiresAt: null,
+    });
+  });
+
+  it('does not revoke old tokens when saving the new tokens fails', async () => {
+    const base = createMemoryStore();
+    const store: Store = {
+      ...base,
+      saveTokens: async () => {
+        throw new Error('store down');
+      },
+    };
+    await base.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const { app, oauth } = setup({ store });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.headers.get('location')).toBe('/app?linear_error=exchange_failed');
+    expect(oauth.revoked).toEqual([]);
+  });
+
+  it('does not revoke old tokens that match the newly issued ones', async () => {
+    const oauth = stubOAuth({
+      async exchangeCode() {
+        return { accessToken: 'kept-access', refreshToken: 'refresh-new', expiresAt: null };
+      },
+    });
+    const { app, store } = setup({ oauth });
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'kept-access',
+      refreshToken: 'old-refresh',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.headers.get('location')).toBe('/app');
+    expect(oauth.revoked).toEqual(['old-refresh']);
+  });
+
+  it('revokes a duplicated old token only once', async () => {
+    const { app, store, oauth } = setup();
+    await store.saveTokens(USER.sub, USER.email, {
+      accessToken: 'old-dup',
+      refreshToken: 'old-dup',
+      expiresAt: null,
+    });
+    const res = await callback(app, `code=the-code&state=${STATE}`);
+    expect(res.status).toBe(302);
+    expect(oauth.revoked).toEqual(['old-dup']);
   });
 
   it('preserves linear_oauth_project across callback success and error redirects and clears the cookie', async () => {

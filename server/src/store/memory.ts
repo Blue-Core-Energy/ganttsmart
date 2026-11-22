@@ -39,16 +39,24 @@ export function createMemoryStore(): Store {
       data.linear = copy(tokens);
     },
 
-    async clearTokens(sub) {
+    async clearTokens(sub, expectedRefreshToken) {
       const data = users.get(sub);
+      if (expectedRefreshToken !== undefined) {
+        if (!data || data.linear === null || data.linear.refreshToken !== expectedRefreshToken) {
+          return false;
+        }
+        data.linear = null;
+        return true;
+      }
       if (data) data.linear = null;
+      return true;
     },
 
     // Single-threaded JS: no await between read and write, so this is atomic.
     async swapTokens(sub, expectedRefreshToken, next) {
       const data = users.get(sub);
       const stored = data?.linear ?? null;
-      if (!data || stored === null) return copy(next);
+      if (!data || stored === null) return null;
       if (stored.refreshToken !== expectedRefreshToken) return copy(stored);
       data.linear = copy(next);
       return copy(next);

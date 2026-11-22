@@ -5,6 +5,12 @@ import { describeError, log } from '../log.js';
 import type { BaselineRow, ChangeInput, Store, TransitionInput } from '../store/types.js';
 
 const CHANGES_LIMIT = 50;
+/**
+ * Application-level sanity cap on the number of baselines per request. Note that MAX_BODY_BYTES (1 MiB),
+ * enforced by bodyLimit middleware before parsing, is the binding limit in practice: with row fields
+ * allowing up to MAX_STRING_LENGTH characters, a payload approaching 2000 rows would exceed 1 MiB and
+ * be rejected with HTTP 413 first.
+ */
 const MAX_BASELINE_ROWS = 2000;
 const MAX_STRING_LENGTH = 1000;
 const MAX_BODY_BYTES = 1024 * 1024;

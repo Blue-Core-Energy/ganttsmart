@@ -47,14 +47,19 @@ export interface TransitionInput {
 export interface Store {
   getTokens(sub: string): Promise<LinearTokens | null>;
   saveTokens(sub: string, email: string, tokens: LinearTokens): Promise<void>;
-  clearTokens(sub: string): Promise<void>;
+  /**
+   * Clears stored tokens. If `expectedRefreshToken` is provided, clears only if the stored refresh
+   * token matches it, returning true if cleared and false otherwise. If omitted, clears unconditionally
+   * and returns true.
+   */
+  clearTokens(sub: string, expectedRefreshToken?: string): Promise<boolean>;
   /**
    * Atomically replaces the stored tokens with `next` if the stored refresh token equals
    * `expectedRefreshToken`, and returns `next`. Otherwise another request already renewed them, so
    * the stored tokens are returned untouched. If nothing is stored (the user disconnected
-   * meanwhile), returns `next` without writing.
+   * meanwhile), returns null without writing.
    */
-  swapTokens(sub: string, expectedRefreshToken: string, next: LinearTokens): Promise<LinearTokens>;
+  swapTokens(sub: string, expectedRefreshToken: string, next: LinearTokens): Promise<LinearTokens | null>;
   listBaselines(sub: string, projectId: string): Promise<Baseline[]>;
   /** Inserts rows not yet stored. Existing rows keep their original values and `first_seen_at`. */
   addBaselinesIfAbsent(sub: string, projectId: string, rows: BaselineRow[]): Promise<void>;

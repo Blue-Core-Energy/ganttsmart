@@ -163,4 +163,33 @@ describe('createLinearOAuth', () => {
     }) as typeof globalThis.fetch;
     await expect(oauth(fetch).revoke('access-1')).resolves.toBeUndefined();
   });
+
+  it('revoke cancels the response body on ok and error responses', async () => {
+    let canceledOk = false;
+    let canceledErr = false;
+
+    const okFetch = (async () => {
+      const stream = new ReadableStream({
+        cancel() {
+          canceledOk = true;
+        },
+      });
+      return new Response(stream, { status: 200 });
+    }) as typeof globalThis.fetch;
+
+    await oauth(okFetch).revoke('tok-ok');
+    expect(canceledOk).toBe(true);
+
+    const errFetch = (async () => {
+      const stream = new ReadableStream({
+        cancel() {
+          canceledErr = true;
+        },
+      });
+      return new Response(stream, { status: 400 });
+    }) as typeof globalThis.fetch;
+
+    await oauth(errFetch).revoke('tok-err');
+    expect(canceledErr).toBe(true);
+  });
 });
