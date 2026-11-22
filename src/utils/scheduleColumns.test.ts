@@ -22,6 +22,11 @@ describe('column definitions', () => {
     }
   });
 
+  it('labels the required task column as Issue', () => {
+    const taskCol = COLUMN_DEFS.find((c) => c.key === 'task');
+    expect(taskCol?.label).toBe('Issue');
+  });
+
   it('defaults to task, assignee, status and due date', () => {
     expect(DEFAULT_VISIBLE_COLUMNS).toEqual(['task', 'assignee', 'status', 'due']);
   });

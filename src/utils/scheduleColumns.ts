@@ -14,7 +14,7 @@ export interface ColumnDef {
 
 /** Canonical left-to-right order. Showing or hiding a column never reorders the rest. */
 export const COLUMN_DEFS: ColumnDef[] = [
-  { key: 'task', label: 'Task', defaultWidth: 300, minWidth: 220, required: true },
+  { key: 'task', label: 'Issue', defaultWidth: 300, minWidth: 220, required: true },
   { key: 'assignee', label: 'Assignee', defaultWidth: 128, minWidth: 90 },
   { key: 'status', label: 'Status', defaultWidth: 128, minWidth: 90 },
   { key: 'start', label: 'Start', pickerLabel: 'Start date', defaultWidth: 86, minWidth: 70 },

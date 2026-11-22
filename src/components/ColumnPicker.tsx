@@ -117,9 +117,9 @@ export default function ColumnPicker({ open, onOpenChange, visible, onChange }: 
                 }`}
                 title={
                   def.required
-                    ? 'The task column is always shown'
+                    ? 'The issue column is always shown'
                     : isLastOptional
-                      ? 'Keep at least one column besides Task'
+                      ? 'Keep at least one column besides Issue'
                       : undefined
                 }
               >
