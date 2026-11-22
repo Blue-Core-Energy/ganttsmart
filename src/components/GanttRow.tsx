@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AssignableUser, InlineEditHandlers, Task, TimeScale, WorkflowState } from '@/types';
+import type { AssignableUser, InlineEditHandlers, NonWorkDay, Task, TimeScale, WorkflowState } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
@@ -21,6 +21,7 @@ import {
   isWeekend,
   moveTaskDatesPreservingWorkdays,
 } from '@/utils/date';
+import { buildNonWorkSpans, calendarFor, formatNonWorkRange } from '@/utils/nonWorkDays';
 import { isTaskDone } from '@/utils/tasks';
 import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/workflowStates';
 import CellMenu, { type CellMenuOption } from './CellMenu';
@@ -63,6 +64,8 @@ interface Props {
   /** The chevron is shown but inert — every matching row is revealed while filtering */
   toggleLocked?: boolean;
   onToggleCollapse?: (taskId: string) => void;
+  /** Holidays and PTO: shaded on the row and skipped by workday math for this task's assignee */
+  nonWorkDays?: NonWorkDay[];
 }
 
 const REORDER_MIME = 'application/x-gantt-task';
@@ -99,6 +102,7 @@ export default function GanttRow({
   collapsed = false,
   toggleLocked = false,
   onToggleCollapse,
+  nonWorkDays,
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
@@ -245,9 +249,15 @@ export default function GanttRow({
     return today <= dueDate ? today : dueDate;
   }, [taskStartDate, isDone, overdue, dueDate, today]);
 
+  // Company holidays plus this assignee's PTO: what a bar move skips over
+  const calendar = useMemo(
+    () => (nonWorkDays && nonWorkDays.length > 0 ? calendarFor(nonWorkDays, task.assignee) : undefined),
+    [nonWorkDays, task.assignee],
+  );
+
   const moveDays = Math.round(moveDelta / dayWidth);
   const movedPreview =
-    isMoving && moveDays !== 0 ? moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, moveDays) : null;
+    isMoving && moveDays !== 0 ? moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, moveDays, calendar) : null;
 
   // Apply due date drag (extends/shrinks right edge), start drag (moves left edge), or whole-bar move
   let displayBarWidth = Math.max(barWidth + dragDelta - startDragDelta, dayWidth);
@@ -414,7 +424,7 @@ export default function GanttRow({
         setMoveDelta(0);
 
         if (days !== 0) {
-          const moved = moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, days);
+          const moved = moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, days, calendar);
           const nextDue = formatIsoDate(moved.due);
           const nextStart = formatIsoDate(moved.start);
           if (onReschedule && nextDue !== task.due) {
@@ -429,7 +439,17 @@ export default function GanttRow({
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [dayWidth, dueDate, barStartBaseDate, onReschedule, onRescheduleStart, task.uuid, task.due, task.startDate],
+    [
+      dayWidth,
+      dueDate,
+      barStartBaseDate,
+      calendar,
+      onReschedule,
+      onRescheduleStart,
+      task.uuid,
+      task.due,
+      task.startDate,
+    ],
   );
 
   // Background grid cells (per day/week/month depending on time scale)
@@ -438,6 +458,12 @@ export default function GanttRow({
     isWeekend: timeScale === 'day' && isWeekend(c.start),
     isToday: timeScale === 'day' && c.start.getTime() === today.getTime(),
   }));
+
+  // Holidays / PTO shading: spans positioned over the grid, valid at every zoom level
+  const nonWorkSpans = useMemo(
+    () => (nonWorkDays ? buildNonWorkSpans(nonWorkDays, task.assignee, chartStart, totalDays) : []),
+    [nonWorkDays, task.assignee, chartStart, totalDays],
+  );
 
   // At week/month scale a whole cell spans many days, so mark today with a thin line instead
   const todayOffset = daysBetween(chartStart, today);
@@ -1082,6 +1108,23 @@ export default function GanttRow({
                 style={{ width: d.days * dayWidth }}
               />
             ))}
+            {nonWorkSpans.map((span) => {
+              const entry = nonWorkDays?.find((e) => e.id === span.id);
+              return (
+                <div
+                  key={span.id}
+                  data-non-work-day={span.label}
+                  data-non-work-scope={span.scope}
+                  className={`absolute top-0 bottom-0 ${span.scope === 'pto' ? 'nonwork-pto' : 'nonwork-company'}`}
+                  style={{ left: span.offset * dayWidth, width: span.days * dayWidth }}
+                  title={
+                    span.scope === 'pto'
+                      ? `${span.label} · ${task.assignee} out${entry ? ` · ${formatNonWorkRange(entry)}` : ''}`
+                      : `${span.label}${entry ? ` · ${formatNonWorkRange(entry)}` : ''}`
+                  }
+                />
+              );
+            })}
           </div>
 
           {/* Today marker at week/month scale (cells are too coarse to highlight) */}

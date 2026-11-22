@@ -115,6 +115,233 @@ function trackErrors(page: Page): string[] {
   return errors;
 }
 
+interface MockIssue {
+  id: string;
+  identifier: string;
+  title: string;
+  assignee: string;
+  startOffset: number;
+  dueOffset: number;
+}
+
+interface NonWorkDayEntry {
+  id: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  assigneeName: string | null;
+}
+
+/** Monday of the coming week (or today when it is a Monday), as a day offset from today. */
+function mondayOffset(): number {
+  return (8 - localOffsetDate(0).getDay()) % 7;
+}
+
+/**
+ * Serves the holidays/PTO API from memory so these tests never touch the shared dev server's
+ * calendar (other tests run against the same server in parallel).
+ */
+async function mockNonWorkDayApi(page: Page, initial: NonWorkDayEntry[] = []): Promise<NonWorkDayEntry[]> {
+  const entries = [...initial];
+  let counter = 0;
+  await page.route('**/api/non-work-days**', async (route) => {
+    const req = route.request();
+    if (req.method() === 'GET') {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ nonWorkDays: entries }),
+      });
+      return;
+    }
+    if (req.method() === 'POST') {
+      const body = req.postDataJSON() as Omit<NonWorkDayEntry, 'id'>;
+      const entry: NonWorkDayEntry = {
+        id: `nwd-${++counter}`,
+        label: body.label,
+        startDate: body.startDate,
+        endDate: body.endDate ?? body.startDate,
+        assigneeName: body.assigneeName ?? null,
+      };
+      entries.push(entry);
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({ nonWorkDay: entry }),
+      });
+      return;
+    }
+    const id = decodeURIComponent(new URL(req.url()).pathname.split('/').pop() ?? '');
+    const at = entries.findIndex((e) => e.id === id);
+    if (at >= 0) entries.splice(at, 1);
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+  });
+  return entries;
+}
+
+/** Mocks Linear for one project; returns the due-date and start-date updates the app sends, by issue id. */
+async function mockLinearIssues(page: Page, issues: MockIssue[]) {
+  const dueUpdates: Array<{ id: string; dueDate: string }> = [];
+  const startUpdates: Array<{ id: string; body: string }> = [];
+  const descriptionOf = (i: MockIssue) => `${startTagOffsetDays(i.startOffset)}\n${i.title}`;
+  const currentStartById = new Map(issues.map((i) => [i.id, isoOffsetDays(i.startOffset)]));
+  const currentDueById = new Map(issues.map((i) => [i.id, isoOffsetDays(i.dueOffset)]));
+  const commentsByIssue = new Map<
+    string,
+    Array<{ id: string; body: string; createdAt: string; updatedAt: string }>
+  >();
+
+  await page.addInitScript(() => {
+    localStorage.setItem('gantt_onboarding_done', '1');
+    localStorage.setItem('gantt_theme', 'dark');
+    localStorage.setItem('linear_selected_project', 'proj-1');
+  });
+  await page.route('**/api/me', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+    });
+  });
+  await page.route('**/api/linear/graphql', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      query?: string;
+      variables?: {
+        id?: string;
+        dueDate?: string;
+        description?: string;
+        issueId?: string;
+        commentId?: string;
+        body?: string;
+      };
+    } | null;
+    const query = payload?.query ?? '';
+    const reply = (data: unknown) =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+    const recordScheduleBody = (issueId: string, body: string) => {
+      const m = body.match(/start:\s*(\d{4}-\d{2}-\d{2})/i);
+      if (m && m[1] !== currentStartById.get(issueId)) {
+        currentStartById.set(issueId, m[1]);
+        startUpdates.push({ id: issueId, body });
+      }
+    };
+
+    if (query.includes('projects(')) return reply({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
+    if (query.includes('externalLinks')) {
+      return reply({
+        project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } },
+      });
+    }
+    if (query.includes('project(id:')) {
+      const last = Math.max(...issues.map((i) => i.dueOffset));
+      return reply({
+        project: {
+          name: 'Demo Project',
+          startDate: isoOffsetDays(Math.min(...issues.map((i) => i.startOffset)) - 2),
+          targetDate: isoOffsetDays(last + 10),
+          projectMilestones: { nodes: [] },
+          issues: {
+            nodes: issues.map((i) => ({
+              id: i.id,
+              identifier: i.identifier,
+              title: i.title,
+              description: descriptionOf(i),
+              dueDate: isoOffsetDays(i.dueOffset),
+              url: `https://linear.app/bluecoreenergy/issue/${i.identifier}`,
+              priority: 3,
+              state: { name: 'Todo', type: 'unstarted' },
+              createdAt: '2026-01-01T00:00:00Z',
+              completedAt: null,
+              assignee: { name: i.assignee },
+              team: { id: 'team-1' },
+              projectMilestone: null,
+            })),
+          },
+          doneIssues: { nodes: [] },
+        },
+      });
+    }
+    if (query.includes('relations')) return reply({ issues: { nodes: [] } });
+    if (query.includes('ScheduleComments')) return reply({ issues: { nodes: [] } });
+    if (query.includes('IssueSchedule')) {
+      const issueId = String(payload?.variables?.id ?? '');
+      const issue = issues.find((i) => i.id === issueId);
+      return reply({
+        issue: {
+          description: issue ? descriptionOf(issue) : '',
+          dueDate: currentDueById.get(issueId) ?? null,
+          updatedAt: '2026-01-01T00:00:00Z',
+          comments: { nodes: commentsByIssue.get(issueId) ?? [] },
+        },
+      });
+    }
+    if (query.includes('commentCreate')) {
+      const issueId = String(payload?.variables?.issueId ?? '');
+      const body = String(payload?.variables?.body ?? '');
+      const now = new Date().toISOString();
+      const list = commentsByIssue.get(issueId) ?? [];
+      list.push({ id: `comment-${issueId}-${list.length + 1}`, body, createdAt: now, updatedAt: now });
+      commentsByIssue.set(issueId, list);
+      recordScheduleBody(issueId, body);
+      return reply({ commentCreate: { success: true } });
+    }
+    if (query.includes('commentUpdate')) {
+      const commentId = String(payload?.variables?.commentId ?? '');
+      const body = String(payload?.variables?.body ?? '');
+      for (const [issueId, list] of commentsByIssue.entries()) {
+        const hit = list.find((c) => c.id === commentId);
+        if (hit) {
+          hit.body = body;
+          hit.updatedAt = new Date().toISOString();
+          recordScheduleBody(issueId, body);
+          break;
+        }
+      }
+      return reply({ commentUpdate: { success: true } });
+    }
+    if (query.includes('workflowStates')) {
+      return reply({ workflowStates: { nodes: [{ id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 }] } });
+    }
+    if (query.includes('issue(id:')) {
+      const issue = issues.find((i) => i.id === payload?.variables?.id);
+      return reply({ issue: { description: issue ? descriptionOf(issue) : '' } });
+    }
+    if (query.includes('issueUpdate')) {
+      const { id = '', dueDate, description } = payload?.variables ?? {};
+      if (dueDate) {
+        currentDueById.set(id, dueDate);
+        dueUpdates.push({ id, dueDate });
+      }
+      if (description) startUpdates.push({ id, body: description });
+      return reply({ issueUpdate: { success: true } });
+    }
+    return route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+  });
+
+  return { dueUpdates, startUpdates };
+}
+
+async function addNonWorkDayViaDialog(
+  page: Page,
+  entry: { label: string; start: string; end?: string; person?: string },
+): Promise<void> {
+  const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
+  await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Name', { exact: true }).fill(entry.label);
+  await dialog.getByLabel('Start date', { exact: true }).fill(entry.start);
+  if (entry.end) await dialog.getByLabel(/^End date/).fill(entry.end);
+  if (entry.person) {
+    await dialog.getByLabel('Applies to', { exact: true }).selectOption('person');
+    await dialog.getByLabel('Person', { exact: true }).fill(entry.person);
+  }
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(dialog.locator(`[data-non-work-entry="${entry.label}"]`)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+}
+
 test.describe('GanttSmart GCP app', () => {
   test.beforeEach(async ({ page }) => {
     defaultScheduleMock = createScheduleMock();
@@ -4861,6 +5088,110 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('adds a company holiday and per-person PTO, shades the timeline, and snaps affected tasks forward', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const mon = mondayOffset();
+    const wed = mon + 2;
+    const thu = mon + 3;
+    const fri = mon + 4;
+
+    const { dueUpdates, startUpdates } = await mockLinearIssues(page, [
+      // Due on the holiday (Wed): the due date should move to Thu
+      {
+        id: 'uuid-201',
+        identifier: 'ENG-201',
+        title: 'Due on holiday',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: wed,
+      },
+      // Starts on the holiday: the start should move to Thu
+      {
+        id: 'uuid-202',
+        identifier: 'ENG-202',
+        title: 'Starts on holiday',
+        assignee: 'Nate Jones',
+        startOffset: wed,
+        dueOffset: fri,
+      },
+      // Entirely before the holiday: untouched
+      {
+        id: 'uuid-203',
+        identifier: 'ENG-203',
+        title: 'Before holiday',
+        assignee: 'Nate Jones',
+        startOffset: mon,
+        dueOffset: mon + 1,
+      },
+    ]);
+    const entries = await mockNonWorkDayApi(page);
+
+    await page.goto('/app');
+    const barWidth = async (id: string) => (await page.locator(`[data-task-bar="${id}"]`).boundingBox())!.width;
+    await expect(page.locator('[data-task-bar="ENG-201"]')).toBeVisible();
+    await expect(page.locator('[data-non-work-day]')).toHaveCount(0);
+    const dayWidth = 28;
+    expect(await barWidth('ENG-201')).toBeCloseTo(3 * dayWidth, 0); // Mon–Wed
+    expect(await barWidth('ENG-202')).toBeCloseTo(3 * dayWidth, 0); // Wed–Fri
+
+    // 1. Company-wide holiday
+    await addNonWorkDayViaDialog(page, { label: 'Company Retreat', start: isoOffsetDays(wed) });
+    expect(entries).toEqual([
+      expect.objectContaining({
+        label: 'Company Retreat',
+        startDate: isoOffsetDays(wed),
+        endDate: isoOffsetDays(wed),
+        assigneeName: null,
+      }),
+    ]);
+
+    // Shaded on every row and in the date ruler, with the holiday name on hover
+    for (const id of ['ENG-201', 'ENG-202', 'ENG-203']) {
+      const shade = page.locator(`tr[data-task-id="${id}"] [data-non-work-day="Company Retreat"]`);
+      await expect(shade).toHaveCount(1);
+      await expect(shade).toHaveAttribute('data-non-work-scope', 'company');
+      await expect(shade).toHaveAttribute('title', /Company Retreat/);
+    }
+    const headerShade = page.locator('[data-header-holiday="Company Retreat"]');
+    await expect(headerShade).toHaveCount(1);
+    await expect(headerShade).toHaveAttribute('title', 'Company Retreat');
+
+    // Two tasks were snapped, saved to Linear, and announced with an Undo
+    await expect(page.getByText('Company Retreat added: moved 2 tasks to the next workday')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
+    await expect.poll(() => dueUpdates).toEqual([{ id: 'uuid-201', dueDate: isoOffsetDays(thu) }]);
+    await expect.poll(() => startUpdates.map((u) => u.id)).toEqual(['uuid-202']);
+    expect(startUpdates[0].body).toContain(`start: ${isoOffsetDays(thu)}`);
+    await expect.poll(() => barWidth('ENG-201')).toBeCloseTo(4 * dayWidth, 0); // Mon–Thu
+    await expect.poll(() => barWidth('ENG-202')).toBeCloseTo(2 * dayWidth, 0); // Thu–Fri
+    expect(await barWidth('ENG-203')).toBeCloseTo(2 * dayWidth, 0);
+
+    // 2. Per-person PTO for Nate on Thu: only Nate's tasks are affected
+    await addNonWorkDayViaDialog(page, { label: 'Nate PTO', start: isoOffsetDays(thu), person: 'Nate Jones' });
+    expect(entries[1]).toMatchObject({ label: 'Nate PTO', assigneeName: 'Nate Jones' });
+
+    for (const id of ['ENG-202', 'ENG-203']) {
+      const shade = page.locator(`tr[data-task-id="${id}"] [data-non-work-day="Nate PTO"]`);
+      await expect(shade).toHaveCount(1);
+      await expect(shade).toHaveAttribute('data-non-work-scope', 'pto');
+      await expect(shade).toHaveAttribute('title', /Nate PTO · Nate Jones out/);
+    }
+    await expect(page.locator('tr[data-task-id="ENG-201"] [data-non-work-day="Nate PTO"]')).toHaveCount(0);
+    // PTO is not a company holiday, so the date ruler does not mark it
+    await expect(page.locator('[data-header-holiday]')).toHaveCount(1);
+
+    // ENG-202 started on Thu (snapped earlier), now Nate's PTO: Thu -> Fri
+    await expect(page.getByText('Nate PTO added: moved 1 task to the next workday')).toBeVisible();
+    await expect.poll(() => startUpdates.map((u) => u.id)).toEqual(['uuid-202', 'uuid-202']);
+    expect(startUpdates[1].body).toContain(`start: ${isoOffsetDays(fri)}`);
+    expect(dueUpdates).toEqual([{ id: 'uuid-201', dueDate: isoOffsetDays(thu) }]); // Andrew's task is untouched
+    await expect.poll(() => barWidth('ENG-202')).toBeCloseTo(1 * dayWidth, 0); // Fri only
+
+    expect(errors).toEqual([]);
+  });
+
   test('keeps hierarchy intact when reordering rows with the keyboard', async ({ page }) => {
     const errors = trackErrors(page);
     await mockSubtaskProject(page);
@@ -4892,6 +5223,224 @@ test.describe('GanttSmart GCP app', () => {
     await expect.poll(order).toEqual(['ENG-220', 'ENG-210', 'ENG-200', 'ENG-202', 'ENG-201', 'ENG-203']);
 
     expect(errors).toEqual([]);
+  });
+
+  test('undoes the auto-snap, lists and removes entries, and leaves an add with nothing to snap quiet', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const mon = mondayOffset();
+    const wed = mon + 2;
+
+    const { dueUpdates } = await mockLinearIssues(page, [
+      {
+        id: 'uuid-211',
+        identifier: 'ENG-211',
+        title: 'Due on holiday',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: wed,
+      },
+    ]);
+    const entries = await mockNonWorkDayApi(page);
+
+    await page.goto('/app');
+    const bar = page.locator('[data-task-bar="ENG-211"]');
+    await expect(bar).toBeVisible();
+
+    // Nothing lands on a far-away holiday: a plain confirmation, no snapping
+    await addNonWorkDayViaDialog(page, {
+      label: 'Far Future',
+      start: isoOffsetDays(mon + 40),
+      end: isoOffsetDays(mon + 41),
+    });
+    await expect(page.getByText('Added Far Future')).toBeVisible();
+    expect(dueUpdates).toEqual([]);
+
+    await addNonWorkDayViaDialog(page, { label: 'Retreat', start: isoOffsetDays(wed) });
+    await expect.poll(() => dueUpdates.length).toBe(1);
+    await expect.poll(async () => (await bar.boundingBox())!.width).toBeCloseTo(4 * 28, 0);
+
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByText('Undone')).toHaveCount(0); // the toast action, not Ctrl+Z, so no extra toast
+    await expect.poll(async () => (await bar.boundingBox())!.width).toBeCloseTo(3 * 28, 0);
+    await expect.poll(() => dueUpdates.length).toBe(2);
+    expect(dueUpdates[1]).toEqual({ id: 'uuid-211', dueDate: isoOffsetDays(wed) });
+
+    // The manager lists both entries; removing one clears its shading
+    await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
+    await expect(dialog.locator('[data-non-work-entry]')).toHaveCount(2);
+    await expect(dialog.locator('[data-non-work-entry="Far Future"]')).toContainText(' – ');
+    await dialog.getByRole('button', { name: 'Remove Retreat' }).click();
+    await expect(dialog.locator('[data-non-work-entry="Retreat"]')).toHaveCount(0);
+    await expect.poll(() => entries.map((e) => e.label)).toEqual(['Far Future']);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('[data-non-work-day="Retreat"]')).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('validates the Holidays / PTO form before saving', async ({ page }) => {
+    const errors = trackErrors(page);
+    const mon = mondayOffset();
+    await mockLinearIssues(page, [
+      {
+        id: 'uuid-221',
+        identifier: 'ENG-221',
+        title: 'Any task',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: mon + 1,
+      },
+    ]);
+    const entries = await mockNonWorkDayApi(page);
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-221"]')).toBeVisible();
+    await page.getByRole('button', { name: /Holidays \/ PTO/ }).click();
+    const dialog = page.getByRole('dialog', { name: 'Holidays and PTO' });
+    const add = dialog.getByRole('button', { name: 'Add', exact: true });
+
+    await add.click();
+    await expect(dialog.getByRole('alert')).toContainText('Give the entry a name');
+
+    await dialog.getByLabel('Name', { exact: true }).fill('Trip');
+    await add.click();
+    await expect(dialog.getByRole('alert')).toContainText('valid start date');
+
+    await dialog.getByLabel('Start date', { exact: true }).fill(isoOffsetDays(mon + 5));
+    await dialog.getByLabel('Applies to', { exact: true }).selectOption('person');
+    await add.click();
+    await expect(dialog.getByRole('alert')).toContainText('Pick or type the person');
+    expect(entries).toEqual([]);
+
+    // Keyboard shortcuts stay quiet while the dialog is open, and Escape closes it
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('skips holidays and PTO when moving bars and counting workdays in the detail panel', async ({ page }) => {
+    const errors = trackErrors(page);
+    const mon = mondayOffset();
+    const wed = mon + 2;
+
+    const { dueUpdates, startUpdates } = await mockLinearIssues(page, [
+      // 2 workdays, moved 2 days right: Wed is a holiday so it runs Thu–Fri
+      {
+        id: 'uuid-231',
+        identifier: 'ENG-231',
+        title: 'Drag me',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: mon + 1,
+      },
+      // Mon–Fri around the Wed holiday: 4 workdays
+      {
+        id: 'uuid-232',
+        identifier: 'ENG-232',
+        title: 'Spans holiday',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: mon + 4,
+      },
+      // Same span for Nate, who is also out Tue: 3 workdays
+      {
+        id: 'uuid-233',
+        identifier: 'ENG-233',
+        title: 'Spans PTO',
+        assignee: 'Nate Jones',
+        startOffset: mon,
+        dueOffset: mon + 4,
+      },
+    ]);
+    await mockNonWorkDayApi(page, [
+      {
+        id: 'h1',
+        label: 'Company Retreat',
+        startDate: isoOffsetDays(wed),
+        endDate: isoOffsetDays(wed),
+        assigneeName: null,
+      },
+      {
+        id: 'p1',
+        label: 'Nate PTO',
+        startDate: isoOffsetDays(mon + 1),
+        endDate: isoOffsetDays(mon + 1),
+        assigneeName: 'Nate Jones',
+      },
+    ]);
+
+    await page.goto('/app');
+    const bar = page.locator('[data-task-bar="ENG-231"]');
+    await expect(bar).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-233"] [data-non-work-day="Nate PTO"]')).toHaveCount(1);
+
+    // Duration in the detail panel excludes the holiday, and PTO only for Nate
+    await page.locator('[data-task-bar="ENG-232"]').click();
+    await expect(page.getByText('4 workdays')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('4 workdays')).toHaveCount(0);
+    await page.locator('[data-task-bar="ENG-233"]').click();
+    await expect(page.getByText('3 workdays')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('3 workdays')).toHaveCount(0);
+
+    // Dragging Mon–Tue two days right lands the start on the holiday, so it snaps to Thu and ends Fri
+    const box = (await bar.boundingBox())!;
+    const startX = box.x + box.width / 2;
+    const startY = box.y + box.height / 2;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(startX + 56, startY, { steps: 4 });
+    // The live preview already shows the calendar-aware result
+    await expect(bar).toContainText('(2wd)');
+    await page.mouse.up();
+
+    await expect.poll(() => dueUpdates).toEqual([{ id: 'uuid-231', dueDate: isoOffsetDays(mon + 4) }]);
+    await expect.poll(() => startUpdates.length).toBe(1);
+    expect(startUpdates[0].body).toContain(`start: ${isoOffsetDays(mon + 3)}`);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('shares the holidays / PTO calendar through the server API', async ({ request, baseURL }) => {
+    const origin = baseURL ?? 'http://127.0.0.1:4173';
+    const headers = { origin, 'content-type': 'application/json' };
+    const label = `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const created = await request.post('/api/non-work-days', {
+      headers,
+      data: { label, startDate: '2099-11-26', endDate: '2099-11-27', assigneeName: 'Alex Rivera' },
+    });
+    expect(created.status()).toBe(201);
+    const { nonWorkDay } = (await created.json()) as { nonWorkDay: NonWorkDayEntry };
+    expect(nonWorkDay).toMatchObject({
+      label,
+      startDate: '2099-11-26',
+      endDate: '2099-11-27',
+      assigneeName: 'Alex Rivera',
+    });
+
+    try {
+      const listed = await request.get('/api/non-work-days');
+      expect(((await listed.json()) as { nonWorkDays: NonWorkDayEntry[] }).nonWorkDays).toContainEqual(nonWorkDay);
+
+      const bad = await request.post('/api/non-work-days', { headers, data: { label, startDate: '2099-02-31' } });
+      expect(bad.status()).toBe(400);
+      const crossOrigin = await request.post('/api/non-work-days', {
+        headers: { ...headers, origin: 'https://evil.example.com' },
+        data: { label, startDate: '2099-11-26' },
+      });
+      expect(crossOrigin.status()).toBe(403);
+    } finally {
+      const removed = await request.delete(`/api/non-work-days/${nonWorkDay.id}`, { headers });
+      expect(removed.status()).toBe(200);
+    }
+    const gone = await request.delete(`/api/non-work-days/${nonWorkDay.id}`, { headers });
+    expect(gone.status()).toBe(404);
   });
 });
 

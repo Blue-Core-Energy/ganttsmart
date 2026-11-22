@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { InlineEditHandlers, Milestone, Task, TimeScale } from '@/types';
+import type { InlineEditHandlers, Milestone, NonWorkDay, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
-import { buildTimeCells, daysBetween, isWeekend, startOfWeek } from '@/utils/date';
+import { buildTimeCells, daysBetween, formatIsoDate, isWeekend, startOfWeek } from '@/utils/date';
 import { buildArrowPath, resolveDependencyEdges } from '@/utils/dependencyArrows';
 import { loadCollapsedParents, saveCollapsedParents } from '@/utils/collapsedParents';
 import {
@@ -60,6 +60,8 @@ interface Props {
   projectName?: string;
   /** Show every row even under a collapsed parent — set while search or filters are narrowing the list */
   ignoreCollapsed?: boolean;
+  /** Shared holidays and PTO: shaded on the timeline and skipped by workday math. Omit for none. */
+  nonWorkDays?: NonWorkDay[];
 }
 
 // Resize handle component
@@ -119,6 +121,7 @@ export default function GanttChart({
   onSelectProject,
   projectName,
   ignoreCollapsed = false,
+  nonWorkDays,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(loadVisibleColumns);
@@ -427,11 +430,14 @@ export default function GanttChart({
           };
           document.addEventListener('mouseup', resetBase);
         }
-        setColWidths((prev) => {
-          const next = { ...prev, [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth) };
-          liveWidthsRef.current = next;
-          return next;
-        });
+        // Update the ref now rather than inside a state updater: React may defer the updater past
+        // the mouseup, and the persisted widths would then miss the last move.
+        const next = {
+          ...liveWidthsRef.current,
+          [col]: Math.max(baseWidthsRef.current[col] + delta, getColumnDef(col).minWidth),
+        };
+        liveWidthsRef.current = next;
+        setColWidths(next);
       };
     },
     [colWidths],
@@ -592,11 +598,17 @@ export default function GanttChart({
       else topCells.push({ label, days: c.days });
     }
 
+    // Company-wide days off get a header tint and the holiday name as a tooltip (day scale only)
+    const companyEntries = timeScale === 'day' ? (nonWorkDays ?? []).filter((e) => !e.assigneeName) : [];
+
     const bottomCells = cells.map((c) => {
       const end = new Date(c.start);
       end.setDate(end.getDate() + c.days - 1);
+      const iso = formatIsoDate(c.start);
+      const holidays = companyEntries.filter((e) => iso >= e.startDate && iso <= e.endDate).map((e) => e.label);
       return {
         days: c.days,
+        holiday: holidays.length > 0 ? holidays.join(', ') : undefined,
         isWeekend: timeScale === 'day' && isWeekend(c.start),
         isCurrent: today >= c.start && today <= end,
         label:
@@ -610,7 +622,7 @@ export default function GanttChart({
     });
 
     return { topCells, bottomCells };
-  }, [chartStart, totalDays, today, timeScale]);
+  }, [chartStart, totalDays, today, timeScale, nonWorkDays]);
 
   // Milestone positions (memoized)
   const milestonesInRange = useMemo(
@@ -964,7 +976,9 @@ export default function GanttChart({
                           : d.isWeekend
                             ? 'bg-bg-hover/40 text-text-muted'
                             : 'text-text-muted'
-                      }`}
+                      } ${d.holiday ? 'nonwork-company' : ''}`}
+                      data-header-holiday={d.holiday}
+                      title={d.holiday}
                       style={{
                         width: d.days * dayWidth,
                       }}
@@ -1024,6 +1038,7 @@ export default function GanttChart({
                 isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
                 isHighlighted={highlightedTaskIds?.has(task.id)}
+                nonWorkDays={nonWorkDays}
               />
             ))}
           </tbody>

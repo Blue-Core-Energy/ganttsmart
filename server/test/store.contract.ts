@@ -216,5 +216,105 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
         ).resolves.toBeUndefined();
       });
     });
+
+    describe('non-work days', () => {
+      // The calendar is shared by every user, so a shared backend (the Firestore emulator) can hold
+      // entries from other tests: these look entries up by the unique label of this run.
+      let tag: string;
+      beforeEach(() => {
+        tag = alice.replace('alice-', 'nwd-');
+      });
+      const mine = async () => (await store.listNonWorkDays()).filter((e) => e.label.startsWith(tag));
+
+      it('adds a company-wide entry and lists it with its generated id', async () => {
+        const added = await store.addNonWorkDay(alice, {
+          label: `${tag} Thanksgiving`,
+          startDate: '2026-11-26',
+          endDate: '2026-11-26',
+          assigneeName: null,
+        });
+        expect(added.id).toMatch(/^[A-Za-z0-9_-]{1,128}$/);
+        expect(added).toEqual({
+          id: added.id,
+          label: `${tag} Thanksgiving`,
+          startDate: '2026-11-26',
+          endDate: '2026-11-26',
+          assigneeName: null,
+        });
+        expect(await mine()).toEqual([added]);
+      });
+
+      it('stores a per-assignee range and gives every entry its own id', async () => {
+        const a = await store.addNonWorkDay(alice, {
+          label: `${tag} Alex PTO`,
+          startDate: '2026-12-21',
+          endDate: '2026-12-31',
+          assigneeName: 'Alex Rivera',
+        });
+        const b = await store.addNonWorkDay(alice, {
+          label: `${tag} Alex PTO`,
+          startDate: '2026-12-21',
+          endDate: '2026-12-31',
+          assigneeName: 'Alex Rivera',
+        });
+        expect(a.id).not.toBe(b.id);
+        expect((await mine()).map((e) => e.assigneeName)).toEqual(['Alex Rivera', 'Alex Rivera']);
+      });
+
+      it('lists by start date, then end date, then label', async () => {
+        const add = (label: string, startDate: string, endDate: string) =>
+          store.addNonWorkDay(alice, { label: `${tag} ${label}`, startDate, endDate, assigneeName: null });
+        await add('c', '2026-12-24', '2026-12-26');
+        await add('b', '2026-12-24', '2026-12-24');
+        await add('z', '2026-11-26', '2026-11-26');
+        await add('a', '2026-12-24', '2026-12-24');
+        expect((await mine()).map((e) => e.label.slice(tag.length + 1))).toEqual(['z', 'a', 'b', 'c']);
+      });
+
+      it('shares the calendar between users', async () => {
+        const added = await store.addNonWorkDay(alice, {
+          label: `${tag} Shutdown`,
+          startDate: '2026-12-28',
+          endDate: '2026-12-31',
+          assigneeName: null,
+        });
+        // The list takes no user: bob sees alice's entry and can remove it
+        expect(await mine()).toEqual([added]);
+        expect(await store.deleteNonWorkDay(added.id)).toBe(true);
+        expect(await mine()).toEqual([]);
+        expect(bob).toBeTruthy();
+      });
+
+      it('deletes only the named entry and reports a missing one', async () => {
+        const keep = await store.addNonWorkDay(alice, {
+          label: `${tag} keep`,
+          startDate: '2026-11-26',
+          endDate: '2026-11-26',
+          assigneeName: null,
+        });
+        const drop = await store.addNonWorkDay(alice, {
+          label: `${tag} drop`,
+          startDate: '2026-11-27',
+          endDate: '2026-11-27',
+          assigneeName: null,
+        });
+        expect(await store.deleteNonWorkDay(drop.id)).toBe(true);
+        expect(await mine()).toEqual([keep]);
+        expect(await store.deleteNonWorkDay(drop.id)).toBe(false);
+        expect(await store.deleteNonWorkDay('does-not-exist')).toBe(false);
+      });
+
+      it('does not let callers mutate stored entries through returned objects', async () => {
+        const added = await store.addNonWorkDay(alice, {
+          label: `${tag} immutable`,
+          startDate: '2026-11-26',
+          endDate: '2026-11-26',
+          assigneeName: null,
+        });
+        added.label = 'changed';
+        (await mine())[0].label = 'changed too';
+        expect((await mine())[0].label).toBe(`${tag} immutable`);
+      });
+    });
   });
 }

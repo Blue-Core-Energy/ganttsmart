@@ -1,5 +1,6 @@
 import type { Backend } from '../types';
 import { history } from './history';
+import { nonWorkDays } from './nonWorkDays';
 import { useSupabaseAuth } from './useSupabaseAuth';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
@@ -16,4 +17,5 @@ export const backend: Backend = {
     });
   },
   history,
+  nonWorkDays,
 };

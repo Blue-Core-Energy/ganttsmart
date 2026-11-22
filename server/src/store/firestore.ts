@@ -1,8 +1,11 @@
 import { FieldValue, type DocumentReference, type Firestore } from '@google-cloud/firestore';
-import type { Baseline, ChangeEvent, LinearTokens, Store } from './types.js';
+import { sortNonWorkDays } from './nonWorkDays.js';
+import type { Baseline, ChangeEvent, LinearTokens, NonWorkDay, Store } from './types.js';
 
 /** gRPC status code Firestore returns from create() when the document already exists. */
 const ALREADY_EXISTS = 6;
+/** gRPC status code Firestore returns from delete({ exists: true }) when the document is missing. */
+const NOT_FOUND = 5;
 
 interface UserDoc {
   email?: string;
@@ -19,9 +22,18 @@ interface ChangeDoc extends ChangeEvent {
   sort_key: string;
 }
 
+interface NonWorkDayDoc extends Omit<NonWorkDay, 'id'> {
+  created_by: string;
+  created_at: string;
+}
+
 function toTokens(value: LinearTokens | null | undefined): LinearTokens | null {
   if (!value) return null;
   return { accessToken: value.accessToken, refreshToken: value.refreshToken, expiresAt: value.expiresAt };
+}
+
+function isNotFound(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === NOT_FOUND;
 }
 
 function isAlreadyExists(err: unknown): boolean {
@@ -55,6 +67,7 @@ async function runWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
  * - users/{sub}/baselines/{issueId}
  * - users/{sub}/issueChanges/{issueId}/events/{auto} (keyed by issue so ordering needs no composite index)
  * - users/{sub}/transitions/{auto}
+ * - nonWorkDays/{auto}: the team's shared holidays and PTO (not per user)
  */
 export function createFirestoreStore(db: Firestore): Store {
   let seq = 0;
@@ -174,6 +187,47 @@ export function createFirestoreStore(db: Firestore): Store {
         to_status: t.toStatus,
         transitioned_at: new Date().toISOString(),
       });
+    },
+
+    async listNonWorkDays() {
+      const snap = await db.collection('nonWorkDays').get();
+      return sortNonWorkDays(
+        snap.docs.map((doc) => {
+          const d = doc.data() as NonWorkDayDoc;
+          return {
+            id: doc.id,
+            label: d.label,
+            startDate: d.startDate,
+            endDate: d.endDate,
+            assigneeName: d.assigneeName ?? null,
+          };
+        }),
+      );
+    },
+
+    async addNonWorkDay(sub, input) {
+      const doc: NonWorkDayDoc = {
+        label: input.label,
+        startDate: input.startDate,
+        endDate: input.endDate,
+        assigneeName: input.assigneeName,
+        created_by: sub,
+        created_at: new Date().toISOString(),
+      };
+      const ref = await db.collection('nonWorkDays').add(doc);
+      return { id: ref.id, ...input };
+    },
+
+    async deleteNonWorkDay(id) {
+      const ref = db.collection('nonWorkDays').doc(id);
+      // delete() with exists:true fails with NOT_FOUND, so a missing id is reported without a read
+      try {
+        await ref.delete({ exists: true });
+        return true;
+      } catch (err) {
+        if (isNotFound(err)) return false;
+        throw err;
+      }
     },
   };
 }

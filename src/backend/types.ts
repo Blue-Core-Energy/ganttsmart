@@ -1,3 +1,5 @@
+import type { NewNonWorkDay, NonWorkDay } from '@/types';
+
 export interface TaskBaseline {
   issue_id: string;
   planned_start: string | null;
@@ -51,6 +53,16 @@ export interface HistoryApi {
   getTaskHistory(issueId: string): Promise<ChangeEvent[]>;
 }
 
+/**
+ * The shared calendar of holidays, shutdowns and PTO. All methods throw on failure.
+ * Entries are stored on the backend so everyone using it sees the same calendar.
+ */
+export interface NonWorkDaysApi {
+  list(): Promise<NonWorkDay[]>;
+  add(entry: NewNonWorkDay): Promise<NonWorkDay>;
+  remove(id: string): Promise<void>;
+}
+
 export interface Backend {
   kind: 'supabase' | 'gcp';
   capabilities: {
@@ -63,4 +75,5 @@ export interface Backend {
   useAuth(): AuthState;
   linearRequest(token: string, body: { query: string; variables?: Record<string, unknown> }): Promise<Response>;
   history: HistoryApi;
+  nonWorkDays: NonWorkDaysApi;
 }

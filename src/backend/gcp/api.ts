@@ -69,6 +69,23 @@ export async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** POST a JSON body and parse the JSON reply; throws on any non-2xx response. */
+export async function postJsonForJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await apiFetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw await failure(res);
+  return (await res.json()) as T;
+}
+
+/** DELETE; throws on any non-2xx response. */
+export async function deleteRequest(path: string): Promise<void> {
+  const res = await apiFetch(path, { method: 'DELETE' });
+  if (!res.ok) throw await failure(res);
+}
+
 /** POST a JSON body; throws on any non-2xx response. */
 export async function postJson(path: string, body?: unknown): Promise<void> {
   const res = await apiFetch(path, {

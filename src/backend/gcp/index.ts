@@ -1,6 +1,7 @@
 import type { Backend } from '../types';
 import { apiFetch } from './api';
 import { history } from './history';
+import { nonWorkDays } from './nonWorkDays';
 import { useGcpAuth } from './useGcpAuth';
 
 export const backend: Backend = {
@@ -16,4 +17,5 @@ export const backend: Backend = {
     });
   },
   history,
+  nonWorkDays,
 };

@@ -19,10 +19,11 @@ import {
   updateMilestoneTargetDate,
 } from '@/api/linear';
 import { toast, toastError, toastSuccess } from '@/components/toastStore';
-import type { AssignableUser, Filters, Milestone, Project, Task, WorkflowState } from '@/types';
+import type { AssignableUser, Filters, Milestone, NonWorkDay, Project, Task, WorkflowState } from '@/types';
 import { buildProjectDeepLink, resolveProjectId } from '@/utils/projectDeepLink';
 import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWidth } from '@/utils/timelineZoom';
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
+import { planNonWorkDaySnap, type ScheduleSnap } from '@/utils/nonWorkDays';
 import { applyCustomOrder, filterTasks, isTaskDone, reorderWithinHierarchy } from '@/utils/tasks';
 import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
 
@@ -480,6 +481,83 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
       }
     },
     [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+  );
+
+  /**
+   * Moves editable tasks whose start or due date sits on the just-added non-work day(s) to the next
+   * workday: updates the chart right away, saves to Linear, and offers one Undo for the batch.
+   * `entries` is the whole calendar including `added`. Returns the snaps that were saved.
+   */
+  const snapTasksToNonWorkDays = useCallback(
+    async (entries: NonWorkDay[], added: NonWorkDay): Promise<ScheduleSnap[]> => {
+      if (!linearToken) return [];
+      const plan = planNonWorkDaySnap(tasks, entries, added);
+      if (plan.length === 0) return [];
+
+      const prevTasks = tasks;
+      const planByUuid = new Map(plan.map((p) => [p.task.uuid, p]));
+      const applySnap = (t: Task, p: ScheduleSnap): Task => ({
+        ...t,
+        ...(p.startDate ? { startDate: p.startDate } : {}),
+        ...(p.due ? { due: p.due, isDueImplicit: undefined } : {}),
+      });
+      setTasks((prev) => prev.map((t) => (planByUuid.has(t.uuid) ? applySnap(t, planByUuid.get(t.uuid)!) : t)));
+
+      pendingMutations.current++;
+      try {
+        const settled = await Promise.allSettled(
+          plan.map(async (p) => {
+            if (p.due) await updateIssueDueDate(linearToken, p.task.uuid, p.due);
+            if (p.startDate) await updateIssueStartDate(linearToken, p.task.uuid, p.startDate);
+          }),
+        );
+        const saved = plan.filter((_, i) => settled[i].status === 'fulfilled');
+        const failed = plan.filter((_, i) => settled[i].status === 'rejected');
+
+        if (failed.length > 0) {
+          const failedUuids = new Set(failed.map((p) => p.task.uuid));
+          setTasks((prev) =>
+            prev.map((t) => (failedUuids.has(t.uuid) ? (prevTasks.find((o) => o.uuid === t.uuid) ?? t) : t)),
+          );
+          toastError(`Could not move ${failed.length} ${failed.length === 1 ? 'task' : 'tasks'} off ${added.label}`);
+        }
+        if (saved.length === 0) return [];
+
+        pushUndo(prevTasks, `${saved.length} ${saved.length === 1 ? 'task' : 'tasks'} moved off ${added.label}`);
+        const savedByUuid = new Map(saved.map((p) => [p.task.uuid, p]));
+        toast(
+          `${added.label} added: moved ${saved.length} ${saved.length === 1 ? 'task' : 'tasks'} to the next workday`,
+          'success',
+          {
+            label: 'Undo',
+            onClick: () => {
+              setTasks((prev) =>
+                prev.map((t) => {
+                  const p = savedByUuid.get(t.uuid);
+                  if (!p) return t;
+                  const original = p.task;
+                  return {
+                    ...t,
+                    ...(p.startDate ? { startDate: original.startDate } : {}),
+                    ...(p.due ? { due: original.due, isDueImplicit: original.isDueImplicit } : {}),
+                  };
+                }),
+              );
+              for (const p of saved) {
+                if (p.due) updateIssueDueDate(linearToken, p.task.uuid, p.task.due).catch(() => {});
+                if (p.startDate && p.task.startDate) {
+                  updateIssueStartDate(linearToken, p.task.uuid, p.task.startDate).catch(() => {});
+                }
+              }
+            },
+          },
+        );
+        return saved;
+      } finally {
+        pendingMutations.current--;
+      }
+    },
+    [linearToken, tasks, pushUndo],
   );
 
   // Optimistic milestone move (drag on the chart) with rollback + undo
@@ -1002,6 +1080,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     zoomOut,
     reschedule,
     rescheduleStart,
+    snapTasksToNonWorkDays,
     updateMilestoneDate,
     cycleStatus,
     loadTeamWorkflowStates,

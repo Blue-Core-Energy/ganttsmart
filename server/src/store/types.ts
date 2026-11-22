@@ -43,7 +43,23 @@ export interface TransitionInput {
   toStatus: string;
 }
 
-/** Per-user persistence for Linear tokens and planning history. `sub` is the user's stable identity. */
+/** A holiday, shutdown or vacation shared by the whole team. Without `assigneeName` it is company-wide. */
+export interface NonWorkDay {
+  id: string;
+  label: string;
+  /** `YYYY-MM-DD`, inclusive. */
+  startDate: string;
+  /** `YYYY-MM-DD`, inclusive; equal to `startDate` for a single day. */
+  endDate: string;
+  assigneeName: string | null;
+}
+
+export type NonWorkDayInput = Omit<NonWorkDay, 'id'>;
+
+/**
+ * Persistence for Linear tokens and planning history (per user; `sub` is the user's stable identity)
+ * and the non-work-day calendar (shared by everyone).
+ */
 export interface Store {
   getTokens(sub: string): Promise<LinearTokens | null>;
   saveTokens(sub: string, email: string, tokens: LinearTokens): Promise<void>;
@@ -67,4 +83,10 @@ export interface Store {
   /** The issue's changes, newest first, at most `limit`. */
   listChanges(sub: string, issueId: string, limit: number): Promise<ChangeEvent[]>;
   addTransition(sub: string, t: TransitionInput): Promise<void>;
+  /** The shared calendar, sorted by start date, then end date, then label. */
+  listNonWorkDays(): Promise<NonWorkDay[]>;
+  /** Adds an entry to the shared calendar; `sub` is recorded as its author. */
+  addNonWorkDay(sub: string, input: NonWorkDayInput): Promise<NonWorkDay>;
+  /** Removes an entry. Returns false if there was none with that id. */
+  deleteNonWorkDay(id: string): Promise<boolean>;
 }

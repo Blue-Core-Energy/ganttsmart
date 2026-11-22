@@ -9,6 +9,7 @@ import { createTokenService } from './linear/tokens.js';
 import { describeError, log } from './log.js';
 import { historyRoutes } from './routes/history.js';
 import { linearRoutes } from './routes/linear.js';
+import { nonWorkDayRoutes } from './routes/nonWorkDays.js';
 import type { Store } from './store/types.js';
 
 export interface AppDeps {
@@ -104,6 +105,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }),
   );
   app.route('/api/history', historyRoutes({ store }));
+  app.route('/api/non-work-days', nonWorkDayRoutes({ store }));
 
   // Unknown API routes are a JSON 404, never the SPA shell. This must stay after every /api route.
   app.all('/api/*', (c) => c.json({ error: 'not found' }, 404));

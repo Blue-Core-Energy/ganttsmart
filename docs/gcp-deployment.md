@@ -16,7 +16,7 @@ Browser ─HTTPS─► Load balancer (static IP, Google-managed certificate for 
 
 - **Identity-Aware Proxy (IAP)** signs people in with Google and turns away anyone outside `bluecore.energy` before a request reaches the app. The app then checks IAP's signed header on every API call.
 - **Cloud Run** runs one container that serves both the web app and the API. It only accepts traffic that comes through the load balancer and has been let through by IAP, so its own `*.run.app` address can't be used to get around sign-in.
-- **Firestore** stores each person's Linear connection and planning history. **Secret Manager** holds the Linear client secret.
+- **Firestore** stores each person's Linear connection and planning history, plus the team's shared holidays and PTO calendar (the `nonWorkDays` collection, readable and editable by everyone signed in). **Secret Manager** holds the Linear client secret.
 - **Cloud Build** rebuilds and redeploys automatically whenever `main` changes in `Blue-Core-Energy/ganttsmart`.
 
 ## What you need before starting
