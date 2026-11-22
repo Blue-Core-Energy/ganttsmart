@@ -2512,8 +2512,9 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as {
         query?: string;
-        variables?: { id?: string; dueDate?: string; teamId?: string };
+        variables?: Record<string, unknown>;
       } | null;
+      if (await defaultScheduleMock.handle(route, payload)) return;
       const query = payload?.query ?? '';
 
       if (query.includes('projects(')) {
