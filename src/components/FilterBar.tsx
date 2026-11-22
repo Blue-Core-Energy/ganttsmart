@@ -318,7 +318,11 @@ export default function FilterBar({
   );
 
   return (
-    <div ref={rootRef} className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20">
+    <div
+      ref={rootRef}
+      data-testid="filter-bar"
+      className="shrink-0 border-b border-border-primary bg-bg-header print:hidden relative z-20"
+    >
       {/* Main filter row */}
       <div className="min-h-12 py-1.5 flex flex-wrap items-center gap-2 px-4">
         {/* Search */}

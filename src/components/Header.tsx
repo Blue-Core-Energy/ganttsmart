@@ -24,8 +24,6 @@ interface Props {
   projectId: string;
   projects: Project[];
   onSelectProject: (id: string) => void;
-  /** Renders the project name as plain text with no switcher (read-only views) */
-  hideProjectSelector?: boolean;
   linearToken?: string;
   linearProjectUrl?: string | null;
   isLinkedInLinear?: boolean;
@@ -204,7 +202,6 @@ export default memo(function Header({
   projectId,
   projects,
   onSelectProject,
-  hideProjectSelector,
   linearToken,
   linearProjectUrl,
   isLinkedInLinear,
@@ -289,28 +286,25 @@ export default memo(function Header({
         <span className="hidden sm:inline text-sm font-semibold text-text-primary tracking-tight whitespace-nowrap">
           Ganttsmart
         </span>
-        {projectName && (
+        {/* The switcher renders from the project list, not the loaded name, so a project that
+            fails to load can still be switched away from */}
+        {(projectName || projects.length > 0) && (
           <>
             <span className="hidden sm:inline text-text-muted text-sm">/</span>
-            {hideProjectSelector ? (
-              <span className="hidden sm:inline text-sm text-text-secondary truncate max-w-[240px]" title={projectName}>
-                {projectName}
-              </span>
-            ) : (
-              <CustomDropdown
-                variant="breadcrumb"
-                value={projectId}
-                options={projectOptions}
-                placeholder={projectName}
-                onChange={onSelectProject}
-                className="min-w-0"
-                required
-                searchable
-                searchPlaceholder="Search projects…"
-                emptyMessage="No projects found"
-                ariaLabel="Projects"
-              />
-            )}
+            <CustomDropdown
+              variant="breadcrumb"
+              value={projectId}
+              options={projectOptions}
+              placeholder={projectName || 'Select project'}
+              placeholderIcon={<FolderIcon />}
+              onChange={onSelectProject}
+              className="min-w-0"
+              required
+              searchable
+              searchPlaceholder="Search projects…"
+              emptyMessage="No projects found"
+              ariaLabel="Projects"
+            />
             <span className="hidden xl:inline text-text-muted text-sm">/</span>
             <span className="hidden xl:inline text-sm text-text-primary font-medium whitespace-nowrap">Roadmap</span>
           </>

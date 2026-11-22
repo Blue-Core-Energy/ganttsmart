@@ -204,7 +204,7 @@ export default function CustomDropdown({
         aria-expanded={open}
         aria-controls={open ? listboxId : undefined}
         className={`flex items-center gap-2 cursor-pointer outline-none transition-colors bg-no-repeat bg-[right_10px_center] bg-[length:10px_6px] ${triggerClasses[variant]}`}
-        title={variant === 'breadcrumb' ? selected?.label : undefined}
+        title={variant === 'breadcrumb' ? (selected?.label ?? placeholder) : undefined}
         style={{ backgroundImage: selectBgImage }}
       >
         {selected ? (

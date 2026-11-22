@@ -734,7 +734,7 @@ test.describe('GanttSmart GCP app', () => {
     const projectTrigger = header.getByRole('button', { name: 'Demo Project' });
     await expect(projectTrigger).toBeVisible();
     await expect(page.getByRole('button', { name: 'Demo Project' })).toHaveCount(1);
-    await expect(page.locator('header + div').getByRole('button', { name: 'Demo Project' })).toHaveCount(0);
+    await expect(page.getByTestId('filter-bar').getByRole('button', { name: 'Demo Project' })).toHaveCount(0);
 
     // Open project dropdown — search input receives focus automatically
     await projectTrigger.click();
@@ -806,6 +806,131 @@ test.describe('GanttSmart GCP app', () => {
     await expect(header.getByRole('button', { name: 'Sync' })).toBeFocused();
 
     expect(errors).toEqual([]);
+  });
+
+  test('lets the user switch away from a project that fails to load', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: { id?: string };
+      } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              projects: {
+                nodes: [
+                  { id: 'proj-1', name: 'Broken Project' },
+                  { id: 'proj-2', name: 'Beta Mobile' },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        if (payload?.variables?.id === 'proj-1') {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({ errors: [{ message: 'Forbidden: no access to this project' }] }),
+          });
+          return;
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Beta Mobile',
+                startDate: isoOffsetDays(-5),
+                targetDate: isoOffsetDays(15),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-MOB-301',
+                      identifier: 'MOB-301',
+                      title: 'Ship offline cache',
+                      description: startTagOffsetDays(-1),
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/MOB-301',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 }] } },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    await expect(page.getByText('Forbidden: no access to this project')).toBeVisible();
+
+    // The saved project is broken, but the breadcrumb switcher is still there
+    const projectTrigger = page.locator('header').getByRole('button', { name: 'Broken Project' });
+    await expect(projectTrigger).toBeVisible();
+    await projectTrigger.click();
+    await page.getByRole('option', { name: 'Beta Mobile' }).click();
+
+    await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
+    await expect(page.getByText('Forbidden: no access to this project')).toHaveCount(0);
+    await expect(page).toHaveURL(/\/app\?project=proj-2$/);
+    await expect(page.locator('header').getByRole('button', { name: 'Beta Mobile' })).toBeVisible();
   });
 
   test('ignores duplicate and canceled issues across schedule, unscheduled list, stats, filters, and dependencies', async ({
@@ -1837,8 +1962,12 @@ test.describe('GanttSmart GCP app', () => {
     expect(mobileOverflow).toBe(false);
     // The breadcrumb project switcher stays reachable (and inside the header) on narrow screens
     const mobileProjectBox = await page.locator('header').getByRole('button', { name: 'Demo Project' }).boundingBox();
+    const mobileSyncBox = await page.locator('header').getByTitle('Refresh (R)').boundingBox();
     expect(mobileProjectBox).not.toBeNull();
-    expect(mobileProjectBox!.x + mobileProjectBox!.width).toBeLessThanOrEqual(375);
+    expect(mobileSyncBox).not.toBeNull();
+    // Not overlapping Sync, and still wide enough to read the project name
+    expect(mobileProjectBox!.x + mobileProjectBox!.width).toBeLessThanOrEqual(mobileSyncBox!.x);
+    expect(mobileProjectBox!.width).toBeGreaterThan(60);
 
     await page.getByRole('button', { name: 'Feedback' }).click();
     await expect(dialog).toBeVisible();

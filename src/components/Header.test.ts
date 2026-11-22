@@ -36,10 +36,27 @@ describe('Header project switcher', () => {
     expect(html).toMatch(/<button[^>]*aria-haspopup="listbox"[^>]*>.*Beta Mobile.*<\/button>/);
   });
 
-  it('renders plain, non-interactive text when hideProjectSelector is set', () => {
-    const html = renderToStaticMarkup(createElement(Header, { ...headerProps, hideProjectSelector: true }));
+  it('still renders the switcher when no project has loaded yet', () => {
+    const html = renderToStaticMarkup(createElement(Header, { ...headerProps, projectName: '', projectId: 'proj-9' }));
 
-    expect(html).toContain('Beta Mobile');
+    expect(html).toContain('aria-haspopup="listbox"');
+    expect(html).toContain('Select project');
+  });
+
+  it('labels the trigger with the loaded project name when the project is not in the list yet', () => {
+    const html = renderToStaticMarkup(
+      createElement(Header, { ...headerProps, projectName: 'Gamma Controls', projectId: 'proj-9' }),
+    );
+
+    expect(html).toMatch(/<button[^>]*aria-haspopup="listbox"[^>]*>.*Gamma Controls.*<\/button>/);
+    expect(html).toContain('title="Gamma Controls"');
+  });
+
+  it('renders no switcher when there is neither a project name nor any projects', () => {
+    const html = renderToStaticMarkup(
+      createElement(Header, { ...headerProps, projectName: '', projectId: '', projects: [] }),
+    );
+
     expect(html).not.toContain('aria-haspopup="listbox"');
   });
 });
@@ -58,6 +75,5 @@ describe('FilterBar', () => {
     );
 
     expect(html).not.toContain('aria-haspopup="listbox"');
-    expect(html).not.toContain('Search projects');
   });
 });

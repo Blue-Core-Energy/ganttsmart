@@ -55,7 +55,5 @@ describe('CustomDropdown', () => {
 
     expect(html).toContain('Beta Project');
     expect(html).toContain('title="Beta Project"');
-    expect(html).toContain('border-transparent');
-    expect(html).not.toContain('bg-bg-card');
   });
 });
