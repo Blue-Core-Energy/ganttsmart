@@ -918,8 +918,15 @@ test.describe('GanttSmart GCP app', () => {
       await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
     });
 
+    // The failure shows on the error screen and, separately, in a "Failed to load issues: …" toast.
+    // Assert on the error screen only: its heading, and its paragraph via an exact text match (the
+    // toast text has a prefix, so it can't match). Nothing here depends on the toast's 8s lifetime.
+    const errorHeading = page.getByRole('heading', { name: 'Something went wrong' });
+    const errorMessage = page.getByText('Forbidden: no access to this project', { exact: true });
+
     await page.goto('/app');
-    await expect(page.getByText('Forbidden: no access to this project')).toBeVisible();
+    await expect(errorHeading).toBeVisible();
+    await expect(errorMessage).toBeVisible();
 
     // The saved project is broken, but the breadcrumb switcher is still there
     const projectTrigger = page.locator('header').getByRole('button', { name: 'Broken Project' });
@@ -928,7 +935,8 @@ test.describe('GanttSmart GCP app', () => {
     await page.getByRole('option', { name: 'Beta Mobile' }).click();
 
     await expect(page.locator('[data-task-bar="MOB-301"]')).toBeVisible();
-    await expect(page.getByText('Forbidden: no access to this project')).toHaveCount(0);
+    await expect(errorHeading).toHaveCount(0);
+    await expect(errorMessage).toHaveCount(0);
     await expect(page).toHaveURL(/\/app\?project=proj-2$/);
     await expect(page.locator('header').getByRole('button', { name: 'Beta Mobile' })).toBeVisible();
   });
