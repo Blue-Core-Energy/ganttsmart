@@ -187,6 +187,7 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
     });
 
     describe('transitions', () => {
+      // Status transitions are write-only audit log events (no listTransitions read path on Store or HTTP routes).
       it('accepts a transition', async () => {
         await expect(
           store.addTransition(alice, { projectId: 'proj-1', issueId: 'ISS-1', fromStatus: null, toStatus: 'Todo' }),

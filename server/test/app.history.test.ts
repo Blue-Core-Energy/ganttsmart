@@ -406,9 +406,7 @@ describe('error handling', () => {
     const { app } = setup();
     const res = await app.request('/api/history/baselines', { headers: as() });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: unknown };
-    expect(body.error).toEqual(expect.any(String));
-    expect(body.error).not.toBe('internal error');
+    await expect(res.json()).resolves.toEqual({ error: 'projectId is invalid' });
   });
 });
 
