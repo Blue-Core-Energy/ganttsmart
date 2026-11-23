@@ -1102,12 +1102,12 @@ export default function GanttRow({
           {/* Ghost bar — baseline (original plan) overlay, rendered above main bar */}
           {baselineBar && (
             <div
-              className="absolute rounded-md top-1/2 -translate-y-1/2 z-[3] border-2 border-dashed border-amber-400/60 pointer-events-none"
+              data-baseline-bar={task.id}
+              className="baseline-ghost-bar absolute rounded-md top-1/2 -translate-y-1/2 z-[3] pointer-events-none"
               style={{
                 height: BAR_HEIGHT,
                 left: baselineBar.left,
                 width: baselineBar.width,
-                background: 'rgba(251, 191, 36, 0.08)',
               }}
               title={`Originally planned: ${baseline?.planned_start || '(no start)'} → ${baseline?.planned_due}`}
             />
