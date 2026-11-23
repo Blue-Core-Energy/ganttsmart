@@ -439,7 +439,9 @@ const mayShareTrack = (a: { sourceId: string; targetId: string }, b: { sourceId:
 
 /**
  * Route multiple dependency arrows:
- * - Forward arrows from the same source share one exit column (the tightest turn in the group).
+ * - Forward arrows converging on the same target share one vertical trunk near the target; when a
+ *   target has fewer than 2 incoming forward arrows or a shared column is infeasible, arrows stay
+ *   with their source trunk (the tightest turn in the group).
  * - Backwards arrows from the same source share one exit column and one lane per side; backwards
  *   arrows into the same target share one entry column.
  * - Any two vertical runs, forward or backwards, that overlap on the same column are staggered
@@ -466,16 +468,45 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
     return 'backward';
   };
 
-  const forwardBySource = new Map<string, T[]>();
+  const forwardByTarget = new Map<string, T[]>();
   const backward: T[] = [];
   for (const arrow of arrows) {
     const kind = kindOf(arrow);
     if (kind === 'forward') {
+      const list = forwardByTarget.get(arrow.targetId);
+      if (list) list.push(arrow);
+      else forwardByTarget.set(arrow.targetId, [arrow]);
+    } else if (kind === 'backward') {
+      backward.push(arrow);
+    }
+  }
+
+  // Precedence rule: when a target has 2 or more incoming forward arrows and a shared column
+  // is feasible, those arrows share a target trunk. Otherwise an arrow stays with its source trunk.
+  const targetTrunks = new Map<string, T[]>();
+  const arrowInTargetTrunk = new Set<T>();
+
+  for (const [targetId, group] of forwardByTarget) {
+    if (group.length < 2) continue;
+
+    const minToX = Math.min(...group.map((a) => a.toX));
+    const baseX = minToX - ARROW_STUB;
+    const minX = Math.max(...group.map((a) => a.fromX + ARROW_STUB));
+    const maxX = Math.min(...group.map((a) => a.toX - 8));
+
+    // Feasibility: every member's constraints must be satisfied (clear of source bar, short of target)
+    if (baseX >= minX && baseX <= maxX) {
+      targetTrunks.set(targetId, group);
+      for (const arrow of group) arrowInTargetTrunk.add(arrow);
+    }
+  }
+
+  const forwardBySource = new Map<string, T[]>();
+  for (const arrow of arrows) {
+    if (kindOf(arrow) === 'forward' && !arrowInTargetTrunk.has(arrow)) {
       const list = forwardBySource.get(arrow.sourceId);
       if (list) list.push(arrow);
       else forwardBySource.set(arrow.sourceId, [arrow]);
-    } else if (kind === 'backward') {
-      backward.push(arrow);
     }
   }
 
@@ -531,6 +562,24 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
 
   // 2. Vertical columns for forward turns, backwards exits and backwards entries share one system
   const columns = new Map<string, Column>();
+
+  for (const [targetId, group] of targetTrunks) {
+    const minToX = Math.min(...group.map((a) => a.toX));
+    const baseX = minToX - ARROW_STUB;
+    columns.set(`forward-target|${targetId}`, {
+      baseX,
+      minX: Math.max(baseX - 4 * staggerStep, ...group.map((a) => a.fromX + 4)),
+      maxX: Math.min(...group.map((a) => a.toX - 8)),
+      firstSign: -1,
+      maxSteps: 4,
+      spans: group.map((a) => ({
+        y1: Math.min(a.fromY, a.toY),
+        y2: Math.max(a.fromY, a.toY),
+        sourceId: a.sourceId,
+        targetId: a.targetId,
+      })),
+    });
+  }
 
   for (const [sourceId, group] of forwardBySource) {
     const minToX = Math.min(...group.map((a) => a.toX));
@@ -663,7 +712,7 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
     let pathOptions: ArrowPathOptions = { cornerRadius };
 
     if (kind === 'forward') {
-      const turnX = columnX.get(`forward|${arrow.sourceId}`)!;
+      const turnX = (columnX.get(`forward-target|${arrow.targetId}`) ?? columnX.get(`forward|${arrow.sourceId}`))!;
       midXOffset = turnX - defaultTurnX(arrow);
       pathOptions = { cornerRadius, turnX };
     } else if (kind === 'backward') {
