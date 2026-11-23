@@ -382,7 +382,7 @@ export default function FilterBar({
               }
               className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
                 showBaselines
-                  ? 'border-amber-400/60 text-amber-500 bg-amber-400/10'
+                  ? 'border-accent/60 text-accent bg-accent/10'
                   : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
               }`}
             >

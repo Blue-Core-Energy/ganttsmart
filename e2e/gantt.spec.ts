@@ -1755,6 +1755,32 @@ test.describe('GanttSmart GCP app', () => {
       });
     });
 
+    await page.route('**/api/history/baselines*', async (route) => {
+      const req = route.request();
+      if (req.method() === 'GET') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            baselines: [
+              {
+                issue_id: 'ENG-303',
+                planned_start: isoOffsetDays(-6),
+                planned_due: isoOffsetDays(1),
+              },
+              {
+                issue_id: 'ENG-301',
+                planned_start: isoOffsetDays(-10),
+                planned_due: isoOffsetDays(-4),
+              },
+            ],
+          }),
+        });
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
+    });
+
     // Priorities are deliberately mismatched with the states, so any priority colour would show
     const issue = (
       identifier: string,
@@ -1865,6 +1891,44 @@ test.describe('GanttSmart GCP app', () => {
     expect(new Set(backgrounds).size).toBe(4);
     // ...and the in-progress blue stays clear of the accent purple used for selection
     expect(backgrounds[1]).not.toContain('rgb(124, 92, 252)');
+
+    // Baseline ghost overlay: visible over the amber late-start bar (ENG-303) and overdue red bar (ENG-301)
+    const ghostAmber = page.locator('[data-baseline-bar="ENG-303"]');
+    const ghostRed = page.locator('[data-baseline-bar="ENG-301"]');
+    await expect(ghostAmber).toBeVisible();
+    await expect(ghostAmber).toHaveClass(/\bbaseline-ghost-bar\b/);
+    await expect(ghostRed).toBeVisible();
+    await expect(ghostRed).toHaveClass(/\bbaseline-ghost-bar\b/);
+
+    const darkGhostStyle = await ghostAmber.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        borderStyle: s.borderStyle,
+        borderColor: s.borderColor,
+        borderWidth: s.borderWidth,
+        filter: s.filter,
+      };
+    });
+    expect(darkGhostStyle.borderStyle).toBe('dashed');
+    expect(darkGhostStyle.borderWidth).toBe('2px');
+    // Dark theme: crisp neutral border (text-primary #fafafa) and dark contrast halo
+    expect(darkGhostStyle.borderColor).toBe('rgb(250, 250, 250)');
+    expect(darkGhostStyle.filter).toContain('rgba(0, 0, 0');
+
+    // In light theme, the ghost border inverts to dark neutral (#09090b) and halo to light
+    await page.evaluate(() => {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.add('light');
+    });
+    const lightGhostStyle = await ghostAmber.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        borderColor: s.borderColor,
+        filter: s.filter,
+      };
+    });
+    expect(lightGhostStyle.borderColor).toBe('rgb(9, 9, 11)');
+    expect(lightGhostStyle.filter).toContain('rgba(255, 255, 255');
 
     expect(errors).toEqual([]);
   });
