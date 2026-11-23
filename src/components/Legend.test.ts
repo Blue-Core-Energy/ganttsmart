@@ -22,4 +22,9 @@ describe('Legend', () => {
     }
     expect(html).not.toContain('linear-gradient');
   });
+
+  it('renders the Today swatch as a soft purple highlight without a dashed line', () => {
+    expect(html).not.toContain('dashed');
+    expect(html).toContain('bg-accent/20');
+  });
 });

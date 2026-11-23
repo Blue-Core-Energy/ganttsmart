@@ -1066,7 +1066,8 @@ export default function GanttRow({
             {bgCells.map((d, i) => (
               <div
                 key={i}
-                className={`shrink-0 h-full border-r ${d.isWeekend ? 'bg-bg-hover/30' : ''} ${d.isToday ? 'bg-accent/[0.08]' : ''} ${d.isToday ? 'border-dashed border-accent/40' : 'border-border-primary/30'}`}
+                data-today-cell={d.isToday ? 'true' : undefined}
+                className={`shrink-0 h-full border-r border-border-primary/30 ${d.isToday ? 'bg-accent/[0.08]' : d.isWeekend ? 'bg-bg-hover/30' : ''}`}
                 style={{ width: d.days * dayWidth }}
               />
             ))}
@@ -1092,6 +1093,7 @@ export default function GanttRow({
           {/* Today marker at week/month scale (cells are too coarse to highlight) */}
           {showTodayLine && (
             <div
+              data-today-line
               className="absolute top-0 bottom-0 w-px bg-accent/50 pointer-events-none z-[1]"
               style={{ left: todayOffset * dayWidth + dayWidth / 2 }}
             />
