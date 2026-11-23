@@ -262,7 +262,7 @@ export default function Landing() {
                       return (
                         <div
                           key={i}
-                          className={`flex-1 text-center py-1.5 text-[9px] leading-tight border-r border-border-primary/30 ${isWeekend ? 'bg-text-muted/5' : ''} ${isToday ? 'bg-accent/8' : ''}`}
+                          className={`flex-1 text-center py-1.5 text-[9px] leading-tight border-r border-border-primary/30 ${isToday ? 'bg-accent/[0.08]' : isWeekend ? 'bg-text-muted/5' : ''}`}
                         >
                           <div className={`font-medium ${isToday ? 'text-accent' : 'text-text-muted'}`}>{d}</div>
                           <div className={`${isToday ? 'text-accent/60' : 'text-text-muted/60'}`}>{DAYS[i]}</div>
@@ -307,7 +307,7 @@ export default function Landing() {
                           return (
                             <div
                               key={i}
-                              className={`flex-1 h-full border-r border-border-primary/20 ${isWeekend ? 'bg-text-muted/[0.03]' : ''} ${isToday ? 'bg-accent/[0.04] border-r-accent/20' : ''}`}
+                              className={`flex-1 h-full border-r border-border-primary/20 ${isToday ? 'bg-accent/[0.08]' : isWeekend ? 'bg-text-muted/[0.03]' : ''}`}
                             />
                           );
                         })}

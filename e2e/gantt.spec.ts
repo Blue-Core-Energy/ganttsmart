@@ -6357,6 +6357,99 @@ test.describe('GanttSmart GCP app', () => {
       expect(removed.status()).toBe(200);
     }
   });
+
+  test('marks today with a soft column highlight without a dashed border, and keeps vertical line at week/month scale', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    await mockLinearIssues(page, [
+      {
+        id: 'uuid-101',
+        identifier: 'ENG-101',
+        title: 'Task spanning today',
+        assignee: 'Andrew Phillips',
+        startOffset: -3,
+        dueOffset: 5,
+      },
+    ]);
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    // 1. At day scale: today's cell has the soft highlight and normal border, no dashed purple line
+    const todayCell = page.locator('tr[data-task-id="ENG-101"] [data-today-cell="true"]');
+    await expect(todayCell).toBeVisible();
+    await expect(todayCell).toHaveClass(/bg-accent\/\[0\.08\]/);
+    await expect(todayCell).toHaveClass(/border-border-primary\/30/);
+    await expect(todayCell).not.toHaveClass(/border-dashed/);
+    await expect(todayCell).not.toHaveClass(/border-accent/);
+
+    // Date header cell aligns with the column highlight and also has no dashed border
+    const todayHeader = page.locator('[data-header-current="true"]');
+    await expect(todayHeader).toBeVisible();
+    await expect(todayHeader).toHaveClass(/bg-accent\/\[0\.08\]/);
+    await expect(todayHeader).not.toHaveClass(/border-dashed/);
+    const headerBox = await todayHeader.boundingBox();
+    const cellBox = await todayCell.boundingBox();
+    expect(headerBox).not.toBeNull();
+    expect(cellBox).not.toBeNull();
+    expect(Math.abs(headerBox!.x - cellBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(headerBox!.width - cellBox!.width)).toBeLessThanOrEqual(1);
+
+    // 2. Zoom out to week scale: column highlight disappears, thin line appears
+    for (let i = 0; i < 5; i++) {
+      await page.keyboard.press('-');
+    }
+    await expect(page.locator('[data-today-line]').first()).toBeVisible();
+    await expect(page.locator('[data-today-line]').first()).toHaveClass(/w-px bg-accent\/50/);
+    await expect(page.locator('tr[data-task-id="ENG-101"] [data-today-cell="true"]')).toHaveCount(0);
+
+    // Zoom out further to month scale: thin line is still rendered
+    for (let i = 0; i < 6; i++) {
+      await page.keyboard.press('-');
+    }
+    await expect(page.locator('[data-today-line]').first()).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
+  test('handles today falling on a weekend deliberately with today highlight taking precedence', async ({ page }) => {
+    const errors = trackErrors(page);
+    // Pick the upcoming Saturday relative to wall-clock time so task offsets and frozen clock stay aligned
+    const now = localOffsetDate(0);
+    const satOffset = (6 - now.getDay() + 7) % 7 || 7;
+    const saturday = localOffsetDate(satOffset);
+    await page.clock.setFixedTime(new Date(saturday.getFullYear(), saturday.getMonth(), saturday.getDate(), 12, 0, 0));
+
+    await mockLinearIssues(page, [
+      {
+        id: 'uuid-101',
+        identifier: 'ENG-101',
+        title: 'Task spanning weekend today',
+        assignee: 'Andrew Phillips',
+        startOffset: satOffset - 2,
+        dueOffset: satOffset + 4,
+      },
+    ]);
+
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    // Today is Saturday: it must have bg-accent/[0.08] and NOT bg-bg-hover/30
+    const todayCell = page.locator('tr[data-task-id="ENG-101"] [data-today-cell="true"]');
+    await expect(todayCell).toBeVisible();
+    await expect(todayCell).toHaveClass(/bg-accent\/\[0\.08\]/);
+    await expect(todayCell).not.toHaveClass(/bg-bg-hover/);
+    await expect(todayCell).not.toHaveClass(/border-dashed/);
+
+    // Header cell also gets today highlight rather than weekend shading
+    const todayHeader = page.locator('[data-header-current="true"]');
+    await expect(todayHeader).toBeVisible();
+    await expect(todayHeader).toHaveClass(/bg-accent\/\[0\.08\]/);
+    await expect(todayHeader).not.toHaveClass(/bg-bg-hover/);
+
+    expect(errors).toEqual([]);
+  });
 });
 
 /**

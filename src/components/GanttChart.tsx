@@ -1052,6 +1052,7 @@ export default function GanttChart({
                   {bottomCells.map((d, i) => (
                     <div
                       key={i}
+                      data-header-current={d.isCurrent ? 'true' : undefined}
                       className={`text-[10px] text-center py-1.5 shrink-0 border-r border-border-primary/60 overflow-hidden whitespace-nowrap ${
                         d.isCurrent
                           ? 'text-accent font-bold bg-accent/[0.08]'

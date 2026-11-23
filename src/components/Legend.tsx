@@ -11,13 +11,7 @@ export default memo(function Legend() {
         </div>
       ))}
       <div className="flex items-center gap-2 text-[12px] text-text-secondary font-medium">
-        <div
-          className="w-5 h-2 rounded-full"
-          style={{
-            background: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
-            border: '1px dashed var(--color-accent)',
-          }}
-        />
+        <div className="w-5 h-2 rounded-full bg-accent/20 border border-border-primary" />
         Today
       </div>
     </div>
