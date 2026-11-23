@@ -99,7 +99,6 @@ function GanttView({
     rescheduleStart,
     snapTasksToDaysOff,
     updateMilestoneDate,
-    cycleStatus,
     loadTeamWorkflowStates,
     loadAssignableUsers,
     setTaskStatus,
@@ -181,16 +180,6 @@ function GanttView({
     setDetailPanelDaysOff(daysOff.entries);
     return () => setDetailPanelDaysOff([]);
   }, [daysOff.entries]);
-
-  // Wrap cycleStatus to log status transitions
-  const cycleStatusWithHistory = useCallback(
-    async (taskUuid: string) => {
-      const task = tasks.find((t) => t.uuid === taskUuid);
-      const nextStatus = await cycleStatus(taskUuid);
-      if (task && nextStatus) logStatusTransition(task.id, task.status, nextStatus);
-    },
-    [cycleStatus, tasks, logStatusTransition],
-  );
 
   // Inline cell edits (status dropdown, assignee dropdown, title rename) log to planning history on success
   const inlineEdit = useMemo<InlineEditHandlers>(
@@ -342,7 +331,6 @@ function GanttView({
           timeScale={timeScale}
           onReschedule={rescheduleWithHistory}
           onRescheduleStart={rescheduleStartWithHistory}
-          onCycleStatus={cycleStatusWithHistory}
           inlineEdit={inlineEdit}
           onCreateRelation={createRelation}
           onReorder={reorderTask}

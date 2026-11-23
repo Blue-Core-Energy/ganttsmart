@@ -2728,7 +2728,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('cycles task status when clicking or activating the status bubble without opening DetailPanel', async ({
+  test('opens status dropdown when clicking or activating status bubble or pressing s without opening DetailPanel', async ({
     page,
   }) => {
     const errors = trackErrors(page);
@@ -2912,13 +2912,18 @@ test.describe('GanttSmart GCP app', () => {
     const row101 = page.locator('tr[data-task-id="ENG-101"]');
     const bubble101 = page.locator('[data-status-bubble="ENG-101"]');
     const bar101 = page.locator('[data-task-bar="ENG-101"]');
+    const menu101 = page.locator('[data-inline-menu="Status for ENG-101"]');
 
     await expect(bubble101).toBeVisible();
-    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to cycle');
+    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to change');
 
-    // 1. Click status bubble: In Progress -> Done (updates completed state, does NOT open DetailPanel)
+    // 1. Click status bubble: opens status dropdown without opening DetailPanel
     await bubble101.click();
-    await expect(bubble101).toHaveAttribute('title', 'Done — click to cycle');
+    await expect(menu101).toBeVisible();
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+    await menu101.getByRole('option', { name: 'Done' }).click();
+    await expect(menu101).toHaveCount(0);
+    await expect(bubble101).toHaveAttribute('title', 'Done — click to change');
     await expect(row101).toHaveAttribute('data-task-done', 'true');
     await expect(bar101).toHaveClass(/\bbar-done\b/);
     await expect(bar101).toContainText('✓ Done');
@@ -2926,37 +2931,82 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Manifold details')).toHaveCount(0);
     expect(stateUpdates[0]).toEqual({ id: 'uuid-1', stateId: 'st-done' });
 
-    // 2. Click status bubble while Done: skips Canceled & Duplicate, wraps to Backlog, clears completed state
-    await bubble101.click();
-    await expect(bubble101).toHaveAttribute('title', 'Backlog — click to cycle');
-    await expect(row101).not.toHaveAttribute('data-task-done', 'true');
-    await expect(bar101).not.toHaveClass(/\bbar-done\b/);
-    await expect(page.getByText('Status → Backlog')).toBeVisible();
-    expect(stateUpdates[1]).toEqual({ id: 'uuid-1', stateId: 'st-back' });
-
-    // 3. Keyboard activation (Space and Enter) cycles status without opening DetailPanel or a Linear popup
+    // 2. Keyboard activation on status bubble (Space and Enter) opens menu without opening DetailPanel
     await bubble101.focus();
     await page.keyboard.press('Space');
-    await expect(bubble101).toHaveAttribute('title', 'Todo — click to cycle');
-    expect(stateUpdates[2]).toEqual({ id: 'uuid-1', stateId: 'st-todo' });
-
-    await page.keyboard.press('Enter');
-    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to cycle');
-    expect(stateUpdates[3]).toEqual({ id: 'uuid-1', stateId: 'st-prog' });
+    await expect(menu101).toBeVisible();
     await expect(page.getByText('Manifold details')).toHaveCount(0);
+    // Escape returns focus to the bubble
+    await page.keyboard.press('Escape');
+    await expect(menu101).toHaveCount(0);
+    await expect(bubble101).toBeFocused();
+
+    // Enter also opens the menu
+    await page.keyboard.press('Enter');
+    await expect(menu101).toBeVisible();
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+    await menu101.getByRole('option', { name: 'Todo' }).click();
+    await expect(menu101).toHaveCount(0);
+    await expect(bubble101).toHaveAttribute('title', 'Todo — click to change');
+    await expect(bubble101).toBeFocused();
+    expect(stateUpdates[1]).toEqual({ id: 'uuid-1', stateId: 'st-todo' });
+
+    // 3. Pressing 's' on a focused row opens status dropdown without opening DetailPanel
+    await row101.focus();
+    await page.keyboard.press('s');
+    await expect(menu101).toBeVisible();
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+    await menu101.getByRole('option', { name: 'In Progress' }).click();
+    await expect(menu101).toHaveCount(0);
+    await expect(bubble101).toHaveAttribute('title', 'In Progress — click to change');
+    expect(stateUpdates[2]).toEqual({ id: 'uuid-1', stateId: 'st-prog' });
 
     // 4. Second team (team-2) uses its own workflow states
     const bubble102 = page.locator('[data-status-bubble="ENG-102"]');
-    await expect(bubble102).toHaveAttribute('title', 'Todo — click to cycle');
+    const menu102 = page.locator('[data-inline-menu="Status for ENG-102"]');
+    await expect(bubble102).toHaveAttribute('title', 'Todo — click to change');
     await bubble102.click();
-    await expect(bubble102).toHaveAttribute('title', 'Working — click to cycle');
-    expect(stateUpdates[4]).toEqual({ id: 'uuid-2', stateId: 'st2-prog' });
+    await expect(menu102).toBeVisible();
+    await expect(menu102.getByRole('option')).toContainText(['Todo', 'Working', 'Shipped']);
+    await menu102.getByRole('option', { name: 'Working' }).click();
+    await expect(menu102).toHaveCount(0);
+    await expect(bubble102).toHaveAttribute('title', 'Working — click to change');
+    expect(stateUpdates[3]).toEqual({ id: 'uuid-2', stateId: 'st2-prog' });
 
     // 5. Failed mutation rolls back status cleanly and displays an error toast
     failNextUpdate = true;
     await bubble102.click();
+    await expect(menu102).toBeVisible();
+    await menu102.getByRole('option', { name: 'Shipped' }).click();
     await expect(page.getByText('Failed to update status: Permission denied')).toBeVisible();
-    await expect(bubble102).toHaveAttribute('title', 'Working — click to cycle');
+    await expect(bubble102).toHaveAttribute('title', 'Working — click to change');
+
+    // 6. Narrow screen at 375px: status bubble in Issue column opens menu within viewport
+    await page.setViewportSize({ width: 375, height: 812 });
+    const mobileBubble101 = page.locator('td[data-column-key="task"] [data-status-bubble="ENG-101"]');
+    await expect(mobileBubble101).toBeVisible();
+    await mobileBubble101.click();
+    await expect(menu101).toBeVisible();
+    await expect(page.getByText('Manifold details')).toHaveCount(0);
+    const menuBox = (await menu101.boundingBox())!;
+    expect(menuBox.x).toBeGreaterThanOrEqual(0);
+    expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(375);
+    await menu101.getByRole('option', { name: 'Done' }).click();
+    await expect(menu101).toHaveCount(0);
+    await expect(mobileBubble101).toHaveAttribute('title', 'Done — click to change');
+    expect(stateUpdates[4]).toEqual({ id: 'uuid-1', stateId: 'st-done' });
+
+    // Pressing 's' on mobile row also opens menu anchored within viewport; Escape restores focus to the row
+    const mobileRow101 = page.locator('tr[data-task-id="ENG-101"]');
+    await mobileRow101.focus();
+    await page.keyboard.press('s');
+    await expect(menu101).toBeVisible();
+    const sMenuBox = (await menu101.boundingBox())!;
+    expect(sMenuBox.x).toBeGreaterThanOrEqual(0);
+    expect(sMenuBox.x + sMenuBox.width).toBeLessThanOrEqual(375);
+    await page.keyboard.press('Escape');
+    await expect(menu101).toHaveCount(0);
+    await expect(mobileRow101).toBeFocused();
 
     expect(errors).toEqual([]);
   });
@@ -3129,7 +3179,7 @@ test.describe('GanttSmart GCP app', () => {
     await menu.getByRole('option', { name: 'Done' }).click();
     await expect(menu).toHaveCount(0);
     await expect(row101).toHaveAttribute('data-task-done', 'true');
-    await expect(page.locator('[data-status-bubble="ENG-101"]')).toHaveAttribute('title', 'Done — click to cycle');
+    await expect(page.locator('[data-status-bubble="ENG-101"]')).toHaveAttribute('title', 'Done — click to change');
     await expect(page.getByText('Status → Done')).toBeVisible();
     expect(updates).toEqual([{ id: 'uuid-1', stateId: 'st-done' }]);
 
@@ -3150,16 +3200,19 @@ test.describe('GanttSmart GCP app', () => {
     await expect(menu).toHaveCount(0);
     await expect(page.locator('[data-status-bubble="ENG-101"]')).toHaveAttribute(
       'title',
-      'In Progress — click to cycle',
+      'In Progress — click to change',
     );
     expect(updates[1]).toEqual({ id: 'uuid-1', stateId: 'st-prog' });
 
-    // The status bubble still cycles without opening the menu
+    // The status bubble opens the menu too
     await page.locator('[data-status-bubble="ENG-102"]').click();
-    await expect(menu).toHaveCount(0);
+    const menu102 = page.locator('[data-inline-menu="Status for ENG-102"]');
+    await expect(menu102).toBeVisible();
+    await menu102.getByRole('option', { name: 'In Progress' }).click();
+    await expect(menu102).toHaveCount(0);
     await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
       'title',
-      'In Progress — click to cycle',
+      'In Progress — click to change',
     );
     expect(updates[2]).toEqual({ id: 'uuid-2', stateId: 'st-prog' });
 
@@ -3170,7 +3223,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('Failed to update status: Permission denied')).toBeVisible();
     await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
       'title',
-      'In Progress — click to cycle',
+      'In Progress — click to change',
     );
 
     // ---- Assignee dropdown ----
@@ -3183,7 +3236,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(menu.getByRole('option')).toContainText(['Unassigned', 'Andrew Phillips', 'Nate Jones', 'Priya Shah']);
     await expect(menu.getByRole('option', { name: 'Nate Jones' })).toHaveAttribute('aria-selected', 'true');
 
-    // Typing shortcuts ('r' refreshes, 's' cycles status) must stay inside the search box
+    // Typing shortcuts ('r' refreshes, 's' opens status menu) must stay inside the search box
     await search.fill('pr');
     await expect(menu.getByRole('option')).toContainText(['Priya Shah']);
     await expect(menu.getByRole('option')).toHaveCount(1);
@@ -3196,7 +3249,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(projectLoads).toBe(loadsBeforeSearch);
     await expect(page.locator('[data-status-bubble="ENG-102"]')).toHaveAttribute(
       'title',
-      'In Progress — click to cycle',
+      'In Progress — click to change',
     );
 
     await page.keyboard.press('Enter');
@@ -3254,7 +3307,7 @@ test.describe('GanttSmart GCP app', () => {
     await page.mouse.move(bubbleBox.x + bubbleBox.width / 2, bubbleBox.y + bubbleBox.height / 2);
     await page.mouse.down();
     await expect(menu).toHaveCount(0);
-    // Release elsewhere so the press does not count as a click that cycles the status
+    // Release elsewhere so the press does not count as a click that opens the status menu
     await page.mouse.move(5, 300);
     await page.mouse.up();
     expect(updates).toHaveLength(5);
@@ -3581,6 +3634,9 @@ test.describe('GanttSmart GCP app', () => {
     const ctrlBubbleBtn = page.locator('button[data-status-bubble="CTRL-42"]');
     await expect(ctrlBubbleBtn).toBeVisible();
     await ctrlBubbleBtn.click();
+    const ctrlMenu = page.locator('[data-inline-menu="Status for CTRL-42"]');
+    await expect(ctrlMenu).toBeVisible();
+    await ctrlMenu.getByRole('option', { name: 'Done' }).click();
     await expect(page.getByText('Status → Done')).toBeVisible();
     expect(stateUpdates).toEqual([{ id: 'uuid-ctrl-42', stateId: 'ctrl-done' }]);
 
@@ -4507,7 +4563,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(await headerLabels()).not.toContain('ASSIGNEE');
     await picker.getByRole('checkbox', { name: 'Assignee' }).check();
 
-    // Hiding the status column keeps click-to-cycle reachable in the task cell
+    // Hiding the status column keeps the status dropdown reachable in the task cell
     await picker.getByRole('checkbox', { name: 'Status' }).uncheck();
     expect(await headerLabels()).not.toContain('STATUS');
     await expect(page.locator('button[data-status-bubble="ENG-101"]')).toBeVisible();
@@ -5113,10 +5169,16 @@ test.describe('GanttSmart GCP app', () => {
     expect(Math.abs(renameWidths['LOC-306'] - renameWidths['LOC-305'])).toBeLessThanOrEqual(1);
     expect(stateUpdates).toEqual([]);
 
-    // Click-to-cycle still works from the deepest rows
+    // Changing status via the dot menu works from the deepest rows
     await page.locator('[data-status-bubble="LOC-303"]').click();
+    const menu303 = page.locator('[data-inline-menu="Status for LOC-303"]');
+    await expect(menu303).toBeVisible();
+    await menu303.getByRole('option', { name: 'In Progress' }).click();
     await expect.poll(() => stateUpdates).toEqual(['uuid-303']);
     await page.locator('[data-status-bubble="LOC-305"]').click();
+    const menu305 = page.locator('[data-inline-menu="Status for LOC-305"]');
+    await expect(menu305).toBeVisible();
+    await menu305.getByRole('option', { name: 'Done' }).click();
     await expect.poll(() => stateUpdates).toEqual(['uuid-303', 'uuid-305']);
 
     expect(errors).toEqual([]);

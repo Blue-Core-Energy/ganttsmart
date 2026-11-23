@@ -25,7 +25,7 @@ const steps = [
   {
     title: 'Interact with Tasks',
     description:
-      'Click a task ID to open it in Linear. Drag bar edges to reschedule. Click the status badge to cycle through states.',
+      'Click a task ID to open it in Linear. Drag bar edges to reschedule. Click the status badge to change status.',
     tip: 'Hover over bars to see full details in a tooltip.',
   },
   {
