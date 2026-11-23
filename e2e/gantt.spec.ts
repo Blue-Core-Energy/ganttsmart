@@ -5679,6 +5679,54 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('collapses and expands the summary row, and keeps the choice across reloads', async ({ page }) => {
+    const errors = trackErrors(page);
+    await mockSubtaskProject(page);
+    await page.goto('/app');
+
+    const hide = page.getByRole('button', { name: 'Hide summary' });
+    const show = page.getByRole('button', { name: 'Show summary' });
+    const bar = page.locator('[data-task-bar="ENG-200"]');
+    await expect(hide).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByText('Total Span', { exact: true })).toBeVisible();
+    const expandedY = (await bar.boundingBox())!.y;
+
+    await hide.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Total Span', { exact: true })).toHaveCount(0);
+    await expect(show).toBeVisible();
+    await expect(show).toHaveAttribute('aria-expanded', 'false');
+    // Focus follows the toggle to the button that replaced it
+    await expect(show).toBeFocused();
+    expect((await bar.boundingBox())!.y).toBeLessThan(expandedY);
+    expect(await page.evaluate(() => localStorage.getItem('gantt_summary_collapsed'))).toBe('1');
+
+    await page.reload();
+    await expect(page.locator('[data-task-bar="ENG-200"]')).toBeVisible();
+    await expect(show).toBeVisible();
+    await expect(page.getByText('Total Span', { exact: true })).toHaveCount(0);
+
+    // After a reload nothing is focused, so start the keyboard flow from the control
+    await show.focus();
+    await page.keyboard.press('Enter');
+    await expect(page.getByText('Total Span', { exact: true })).toBeVisible();
+    await expect(hide).toHaveAttribute('aria-expanded', 'true');
+    await expect(hide).toBeFocused();
+    expect(await page.evaluate(() => localStorage.getItem('gantt_summary_collapsed'))).toBe('0');
+
+    // Focus is already on the new control, so Enter again toggles back with no refocus
+    await page.keyboard.press('Enter');
+    await expect(show).toBeFocused();
+    expect(await page.evaluate(() => localStorage.getItem('gantt_summary_collapsed'))).toBe('1');
+
+    await show.click();
+    await expect(page.getByText('Total Span', { exact: true })).toBeVisible();
+    await page.reload();
+    await expect(page.getByText('Total Span', { exact: true })).toBeVisible();
+
+    expect(errors).toEqual([]);
+  });
+
   test('rolls dependency arrows up to a collapsed parent bar', async ({ page }) => {
     const errors = trackErrors(page);
     await mockSubtaskProject(page);
