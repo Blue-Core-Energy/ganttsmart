@@ -1234,7 +1234,7 @@ test.describe('GanttSmart GCP app', () => {
 
     // The section sits above the schedule table, keeps its count badge, and still collapses in place
     const unscheduledSection = page.getByTestId('unscheduled-section');
-    await expect(unscheduledSection).toHaveAttribute('data-export-hide', '');
+    await expect(unscheduledSection).toHaveAttribute('data-export-hide', 'true');
     const unscheduledToggle = unscheduledSection.getByRole('button', { name: /Unscheduled/ });
     await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('1');
 
@@ -1571,7 +1571,7 @@ test.describe('GanttSmart GCP app', () => {
     // Section exists, is excluded from export, and shows count of 25 issues
     const unscheduledSection = page.getByTestId('unscheduled-section');
     await expect(unscheduledSection).toBeVisible();
-    await expect(unscheduledSection).toHaveAttribute('data-export-hide', '');
+    await expect(unscheduledSection).toHaveAttribute('data-export-hide', 'true');
     await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('25');
 
     // The list container height is capped at 240px and scrolls

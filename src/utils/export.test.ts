@@ -17,9 +17,11 @@ vi.mock('jspdf', () => ({
 
 describe('export utilities', () => {
   let createdElements: HTMLAnchorElement[];
+  let bodyChildren: HTMLElement[];
 
   beforeEach(() => {
     createdElements = [];
+    bodyChildren = [];
     mockToPng.mockReset();
     mockPdfSave.mockReset();
     mockPdfAddImage.mockReset();
@@ -42,7 +44,6 @@ describe('export utilities', () => {
     vi.stubGlobal('Image', MockImage);
 
     // Stub global document
-    const bodyChildren: HTMLElement[] = [];
     vi.stubGlobal('document', {
       body: {
         appendChild: (child: HTMLElement) => {
@@ -73,19 +74,27 @@ describe('export utilities', () => {
   });
 
   function createMockExportTarget() {
-    const hiddenChild = {
+    const hiddenChildWithInlineDisplay = {
       hasAttribute: (name: string) => name === 'data-export-hide',
       style: { display: 'block' },
     } as unknown as HTMLElement;
 
-    const visibleChild = {
-      hasAttribute: (_name: string) => false,
-      style: { display: 'flex' },
+    const hiddenChildWithClassDisplay = {
+      hasAttribute: (name: string) => name === 'data-export-hide',
+      style: { display: '' },
     } as unknown as HTMLElement;
 
     const target = {
-      scrollWidth: 1200,
-      scrollHeight: 800,
+      get scrollWidth() {
+        const isHidden =
+          hiddenChildWithInlineDisplay.style.display === 'none' && hiddenChildWithClassDisplay.style.display === 'none';
+        return isHidden ? 1000 : 1200;
+      },
+      get scrollHeight() {
+        const isHidden =
+          hiddenChildWithInlineDisplay.style.display === 'none' && hiddenChildWithClassDisplay.style.display === 'none';
+        return isHidden ? 560 : 800;
+      },
       style: {
         overflow: 'auto',
         overflowX: 'auto',
@@ -94,23 +103,29 @@ describe('export utilities', () => {
       },
       hasAttribute: (_name: string) => false,
       querySelectorAll: (selector: string) => {
-        if (selector === '[data-export-hide]') return [hiddenChild];
+        if (selector === '[data-export-hide]') return [hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay];
         return [];
       },
     } as unknown as HTMLElement;
 
-    return { target, hiddenChild, visibleChild };
+    return { target, hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay };
   }
 
   it('exportAsPng hides data-export-hide elements during capture and restores styles', async () => {
-    const { target, hiddenChild } = createMockExportTarget();
+    const { target, hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay } = createMockExportTarget();
     mockToPng.mockImplementation(async (_el, options) => {
-      // While inside toPng, hidden child display should have been set to 'none'
-      expect(hiddenChild.style.display).toBe('none');
+      // While inside toPng, hidden child displays should have been set to 'none'
+      expect(hiddenChildWithInlineDisplay.style.display).toBe('none');
+      expect(hiddenChildWithClassDisplay.style.display).toBe('none');
+
+      // The captured dimensions reflect the reduced height/width with hidden elements excluded
+      expect(options.height).toBe(560);
+      expect(options.width).toBe(1000);
 
       // Test the filter function
       const filter = options.filter;
-      expect(filter(hiddenChild)).toBe(false);
+      expect(filter(hiddenChildWithInlineDisplay)).toBe(false);
+      expect(filter(hiddenChildWithClassDisplay)).toBe(false);
       expect(filter({ hasAttribute: () => false })).toBe(true);
 
       return 'data:image/png;base64,mockpngdata';
@@ -124,34 +139,41 @@ describe('export utilities', () => {
     expect(target.style.width).toBe('100%');
     expect(target.style.maxWidth).toBe('100%');
 
-    // Hidden child's display style restored
-    expect(hiddenChild.style.display).toBe('block');
+    // Hidden children display styles restored to their exact originals
+    expect(hiddenChildWithInlineDisplay.style.display).toBe('block');
+    expect(hiddenChildWithClassDisplay.style.display).toBe('');
 
-    // A link was created, configured, clicked, and removed
+    // A link was created, configured, clicked, and removed from document.body
     expect(createdElements.length).toBe(1);
     const link = createdElements[0];
     expect(link.download).toMatch(/^gantt-\d{4}-\d{2}-\d{2}\.png$/);
     expect(link.href).toBe('data:image/png;base64,mockpngdata');
     expect(link.click).toHaveBeenCalled();
+    expect(bodyChildren.length).toBe(0);
   });
 
   it('exportAsPng restores styles even when toPng fails', async () => {
-    const { target, hiddenChild } = createMockExportTarget();
+    const { target, hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay } = createMockExportTarget();
     mockToPng.mockRejectedValue(new Error('Canvas render failure'));
 
     await expect(exportAsPng(target)).rejects.toThrow('Canvas render failure');
 
     expect(target.style.overflow).toBe('auto');
-    expect(hiddenChild.style.display).toBe('block');
+    expect(hiddenChildWithInlineDisplay.style.display).toBe('block');
+    expect(hiddenChildWithClassDisplay.style.display).toBe('');
   });
 
-  it('exportAsPdf generates and saves a PDF document', async () => {
-    const { target, hiddenChild } = createMockExportTarget();
-    mockToPng.mockResolvedValue('data:image/png;base64,mockpngdata');
+  it('exportAsPdf generates and saves a PDF document with hidden elements restored', async () => {
+    const { target, hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay } = createMockExportTarget();
+    mockToPng.mockImplementation(async (_el, options) => {
+      expect(options.height).toBe(560);
+      return 'data:image/png;base64,mockpngdata';
+    });
 
     await exportAsPdf(target);
 
-    expect(hiddenChild.style.display).toBe('block');
+    expect(hiddenChildWithInlineDisplay.style.display).toBe('block');
+    expect(hiddenChildWithClassDisplay.style.display).toBe('');
     expect(mockPdfAddImage).toHaveBeenCalledWith('data:image/png;base64,mockpngdata', 'PNG', 0, 0, 400, 300);
     expect(mockPdfSave).toHaveBeenCalledWith(expect.stringMatching(/^gantt-\d{4}-\d{2}-\d{2}\.pdf$/));
   });
