@@ -20,9 +20,11 @@ import {
   formatScheduleComment,
   parseScheduleComment,
   parseStartDate,
+  stripStartDateFromDescription,
   pickScheduleComment,
   resolveIssueSchedule,
   updateIssueDueDate,
+  updateIssueSchedule,
   updateIssueStartDate,
   createFeedbackIssue,
   createProjectExternalLink,
@@ -1782,6 +1784,24 @@ describe('schedule date parsing', () => {
     expect(parseStartDate('no tag here')).toBeNull();
   });
 
+  it('stripStartDateFromDescription removes lines with start: tag in various formats and leaves other content intact', () => {
+    expect(stripStartDateFromDescription('Plan\nstart: 2026-05-04\nNotes')).toBe('Plan\nNotes');
+    expect(stripStartDateFromDescription('start: 01-12-26')).toBe('');
+    expect(stripStartDateFromDescription('  * start: 2026-12-01\n- item 2')).toBe('- item 2');
+    expect(stripStartDateFromDescription('No start date here')).toBe('No start date here');
+    expect(stripStartDateFromDescription('Note with start: 2026-12-01 embedded')).toBe('Note with embedded');
+    expect(stripStartDateFromDescription('Note `start: 2026-12-01` extra')).toBe('Note extra');
+    expect(stripStartDateFromDescription('Note _start: 2026-12-01_ extra')).toBe('Note extra');
+    expect(stripStartDateFromDescription('Note **start: 2026-12-01** extra')).toBe('Note extra');
+    expect(stripStartDateFromDescription('`start: 2026-12-01`')).toBe('');
+    expect(stripStartDateFromDescription('_start: 2026-12-01_')).toBe('');
+    expect(
+      stripStartDateFromDescription(
+        '# Notes\n  - Sub-bullet 1\n    const x = 1;\nNote **start: 2026-12-01** end\n  - Sub-bullet 2',
+      ),
+    ).toBe('# Notes\n  - Sub-bullet 1\n    const x = 1;\nNote end\n  - Sub-bullet 2');
+  });
+
   it('parseScheduleComment reads start/end from the bold heading or the plain heading, case-insensitively', () => {
     expect(parseScheduleComment('**GanttSmart Schedule**\nstart: 2026-05-04\nend: 2026-05-08')).toEqual({
       startDate: '2026-05-04',
@@ -2171,9 +2191,15 @@ describe('schedule mutations', () => {
           target.updatedAt = '2026-11-21T11:00:00Z';
           return jsonResponse({ commentUpdate: { success: true } });
         }
+        if (body.query.includes('commentDelete')) {
+          calls.push({ kind: 'commentDelete', variables });
+          issue.comments = issue.comments.filter((c) => c.id !== variables.id);
+          return jsonResponse({ commentDelete: { success: true } });
+        }
         if (body.query.includes('issueUpdate')) {
           calls.push({ kind: 'issueUpdate', variables });
           if (variables.dueDate) issue.dueDate = variables.dueDate as string;
+          if ('description' in variables) issue.description = variables.description as string;
           return jsonResponse({ issueUpdate: { success: true } });
         }
         throw new Error(`Unexpected query: ${body.query}`);
@@ -2307,5 +2333,126 @@ describe('schedule mutations', () => {
       return jsonResponse({ commentCreate: { success: false } });
     });
     await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-03')).rejects.toThrow(/schedule comment/);
+  });
+
+  it('clearing start date strips legacy description tag and updates comment in place when end remains', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.description = 'Plan notes\nstart: 01-12-26';
+    issue.comments = [
+      {
+        id: 'sched-1',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-10',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+
+    await updateIssueStartDate('tok', 'uuid-1', null);
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
+    expect(calls[1].variables).toEqual({ id: 'uuid-1', description: 'Plan notes' });
+    expect(calls[2].variables).toEqual({
+      commentId: 'sched-1',
+      body: '**GanttSmart Schedule**\nend: 2026-12-10',
+    });
+    expect(issue.description).toBe('Plan notes');
+    expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nend: 2026-12-10');
+  });
+
+  it('clearing start date deletes the schedule comment when no due date remains', async () => {
+    issue.dueDate = null;
+    issue.description = 'Only notes';
+    issue.comments = [
+      {
+        id: 'sched-1',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+
+    await updateIssueStartDate('tok', 'uuid-1', null);
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'commentDelete']);
+    expect(calls[1].variables).toEqual({ id: 'sched-1' });
+    expect(issue.comments).toHaveLength(0);
+  });
+
+  it('rejects setting a start date after the issue due date', async () => {
+    issue.dueDate = '2026-12-10';
+    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-15')).rejects.toThrow(
+      'Start date cannot be after due date.',
+    );
+  });
+
+  it('throws when Linear does not confirm comment deletion', async () => {
+    issue.dueDate = null;
+    issue.comments = [
+      {
+        id: 'sched-1',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+    linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
+      if (body.query.includes('IssueSchedule')) {
+        return jsonResponse({ issue: { ...issue, comments: { nodes: issue.comments } } });
+      }
+      if (body.query.includes('commentDelete')) {
+        return jsonResponse({ commentDelete: { success: false } });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    await expect(updateIssueStartDate('tok', 'uuid-1', null)).rejects.toThrow(/schedule comment deletion/);
+  });
+
+  it('throws when Linear does not confirm description update', async () => {
+    issue.description = 'start: 01-12-26';
+    linearRequestMock.mockImplementation(async (_t: string, body: { query: string }) => {
+      if (body.query.includes('IssueSchedule')) {
+        return jsonResponse({ issue: { ...issue, comments: { nodes: issue.comments } } });
+      }
+      if (body.query.includes('issueUpdate')) {
+        return jsonResponse({ issueUpdate: { success: false } });
+      }
+      throw new Error(`Unexpected query: ${body.query}`);
+    });
+    await expect(updateIssueStartDate('tok', 'uuid-1', null)).rejects.toThrow(/description update/);
+  });
+
+  it('clearing legacy-only start tag with no existing comment strips tag without creating a schedule comment', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.description = 'Plan\nstart: 01-12-26';
+    issue.comments = [];
+
+    await updateIssueStartDate('tok', 'uuid-1', null);
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate']);
+    expect(calls[1].variables).toEqual({ id: 'uuid-1', description: 'Plan' });
+    expect(calls.some((c) => c.kind === 'commentCreate')).toBe(false);
+    expect(issue.comments).toHaveLength(0);
+    expect(issue.description).toBe('Plan');
+  });
+
+  it('updateIssueSchedule updates both start and due dates in a single write', async () => {
+    issue.dueDate = '2026-12-10';
+    issue.comments = [
+      {
+        id: 'sched-1',
+        body: '**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-10',
+        createdAt: '2026-11-03T00:00:00Z',
+        updatedAt: '2026-11-03T00:00:00Z',
+      },
+    ];
+
+    await updateIssueSchedule('tok', 'uuid-1', { startDate: '2026-12-05', dueDate: '2026-12-15' });
+
+    expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
+    expect(calls[1].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
+    expect(calls[2].variables).toEqual({
+      commentId: 'sched-1',
+      body: '**GanttSmart Schedule**\nstart: 2026-12-05\nend: 2026-12-15',
+    });
   });
 });

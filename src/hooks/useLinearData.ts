@@ -13,6 +13,7 @@ import {
   removeIssueRelation,
   updateIssueAssignee,
   updateIssueDueDate,
+  updateIssueSchedule,
   updateIssueStartDate,
   updateIssueState,
   updateIssueTitle,
@@ -379,8 +380,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   // Also handles "promoting" an unscheduled task: if the uuid lives in unscheduledTasks,
   // we move it into tasks with the new explicit due date.
   const reschedule = useCallback(
-    async (taskUuid: string, newDueDate: string) => {
-      if (!linearToken) return;
+    async (taskUuid: string, newDueDate: string): Promise<boolean> => {
+      if (!linearToken) return false;
 
       const prevTasks = tasks;
       const prevUnscheduled = unscheduledTasks;
@@ -391,7 +392,12 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
       if (fromExternal && !allowExternalEdits) {
         toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return;
+        return false;
+      }
+
+      if (task?.startDate && newDueDate < task.startDate) {
+        toastError('Due date cannot be before start date');
+        return false;
       }
 
       if (fromUnscheduled) {
@@ -423,12 +429,14 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
             }
           },
         });
+        return true;
       } catch (e) {
-        if (e instanceof DebounceCancelled) return; // superseded by a newer drag — don't rollback
+        if (e instanceof DebounceCancelled) return false; // superseded by a newer drag — don't rollback
         setTasks(prevTasks);
         setUnscheduledTasks(prevUnscheduled);
         setExternalTasks(prevExternal);
         toastError(`Failed to update due date: ${(e as Error).message}`, () => reschedule(taskUuid, newDueDate));
+        return false;
       } finally {
         pendingMutations.current--;
       }
@@ -438,8 +446,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
   // Optimistic reschedule (start date) with rollback + undo
   const rescheduleStart = useCallback(
-    async (taskUuid: string, newStartDate: string) => {
-      if (!linearToken) return;
+    async (taskUuid: string, newStartDate: string | null): Promise<boolean> => {
+      if (!linearToken) return false;
 
       const prevTasks = tasks;
       const prevExternal = externalTasks;
@@ -448,7 +456,12 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
       if (fromExternal && !allowExternalEdits) {
         toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return;
+        return false;
+      }
+
+      if (newStartDate && task?.due && newStartDate > task.due) {
+        toastError('Start date cannot be after due date');
+        return false;
       }
 
       if (fromExternal) {
@@ -461,21 +474,86 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
       try {
         await updateIssueStartDate(linearToken, taskUuid, newStartDate);
         pushUndo(prevTasks, `${task?.id || ''} start date`, prevExternal);
-        toast(`Start date updated`, 'success', {
+        const toastMsg = newStartDate ? 'Start date updated' : 'Start date cleared';
+        toast(toastMsg, 'success', {
           label: 'Undo',
           onClick: () => {
             setTasks(prevTasks);
             setExternalTasks(prevExternal);
-            if (task?.startDate) updateIssueStartDate(linearToken, taskUuid, task.startDate).catch(() => {});
+            if (task) updateIssueStartDate(linearToken, taskUuid, task.startDate).catch(() => {});
           },
         });
+        return true;
       } catch (e) {
-        if (e instanceof DebounceCancelled) return; // superseded by a newer drag
+        if (e instanceof DebounceCancelled) return false; // superseded by a newer drag
         setTasks(prevTasks);
         setExternalTasks(prevExternal);
         toastError(`Failed to update start date: ${(e as Error).message}`, () =>
           rescheduleStart(taskUuid, newStartDate),
         );
+        return false;
+      } finally {
+        pendingMutations.current--;
+      }
+    },
+    [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+  );
+
+  // Optimistic reschedule for both start and due dates (whole-bar move) with rollback + undo
+  const rescheduleRange = useCallback(
+    async (taskUuid: string, newDueDate: string, newStartDate: string | null): Promise<boolean> => {
+      if (!linearToken) return false;
+
+      const prevTasks = tasks;
+      const prevExternal = externalTasks;
+      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
+      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
+
+      if (fromExternal && !allowExternalEdits) {
+        toast('Unlock "Edit external" to modify cross-project issues', 'info');
+        return false;
+      }
+
+      if (newStartDate && newStartDate > newDueDate) {
+        toastError('Start date cannot be after due date');
+        return false;
+      }
+
+      const applyDates = (t: Task) =>
+        t.uuid === taskUuid ? { ...t, due: newDueDate, startDate: newStartDate, isDueImplicit: undefined } : t;
+
+      if (fromExternal) {
+        setExternalTasks((prev) => prev.map(applyDates));
+      } else {
+        setTasks((prev) => prev.map(applyDates));
+      }
+
+      pendingMutations.current++;
+      try {
+        await updateIssueSchedule(linearToken, taskUuid, { dueDate: newDueDate, startDate: newStartDate });
+        pushUndo(prevTasks, `${task?.id || ''} schedule`, prevExternal);
+        toast(`Schedule updated`, 'success', {
+          label: 'Undo',
+          onClick: () => {
+            setTasks(prevTasks);
+            setExternalTasks(prevExternal);
+            if (task) {
+              updateIssueSchedule(linearToken, taskUuid, {
+                dueDate: task.isDueImplicit ? undefined : task.due,
+                startDate: task.startDate,
+              }).catch(() => {});
+            }
+          },
+        });
+        return true;
+      } catch (e) {
+        if (e instanceof DebounceCancelled) return false;
+        setTasks(prevTasks);
+        setExternalTasks(prevExternal);
+        toastError(`Failed to update schedule: ${(e as Error).message}`, () =>
+          rescheduleRange(taskUuid, newDueDate, newStartDate),
+        );
+        return false;
       } finally {
         pendingMutations.current--;
       }
@@ -1018,6 +1096,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     zoomOut,
     reschedule,
     rescheduleStart,
+    rescheduleRange,
     snapTasksToDaysOff,
     updateMilestoneDate,
     loadTeamWorkflowStates,
