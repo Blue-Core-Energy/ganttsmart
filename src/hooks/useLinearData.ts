@@ -123,7 +123,7 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     }
   }, []);
 
-  // Local tasks in display order (used for StatsRow, FilterBar counts, and baselines)
+  // Local tasks in display order (used for StatsRow and baselines)
   const orderedTasks = useMemo(() => applyCustomOrder(tasks, customOrder), [tasks, customOrder]);
 
   const filteredTasks = useMemo(() => filterTasks(orderedTasks, filters), [orderedTasks, filters]);

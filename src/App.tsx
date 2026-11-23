@@ -320,8 +320,6 @@ function GanttView({
         statuses={statuses}
         filters={filters}
         onFiltersChange={setFilters}
-        totalCount={tasks.length}
-        filteredCount={filteredTasks.length}
         showBaselines={showBaselines}
         onShowBaselinesChange={handleShowBaselinesChange}
         externalCount={externalTasks.length}

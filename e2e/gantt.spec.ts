@@ -560,7 +560,12 @@ test.describe('GanttSmart GCP app', () => {
     await page.getByRole('option', { name: /Nate Jones/ }).click();
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
-    await expect(page.getByText('1/2', { exact: true })).toBeVisible();
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^1Active$/ })
+        .first(),
+    ).toBeVisible();
     await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
 
     // The open panel sits below the chip row, so "Clear all" stays clickable
@@ -573,6 +578,12 @@ test.describe('GanttSmart GCP app', () => {
     expect(clearBox!.y + clearBox!.height).toBeLessThanOrEqual(panelBox!.y);
     await clearAll.click({ timeout: 5000 });
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^2Active$/ })
+        .first(),
+    ).toBeVisible();
     await expect(filterButton).toHaveAttribute('title', 'Filter tasks by assignee, status, date range and completion');
 
     // Escape returns focus to the trigger and closes the panel
@@ -1247,8 +1258,13 @@ test.describe('GanttSmart GCP app', () => {
     ).toBeVisible();
     await expect(page.getByRole('button', { name: /Unscheduled\s*1\s*—/ })).toBeVisible();
 
-    // FilterBar count pill reflects only the 2 active scheduled tasks
-    await expect(page.getByText('2/2', { exact: true })).toBeVisible();
+    // Summary cards reflect only the 2 active scheduled tasks
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^2Active$/ })
+        .first(),
+    ).toBeVisible();
 
     // Status filter, inside the Filter dropdown, excludes Duplicate / Rejected
     const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
@@ -1594,8 +1610,13 @@ test.describe('GanttSmart GCP app', () => {
     await expect(doneBar).toHaveClass(/\bbar-done\b/);
     await expect(doneBar).toContainText('✓ Done');
 
-    // StatsRow and FilterBar reflect unified counts (3/3 total, 1 completed)
-    await expect(page.getByText('3/3')).toBeVisible();
+    // StatsRow reflects unified counts (2 active, 1 completed)
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^2Active$/ })
+        .first(),
+    ).toBeVisible();
     const completedStat = page
       .locator('div')
       .filter({ hasText: /^1Completed$/ })
@@ -1706,9 +1727,14 @@ test.describe('GanttSmart GCP app', () => {
     expect(pannedScroll).toBeGreaterThan(initialScroll);
 
     // FilterBar fits cleanly within the 1280px viewport without horizontal clipping
-    const countBox = await page.getByText('3/3').boundingBox();
-    expect(countBox).not.toBeNull();
-    expect(countBox!.x + countBox!.width).toBeLessThanOrEqual(1280);
+    const filterBar = page.getByTestId('filter-bar');
+    const barBox = await filterBar.boundingBox();
+    expect(barBox).not.toBeNull();
+    expect(barBox!.x + barBox!.width).toBeLessThanOrEqual(1280);
+    const lastButton = filterBar.getByRole('button').last();
+    const lastButtonBox = await lastButton.boundingBox();
+    expect(lastButtonBox).not.toBeNull();
+    expect(lastButtonBox!.x + lastButtonBox!.width).toBeLessThanOrEqual(1280);
 
     // DetailPanel shows Completed (not overdue) for past-due completed tasks
     await doneBar.click();
@@ -1725,7 +1751,12 @@ test.describe('GanttSmart GCP app', () => {
     await expect(completedToggle).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('[data-task-bar="ENG-100"]')).toHaveCount(0);
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
-    await expect(page.getByText('2/3')).toBeVisible();
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^0Completed$/ })
+        .first(),
+    ).toBeVisible();
     await expect(page.getByText('Completed hidden')).toBeVisible();
 
     // The Filter button surfaces the active filter count while the panel is open
@@ -1733,7 +1764,13 @@ test.describe('GanttSmart GCP app', () => {
 
     await completedToggle.click();
     await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
-    await expect(page.getByText('3/3')).toBeVisible();
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^1Completed$/ })
+        .first(),
+    ).toBeVisible();
+    await expect(page.getByText('Completed hidden')).toHaveCount(0);
 
     // Escape closes the panel and the bar no longer offers a grouping control
     await page.keyboard.press('Escape');
@@ -3605,8 +3642,13 @@ test.describe('GanttSmart GCP app', () => {
     await expect(rows.nth(0)).toHaveAttribute('data-external-task', 'true');
     await expect(rows.nth(1)).toHaveAttribute('data-task-id', 'COMM-101');
 
-    // FilterBar count stays scoped to current project's local tasks (1/1)
-    await expect(page.getByText('1/1')).toBeVisible();
+    // StatsRow count stays scoped to current project's local tasks (1 Active)
+    await expect(
+      page
+        .locator('div')
+        .filter({ hasText: /^1Active$/ })
+        .first(),
+    ).toBeVisible();
 
     // Cross-project SVG arrow connects CTRL-42 -> COMM-101 (flagged as violated because COMM-101 starts +2d <= CTRL-42 due +6d)
     const crossArrow = page.locator('svg path[data-arrow-source="CTRL-42"][data-arrow-target="COMM-101"]');

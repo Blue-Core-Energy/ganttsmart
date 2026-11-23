@@ -28,7 +28,6 @@ export default function SharedView() {
 
   const {
     filteredTasks,
-    tasks,
     unscheduledTasks,
     milestones,
     projectName,
@@ -178,14 +177,7 @@ export default function SharedView() {
         </div>
 
         {/* Filters */}
-        <FilterBar
-          assignees={assignees}
-          statuses={statuses}
-          filters={filters}
-          onFiltersChange={setFilters}
-          totalCount={tasks.length}
-          filteredCount={filteredTasks.length}
-        />
+        <FilterBar assignees={assignees} statuses={statuses} filters={filters} onFiltersChange={setFilters} />
 
         <StatsRow tasks={filteredTasks} unscheduledTasks={unscheduledTasks} />
         <Legend />
