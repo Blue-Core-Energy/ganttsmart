@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/utils/avatar';
-import { priorityColors, statusDotColors } from '@/utils/colors';
+import { priorityColorFor, statusDotColorFor } from '@/utils/colors';
 import { formatDate } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { isTaskDone } from '@/utils/tasks';
@@ -37,8 +37,8 @@ export default function Tooltip() {
   const isDone = isTaskDone(task);
   const overdue = !isDone && daysLeft < 0;
   const desc = task.description ? stripMarkdown(task.description) : '';
-  const statusDotColor = statusDotColors[task.statusType] || '#52525b';
-  const priorityColor = priorityColors[task.priority] || '#52525b';
+  const statusDotColor = statusDotColorFor(task.statusType);
+  const priorityColor = priorityColorFor(task.priority);
 
   // Position
   let left = x + 16;
@@ -82,9 +82,9 @@ export default function Tooltip() {
           <span
             className="inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
             style={{
-              backgroundColor: `${priorityColor}20`,
+              backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
               color: priorityColor,
-              border: `1px solid ${priorityColor}40`,
+              border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
             }}
           >
             {task.priority}

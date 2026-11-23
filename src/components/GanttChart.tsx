@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { InlineEditHandlers, Milestone, DayOff, Task, TimeScale } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
+import { priorityClass, priorityColors } from '@/utils/colors';
 import { buildTimeCells, daysBetween, formatIsoDate, isWeekend, startOfWeek } from '@/utils/date';
 import { buildArrowPath, resolveDependencyEdges } from '@/utils/dependencyArrows';
 import { loadCollapsedParents, saveCollapsedParents } from '@/utils/collapsedParents';
@@ -1174,13 +1175,13 @@ export default function GanttChart({
               refY="3"
               orient="auto"
             >
-              <polygon points="0 0, 8 3, 0 6" fill="#7c5cfc" opacity="0.9" />
+              <polygon points="0 0, 8 3, 0 6" style={{ fill: 'var(--color-accent)' }} opacity="0.9" />
             </marker>
           </defs>
           <path
             ref={connectionPathRef}
             fill="none"
-            stroke="#7c5cfc"
+            style={{ stroke: 'var(--color-accent)' }}
             strokeWidth="2"
             strokeDasharray="8 4"
             opacity="0.85"
@@ -1228,24 +1229,7 @@ function UnscheduledRow({
   const [date, setDate] = useState(todayStr);
   const [busy, setBusy] = useState(false);
 
-  const priorityCls =
-    task.priorityVal === 1
-      ? 'urgent'
-      : task.priorityVal === 2
-        ? 'high'
-        : task.priorityVal === 3
-          ? 'medium'
-          : task.priorityVal === 4
-            ? 'low'
-            : 'none';
-  const idColorMap: Record<string, string> = {
-    urgent: '#ef4444',
-    high: '#f97316',
-    medium: '#f59e0b',
-    low: '#22c55e',
-    none: '#a1a1aa',
-  };
-  const idColor = idColorMap[priorityCls];
+  const idColor = priorityColors[priorityClass(task.priorityVal)];
 
   const schedule = useCallback(
     async (newDate: string) => {

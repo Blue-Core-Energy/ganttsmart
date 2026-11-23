@@ -25,7 +25,9 @@
   --color-none-dark: #52525b;
   --color-success: #22c55e;
   --color-success-hover: #16a34a;
-  /* Schedule state — what a Gantt bar's colour means (see src/utils/scheduleState.ts) */
+  /* Schedule state — what a Gantt bar's colour means (see src/utils/scheduleState.ts). Four of
+     these match a priority colour today; they are kept separate on purpose, because the two
+     scales mean different things and are free to drift apart. */
   --color-state-done: #22c55e;
   --color-state-done-dark: #15803d;
   --color-state-overdue: #ef4444;
@@ -140,12 +142,6 @@ a {
 }
 
 /* Gantt bar gradients — subtle shimmer via pseudo-element */
-.gantt-bar,
-.bar-swatch {
-  /* Fallback colour, replaced by the schedule-state class the bar carries */
-  --bar-color: var(--color-state-not-started);
-  --bar-color-dark: var(--color-state-not-started-dark);
-}
 .gantt-bar {
   position: relative;
   overflow: hidden;
@@ -195,13 +191,18 @@ a {
   --bar-color-dark: var(--color-state-not-started-dark);
 }
 
-/* Chart bars and the legend swatches that stand for them */
+/* Chart bars and the legend swatches in `Legend.tsx` that stand for them. Without a state class
+   the var() fallbacks keep the element grey rather than transparent. */
 .gantt-bar,
 .bar-swatch {
-  background: linear-gradient(135deg, var(--bar-color-dark), var(--bar-color));
+  background: linear-gradient(
+    135deg,
+    var(--bar-color-dark, var(--color-state-not-started-dark)),
+    var(--bar-color, var(--color-state-not-started))
+  );
 }
 .gantt-bar {
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--bar-color) 30%, transparent);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--bar-color, var(--color-state-not-started)) 30%, transparent);
 }
 
 html.light .gantt-bar::before {

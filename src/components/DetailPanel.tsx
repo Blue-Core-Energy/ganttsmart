@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
-import { priorityColors, statusDotColors } from '@/utils/colors';
+import { priorityColorFor, statusDotColorFor } from '@/utils/colors';
 import { countWorkdaysInclusive, formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { calendarFor } from '@/utils/daysOff';
@@ -83,8 +83,8 @@ export default function DetailPanel() {
   const isDone = isTaskDone(currentTask);
   const overdue = !isDone && !currentTask.isUnscheduledExternal && daysLeft < 0;
   const desc = currentTask.description ? stripMarkdown(currentTask.description) : '';
-  const statusDotColor = statusDotColors[currentTask.statusType] || '#52525b';
-  const priorityColor = priorityColors[currentTask.priority] || '#52525b';
+  const statusDotColor = statusDotColorFor(currentTask.statusType);
+  const priorityColor = priorityColorFor(currentTask.priority);
 
   return (
     <>
@@ -112,9 +112,9 @@ export default function DetailPanel() {
             <span
               className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
               style={{
-                backgroundColor: `${priorityColor}18`,
+                backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
                 color: priorityColor,
-                border: `1px solid ${priorityColor}30`,
+                border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
               }}
             >
               {currentTask.priority}
@@ -230,11 +230,12 @@ export default function DetailPanel() {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Priority</span>
                 <span
+                  data-priority-badge
                   className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
                   style={{
-                    backgroundColor: `${priorityColor}18`,
+                    backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
                     color: priorityColor,
-                    border: `1px solid ${priorityColor}30`,
+                    border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
                   }}
                 >
                   {currentTask.priority}
