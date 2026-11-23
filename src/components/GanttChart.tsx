@@ -911,6 +911,7 @@ export default function GanttChart({
       {unscheduledTasks.length > 0 && (
         <div
           data-testid="unscheduled-section"
+          data-export-hide
           className="sticky left-0 border-b border-border-primary bg-bg-primary print:hidden"
         >
           <button
@@ -960,7 +961,7 @@ export default function GanttChart({
           </button>
 
           {unscheduledVisible && (
-            <div className="px-4 pb-4">
+            <div data-testid="unscheduled-list-container" className="px-4 pb-4 max-h-[240px] overflow-y-auto">
               <UnscheduledList tasks={unscheduledTasks} onReschedule={onReschedule} />
             </div>
           )}

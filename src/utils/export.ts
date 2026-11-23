@@ -15,17 +15,30 @@ async function captureAsDataUrl(element: HTMLElement): Promise<string> {
   element.style.width = element.scrollWidth + 'px';
   element.style.maxWidth = 'none';
 
+  // Temporarily hide elements marked data-export-hide so they don't contribute
+  // to measured scrollHeight or leave trailing empty space in the captured image.
+  const hiddenElements = (element.hasAttribute('data-export-hide') ? [element] : []).concat(
+    Array.from(element.querySelectorAll<HTMLElement>('[data-export-hide]')),
+  );
+  const origDisplays = hiddenElements.map((el) => el.style.display);
+  hiddenElements.forEach((el) => {
+    el.style.display = 'none';
+  });
+
   try {
     const dataUrl = await toPng(element, {
       pixelRatio: 2,
       width: element.scrollWidth,
       height: element.scrollHeight,
       backgroundColor: getComputedStyle(element).backgroundColor || '#09090b',
-      // Leave interactive-only affordances (e.g. the column picker) out of the image
-      filter: (node) => !(node instanceof HTMLElement && node.hasAttribute('data-export-hide')),
+      // Leave interactive-only affordances (e.g. the column picker, unscheduled section) out of the image
+      filter: (node) => !(node as HTMLElement).hasAttribute?.('data-export-hide'),
     });
     return dataUrl;
   } finally {
+    hiddenElements.forEach((el, i) => {
+      el.style.display = origDisplays[i];
+    });
     element.style.overflow = origOverflow;
     element.style.overflowX = origOverflowX;
     element.style.width = origWidth;

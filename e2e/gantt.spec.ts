@@ -1234,8 +1234,17 @@ test.describe('GanttSmart GCP app', () => {
 
     // The section sits above the schedule table, keeps its count badge, and still collapses in place
     const unscheduledSection = page.getByTestId('unscheduled-section');
+    await expect(unscheduledSection).toHaveAttribute('data-export-hide', '');
     const unscheduledToggle = unscheduledSection.getByRole('button', { name: /Unscheduled/ });
     await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('1');
+
+    // Small unscheduled lists are unaffected and take natural height well below 240px
+    const smallListContainer = page.getByTestId('unscheduled-list-container');
+    const smallHeight = await smallListContainer.evaluate((el) => el.clientHeight);
+    const smallScrollHeight = await smallListContainer.evaluate((el) => el.scrollHeight);
+    expect(smallHeight).toBeLessThan(200);
+    expect(smallScrollHeight).toBeLessThanOrEqual(smallHeight + 1);
+
     const sectionBox = await unscheduledSection.boundingBox();
     const headerBox = await page.locator('thead').boundingBox();
     const firstRowBox = await page.locator('[data-task-bar="ENG-101"]').boundingBox();
@@ -1417,6 +1426,17 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('No issues with dates yet')).toBeVisible();
     await expect(page.getByText('2 issues need a due date', { exact: false })).toBeVisible();
 
+    // Verify unscheduled issues are rendered in the expanded list with Schedule buttons
+    await expect(page.getByText('Unscheduled backlog task')).toBeVisible();
+    await expect(page.getByText('Unscheduled todo task')).toBeVisible();
+    await expect(page.getByText('ENG-101')).toBeVisible();
+    await expect(page.getByText('ENG-102')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Schedule' })).toHaveCount(2);
+
+    // Schedule table and export target are omitted when no tasks are scheduled
+    await expect(page.locator('#gantt-export-target')).toHaveCount(0);
+    await expect(page.locator('thead')).toHaveCount(0);
+
     // The summary row shows just the ignored-filtered Unscheduled count, with no misleading zeroed scheduled cards
     await expect(
       page
@@ -1427,6 +1447,163 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('div').filter({ hasText: /^0Active$/ })).toHaveCount(0);
     await expect(page.getByText('Total Span', { exact: true })).toHaveCount(0);
     await expect(page.getByText('In Progress', { exact: true })).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('keeps schedule table header visible in initial viewport when project has 20+ unscheduled issues', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    const scheduledIssue = {
+      id: 'uuid-sched-1',
+      identifier: 'ENG-101',
+      title: 'Design valve manifold',
+      description: `${startTagOffsetDays(-2)}\nManifold details`,
+      dueDate: isoOffsetDays(5),
+      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+      priority: 2,
+      state: { name: 'In Progress', type: 'started' },
+      createdAt: '2026-01-01T00:00:00Z',
+      completedAt: null,
+      canceledAt: null,
+      assignee: { name: 'Andrew Phillips' },
+      team: { id: 'team-1' },
+      projectMilestone: null,
+    };
+
+    const unscheduledIssues = Array.from({ length: 25 }, (_, idx) => {
+      const num = idx + 1;
+      const idStr = `ENG-2${String(num).padStart(2, '0')}`;
+      return {
+        id: `uuid-unscheduled-${num}`,
+        identifier: idStr,
+        title: `Unscheduled backlog item ${num}`,
+        description: '',
+        dueDate: null,
+        url: `https://linear.app/bluecoreenergy/issue/${idStr}`,
+        priority: 4,
+        state: { name: 'Backlog', type: 'backlog' },
+        createdAt: '2026-01-01T00:00:00Z',
+        completedAt: null,
+        canceledAt: null,
+        assignee: { name: 'Nate Jones' },
+        team: { id: 'team-1' },
+        projectMilestone: null,
+      };
+    });
+
+    const allIssues = [scheduledIssue, ...unscheduledIssues];
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      const respond = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) {
+        await respond({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await respond({
+          project: {
+            name: 'Demo Project',
+            startDate: isoOffsetDays(-10),
+            targetDate: null,
+            projectMilestones: { nodes: [] },
+            issues: { nodes: allIssues },
+            doneIssues: { nodes: [] },
+          },
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await respond({
+          issues: {
+            nodes: allIssues.map((n) => ({
+              id: n.id,
+              identifier: n.identifier,
+              relations: { nodes: [] },
+              children: { nodes: [] },
+            })),
+          },
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await respond({
+          workflowStates: {
+            nodes: [
+              { id: 'st-1', name: 'Backlog', type: 'backlog', position: 0 },
+              { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+            ],
+          },
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    // Section exists, is excluded from export, and shows count of 25 issues
+    const unscheduledSection = page.getByTestId('unscheduled-section');
+    await expect(unscheduledSection).toBeVisible();
+    await expect(unscheduledSection).toHaveAttribute('data-export-hide', '');
+    await expect(unscheduledSection.getByTestId('unscheduled-count')).toHaveText('25');
+
+    // The list container height is capped at 240px and scrolls
+    const listContainer = page.getByTestId('unscheduled-list-container');
+    await expect(listContainer).toBeVisible();
+    const listClientHeight = await listContainer.evaluate((el) => el.clientHeight);
+    const listScrollHeight = await listContainer.evaluate((el) => el.scrollHeight);
+    expect(listClientHeight).toBeLessThanOrEqual(240);
+    expect(listScrollHeight).toBeGreaterThan(listClientHeight);
+
+    // Schedule table header remains visible within initial viewport without scrolling
+    const thead = page.locator('thead');
+    await expect(thead).toBeVisible();
+    const theadBox = await thead.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(theadBox).not.toBeNull();
+    expect(theadBox!.y).toBeGreaterThan(0);
+    expect(theadBox!.y + theadBox!.height).toBeLessThan(viewport.height);
+
+    // Scheduled task bar is also visible in initial viewport
+    const taskBar = page.locator('[data-task-bar="ENG-101"]');
+    await expect(taskBar).toBeVisible();
+    const taskBarBox = await taskBar.boundingBox();
+    expect(taskBarBox).not.toBeNull();
+    expect(taskBarBox!.y + taskBarBox!.height).toBeLessThan(viewport.height);
+
+    // Collapsing toggle hides the list and expands back
+    const unscheduledToggle = unscheduledSection.getByRole('button', { name: /Unscheduled/ });
+    await unscheduledToggle.click();
+    await expect(listContainer).toHaveCount(0);
+    await unscheduledToggle.click();
+    await expect(page.getByTestId('unscheduled-list-container')).toBeVisible();
 
     expect(errors).toEqual([]);
   });

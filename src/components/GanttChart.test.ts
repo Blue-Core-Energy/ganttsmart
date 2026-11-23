@@ -89,3 +89,116 @@ describe('GanttChart pinned milestone row', () => {
     expect(html).toContain('drag to reschedule, click for details');
   });
 });
+
+function makeUnscheduledTask(id: string, uuid: string, title: string): Task {
+  return {
+    id,
+    uuid,
+    title,
+    description: '',
+    due: '',
+    startDate: '',
+    priorityVal: 4,
+    priority: 'Low',
+    status: 'Backlog',
+    statusType: 'backlog',
+    assignee: 'Bob',
+    url: `https://linear.app/test/issue/${id}`,
+    teamId: 'team-1',
+    blocks: [],
+    blockedBy: [],
+    progress: 0,
+    totalChildren: 0,
+    completedChildren: 0,
+  };
+}
+
+describe('GanttChart unscheduled section and exports', () => {
+  const baseProps = {
+    tasks: [makeTask()],
+    unscheduledTasks: [],
+    milestones: [],
+    loading: false,
+    error: '',
+    dayWidth: 20,
+  };
+
+  it('renders unscheduled section with data-export-hide, print:hidden, and max-h-[240px] overflow-y-auto', () => {
+    const unscheduledTasks = [
+      makeUnscheduledTask('ENG-101', 'u-101', 'Draft architectural proposal'),
+      makeUnscheduledTask('ENG-102', 'u-102', 'Order pressure test valves'),
+    ];
+
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...baseProps,
+        unscheduledTasks,
+      }),
+    );
+
+    // Section container specifically has test id, data-export-hide, and print:hidden
+    const sectionMatch = html.match(/<div[^>]*data-testid="unscheduled-section"[^>]*>/);
+    expect(sectionMatch).not.toBeNull();
+    expect(sectionMatch![0]).toContain('data-export-hide="true"');
+    expect(sectionMatch![0]).toContain('print:hidden');
+
+    // List container caps height and enables scrolling for long lists
+    const listContainerMatch = html.match(/<div[^>]*data-testid="unscheduled-list-container"[^>]*>/);
+    expect(listContainerMatch).not.toBeNull();
+    expect(listContainerMatch![0]).toContain('max-h-[240px]');
+    expect(listContainerMatch![0]).toContain('overflow-y-auto');
+
+    // Shows count and tasks
+    expect(html).toContain('data-testid="unscheduled-count"');
+    expect(html).toContain('>2<');
+    expect(html).toContain('ENG-101');
+    expect(html).toContain('Draft architectural proposal');
+    expect(html).toContain('ENG-102');
+    expect(html).toContain('Order pressure test valves');
+  });
+
+  it('omits unscheduled section when there are no unscheduled tasks', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...baseProps,
+        unscheduledTasks: [],
+      }),
+    );
+
+    expect(html).not.toContain('data-testid="unscheduled-section"');
+    expect(html).not.toContain('Unscheduled');
+  });
+
+  it('renders "No issues with dates yet" hint banner when only unscheduled tasks exist', () => {
+    const unscheduledTasks = [makeUnscheduledTask('ENG-201', 'u-201', 'Task without schedule')];
+
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...baseProps,
+        tasks: [],
+        unscheduledTasks,
+      }),
+    );
+
+    expect(html).toContain('No issues with dates yet');
+    expect(html).toContain('1 issue need a due date');
+    expect(html).toContain('ENG-201');
+    expect(html).toContain('Task without schedule');
+    // Does not render the schedule table
+    expect(html).not.toContain('gantt-export-target');
+    expect(html).not.toContain('<table');
+  });
+
+  it('renders "No tasks to display" when neither scheduled nor unscheduled tasks exist', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...baseProps,
+        tasks: [],
+        unscheduledTasks: [],
+      }),
+    );
+
+    expect(html).toContain('No tasks to display');
+    expect(html).not.toContain('<table');
+  });
+});
