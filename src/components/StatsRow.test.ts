@@ -1,6 +1,6 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Task } from '@/types';
 import StatsRow from './StatsRow';
 
@@ -94,5 +94,50 @@ describe('StatsRow', () => {
   it('renders nothing when all issues are ignored', () => {
     const ignored = [makeTask({ status: 'Rejected', statusType: 'canceled' })];
     expect(renderToStaticMarkup(createElement(StatsRow, { tasks: ignored, unscheduledTasks: ignored }))).toBe('');
+  });
+});
+
+describe('StatsRow collapsing', () => {
+  const scheduled = [makeTask({ id: 'ENG-1', uuid: 'u-1' })];
+  const render = (tasks: Task[] = scheduled, unscheduledTasks: Task[] = []) =>
+    renderToStaticMarkup(createElement(StatsRow, { tasks, unscheduledTasks }));
+  const stubCollapsed = (value: string | null) =>
+    vi.stubGlobal('localStorage', { getItem: () => value, setItem: () => {} });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('is expanded by default, with an unobtrusive hide control', () => {
+    stubCollapsed(null);
+    const html = render();
+    expect(html).toContain('Active');
+    expect(html).toContain('aria-label="Hide summary"');
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).not.toContain('Show summary');
+  });
+
+  it('is expanded when storage is unavailable', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => {
+        throw new Error('denied');
+      },
+    });
+    expect(render()).toContain('Hide summary');
+  });
+
+  it('renders only a visible, labelled expand button when collapsed', () => {
+    stubCollapsed('1');
+    const html = render(scheduled, [makeTask({ id: 'ENG-9', uuid: 'u-9', startDate: null, isDueImplicit: true })]);
+    expect(html).toMatch(/^<button[^>]*aria-expanded="false"/);
+    expect(html).toContain('>Show summary<');
+    expect(html).not.toContain('Active');
+    expect(html).not.toContain('Unscheduled');
+    expect(html).toContain('print:hidden');
+  });
+
+  it('still renders nothing when collapsed and there is nothing to summarise', () => {
+    stubCollapsed('1');
+    expect(render([], [])).toBe('');
   });
 });

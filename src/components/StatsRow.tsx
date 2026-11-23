@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { Task } from '@/types';
 import { isIgnoredTask } from '@/utils/issues';
+import { loadSummaryCollapsed, saveSummaryCollapsed } from '@/utils/summaryCollapsed';
 import { computeTaskStats, countUnscheduledTasks } from '@/utils/tasks';
 
 interface Props {
@@ -98,6 +100,24 @@ function CheckIcon() {
   );
 }
 
+function ChevronIcon({ up }: { up: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <polyline points={up ? '18 15 12 9 6 15' : '6 9 12 15 18 9'} />
+    </svg>
+  );
+}
+
 function buildScheduledCards(tasks: Task[]) {
   const { active, inProgress, completed, span } = computeTaskStats(tasks);
   return [
@@ -129,6 +149,7 @@ function buildScheduledCards(tasks: Task[]) {
 }
 
 export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
+  const [collapsed, setCollapsed] = useState(loadSummaryCollapsed);
   const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
   const unscheduled = countUnscheduledTasks(unscheduledTasks);
   if (!visibleTasks.length && !unscheduled) return null;
@@ -149,9 +170,29 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
       : []),
   ];
 
+  const toggle = (next: boolean) => {
+    setCollapsed(next);
+    saveSummaryCollapsed(next);
+  };
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        data-summary-toggle
+        aria-expanded={false}
+        onClick={() => toggle(false)}
+        className="shrink-0 flex items-center gap-1.5 w-full h-6 px-4 border-b border-border-primary bg-bg-primary text-[10.5px] uppercase tracking-wider font-medium text-text-muted hover:bg-bg-hover hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent transition-colors cursor-pointer print:hidden"
+      >
+        <ChevronIcon up={false} />
+        Show summary
+      </button>
+    );
+  }
+
   return (
-    <div className="shrink-0 border-b border-border-primary bg-bg-primary print:hidden">
-      <div className="flex items-stretch gap-0 px-4 py-2 overflow-x-auto">
+    <div className="shrink-0 flex items-center border-b border-border-primary bg-bg-primary print:hidden">
+      <div className="flex-1 min-w-0 flex items-stretch gap-0 pl-4 pr-2 py-2 overflow-x-auto">
         {cards.map((c, i) => {
           const Icon = c.Icon;
           return (
@@ -173,6 +214,17 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
           );
         })}
       </div>
+      <button
+        type="button"
+        data-summary-toggle
+        aria-label="Hide summary"
+        aria-expanded={true}
+        title="Hide summary"
+        onClick={() => toggle(true)}
+        className="shrink-0 self-start mt-1 mr-2 inline-flex items-center justify-center w-5 h-5 rounded text-text-muted hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors cursor-pointer"
+      >
+        <ChevronIcon up />
+      </button>
     </div>
   );
 }
