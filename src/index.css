@@ -202,7 +202,10 @@ a {
   );
 }
 .gantt-bar {
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--bar-color, var(--color-state-not-started)) 30%, transparent);
+  box-shadow:
+    var(--tw-ring-offset-shadow),
+    var(--tw-ring-shadow),
+    0 2px 8px color-mix(in srgb, var(--bar-color, var(--color-state-not-started)) 30%, transparent);
 }
 
 html.light .gantt-bar::before {

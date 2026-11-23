@@ -1663,11 +1663,16 @@ test.describe('GanttSmart GCP app', () => {
     await expect(row102).not.toHaveAttribute('data-highlighted', 'true');
     await expect(bar102).not.toHaveAttribute('data-highlighted', 'true');
 
+    // IT-146: Highlighted bar's computed box-shadow renders the purple accent ring; unhighlighted bar does not
+    await expect(bar100).toHaveCSS('box-shadow', /rgb\(124, 92, 252\) 0px 0px 0px 3px/);
+    await expect(bar102).not.toHaveCSS('box-shadow', /rgba?\(124, 92, 252/);
+
     // Pressing Escape clears arrow selection and unhighlights issues
     await page.keyboard.press('Escape');
     await expect(arrow).not.toHaveAttribute('data-selected', 'true');
     await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
     await expect(row101).not.toHaveAttribute('data-highlighted', 'true');
+    await expect(bar100).not.toHaveCSS('box-shadow', /rgba?\(124, 92, 252/);
 
     // Clicking arrow again selects it; clicking empty timeline background clears selection
     await clickArrowMidpoint();
