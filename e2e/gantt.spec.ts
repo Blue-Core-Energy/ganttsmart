@@ -761,6 +761,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(projectTrigger).toBeVisible();
     await expect(page.getByRole('button', { name: 'Demo Project' })).toHaveCount(1);
     await expect(page.getByTestId('filter-bar').getByRole('button', { name: 'Demo Project' })).toHaveCount(0);
+    await expect(header.getByText('Roadmap', { exact: true })).toHaveCount(0);
 
     // Open project dropdown — search input receives focus automatically
     await projectTrigger.click();
