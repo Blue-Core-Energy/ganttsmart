@@ -25,7 +25,7 @@ import { clampDayWidth, DEFAULT_DAY_WIDTH, deriveTimeScale, ZOOM_STEP, zoomDayWi
 import { filterExternalTasks, mergeTasksWithExternalOrder, pruneUnlinkedExternalTasks } from '@/utils/crossProject';
 import { planDayOffSnap, saveScheduleSnap, type ScheduleSnap } from '@/utils/daysOff';
 import { applyCustomOrder, filterTasks, isTaskDone, reorderWithinHierarchy } from '@/utils/tasks';
-import { applyWorkflowStateToTask, findWorkflowStateForTask, getNextWorkflowState } from '@/utils/workflowStates';
+import { applyWorkflowStateToTask, findWorkflowStateForTask } from '@/utils/workflowStates';
 
 const POLL_INTERVAL_MS = 30_000; // 30 seconds
 
@@ -613,85 +613,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     [linearToken, milestones],
   );
 
-  // Optimistic status cycle with rollback + undo
-  const cycleStatus = useCallback(
-    async (taskUuid: string): Promise<string | null> => {
-      if (!linearToken) return null;
-      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
-      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
-      if (!task) return null;
-
-      if (fromExternal && !allowExternalEdits) {
-        toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return null;
-      }
-
-      let teamStates = task.teamId ? workflowStatesByTeam[task.teamId] : undefined;
-      if ((!teamStates || teamStates.length === 0) && task.teamId) {
-        try {
-          const fetched = await fetchWorkflowStates(linearToken, task.teamId);
-          teamStates = fetched;
-          setWorkflowStatesByTeam((prev) => ({ ...prev, [task.teamId]: fetched }));
-        } catch (e) {
-          toastError(`Failed to load workflow states: ${(e as Error).message}`);
-          return null;
-        }
-      }
-      if (!teamStates || teamStates.length === 0) {
-        teamStates = workflowStates;
-      }
-      if (teamStates.length === 0) {
-        toastError('No workflow states available for this task');
-        return null;
-      }
-
-      const nextState = getNextWorkflowState(task, teamStates);
-      if (!nextState) return null;
-
-      const prevTasks = tasks;
-      const prevExternal = externalTasks;
-      const prevSnapshot = {
-        status: task.status,
-        statusType: task.statusType,
-        completedAt: task.completedAt,
-      };
-      const prevState = findWorkflowStateForTask(task, teamStates);
-      const completedAtIso = new Date().toISOString();
-
-      const updateList = (prev: Task[]) =>
-        prev.map((t) => (t.uuid === taskUuid ? applyWorkflowStateToTask(t, nextState, completedAtIso) : t));
-      if (fromExternal) setExternalTasks(updateList);
-      else setTasks(updateList);
-
-      pendingMutations.current++;
-      try {
-        await updateIssueState(linearToken, taskUuid, nextState.id);
-        pushUndo(prevTasks, `${task.id} status`, prevExternal);
-        toast(`Status → ${nextState.name}`, 'success', {
-          label: 'Undo',
-          onClick: () => {
-            const restore = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...prevSnapshot } : t));
-            if (fromExternal) setExternalTasks(restore);
-            else setTasks(restore);
-            if (prevState) updateIssueState(linearToken, taskUuid, prevState.id).catch(() => {});
-          },
-        });
-        return nextState.name;
-      } catch (e) {
-        const restore = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...prevSnapshot } : t));
-        if (fromExternal) setExternalTasks(restore);
-        else setTasks(restore);
-        toastError(`Failed to update status: ${(e as Error).message}`, () => {
-          void cycleStatus(taskUuid);
-        });
-        return null;
-      } finally {
-        pendingMutations.current--;
-      }
-    },
-    [linearToken, workflowStatesByTeam, workflowStates, tasks, externalTasks, allowExternalEdits, pushUndo],
-  );
-
   // Shared optimistic edit for a single issue (local or unlocked external): apply, persist,
   // then record undo + toast; on failure restore the original field values and offer a retry.
   const editTaskField = useCallback(
@@ -1099,7 +1020,6 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     rescheduleStart,
     snapTasksToDaysOff,
     updateMilestoneDate,
-    cycleStatus,
     loadTeamWorkflowStates,
     loadAssignableUsers,
     setTaskStatus,

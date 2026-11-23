@@ -354,7 +354,7 @@ export default function Landing() {
               {
                 num: '03',
                 title: 'Manage',
-                desc: 'Drag bars to reschedule. Click to cycle status. Filter, group, zoom, export. Changes sync back to Linear instantly.',
+                desc: 'Drag bars to reschedule. Click to change status. Filter, group, zoom, export. Changes sync back to Linear instantly.',
               },
             ].map((step, i) => (
               <div

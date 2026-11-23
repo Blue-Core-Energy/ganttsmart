@@ -73,19 +73,38 @@ export default function CellMenu({
     [onClose],
   );
 
-  // Position against the anchor; flip above it when there is no room below
+  // Position against the anchor; flip above it when there is no room below.
+  // Clamp within the viewport so it never overflows narrow screens (e.g. 375px mobile).
   useLayoutEffect(() => {
-    const anchor = anchorRef.current;
-    if (!anchor) return;
-    const rect = anchor.getBoundingClientRect();
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - MENU_WIDTH - VIEWPORT_MARGIN));
-    const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_MARGIN;
-    const spaceAbove = rect.top - VIEWPORT_MARGIN;
-    if (spaceBelow < Math.min(MENU_MAX_HEIGHT, 180) && spaceAbove > spaceBelow) {
-      setPosition({ left, bottom: window.innerHeight - rect.top + 4 });
-    } else {
-      setPosition({ left, top: rect.bottom + 4 });
-    }
+    const place = () => {
+      const anchor = anchorRef.current;
+      if (!anchor) return;
+      const rect = anchor.getBoundingClientRect();
+      const menuEl = menuRef.current;
+      const menuWidth = menuEl?.offsetWidth || MENU_WIDTH;
+      const clientWidth = document.documentElement.clientWidth || window.innerWidth;
+      const clientHeight = document.documentElement.clientHeight || window.innerHeight;
+      const maxLeft = clientWidth - menuWidth - VIEWPORT_MARGIN;
+      const left = Math.round(Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft)));
+      const spaceBelow = clientHeight - rect.bottom - VIEWPORT_MARGIN;
+      const spaceAbove = rect.top - VIEWPORT_MARGIN;
+      setPosition((prev) => {
+        const next =
+          spaceBelow < Math.min(MENU_MAX_HEIGHT, 180) && spaceAbove > spaceBelow
+            ? { left, bottom: clientHeight - rect.top + 4 }
+            : { left, top: rect.bottom + 4 };
+        if (prev && prev.left === next.left && prev.top === next.top && prev.bottom === next.bottom) {
+          return prev;
+        }
+        return next;
+      });
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    if (menuRef.current) observer?.observe(menuRef.current);
+    return () => {
+      observer?.disconnect();
+    };
   }, [anchorRef]);
 
   useEffect(() => {
@@ -168,6 +187,7 @@ export default function CellMenu({
       className="fixed z-[300] flex flex-col bg-bg-card border border-border-secondary rounded-lg shadow-xl outline-none"
       style={{
         width: MENU_WIDTH,
+        maxWidth: `calc(100vw - ${VIEWPORT_MARGIN * 2}px)`,
         maxHeight: MENU_MAX_HEIGHT,
         visibility: position ? 'visible' : 'hidden',
         left: position?.left ?? 0,

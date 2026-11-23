@@ -46,7 +46,6 @@ interface Props {
   onDayWidthChange?: (next: (current: number) => number) => void;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
-  onCycleStatus?: (taskUuid: string) => Promise<void>;
   /** Omit to keep status, assignee, and title read-only in the schedule table (shared views, exports) */
   inlineEdit?: InlineEditHandlers;
   onCreateRelation?: (sourceTaskId: string, targetTaskId: string) => Promise<void>;
@@ -111,7 +110,6 @@ export default function GanttChart({
   onDayWidthChange,
   onReschedule,
   onRescheduleStart,
-  onCycleStatus,
   inlineEdit,
   onCreateRelation,
   onReorder,
@@ -1111,7 +1109,6 @@ export default function GanttChart({
                 projectName={projectName}
                 onReschedule={onReschedule}
                 onRescheduleStart={onRescheduleStart}
-                onCycleStatus={onCycleStatus}
                 inlineEdit={inlineEdit}
                 onConnectStart={onCreateRelation ? handleConnectStart : undefined}
                 isConnecting={isConnecting}

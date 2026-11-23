@@ -38,7 +38,6 @@ interface Props {
   projectName?: string;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
   onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
-  onCycleStatus?: (taskUuid: string) => Promise<void>;
   /** Enables the status/assignee dropdowns and double-click title rename (never for read-only rows) */
   inlineEdit?: InlineEditHandlers;
   onConnectStart?: (taskId: string, e: React.MouseEvent) => void;
@@ -79,7 +78,6 @@ export default function GanttRow({
   projectName,
   onReschedule,
   onRescheduleStart,
-  onCycleStatus,
   inlineEdit,
   onConnectStart,
   isConnecting,
@@ -99,7 +97,6 @@ export default function GanttRow({
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
   const canDragStart = Boolean(onRescheduleStart) && !isExternalReadOnly;
-  const canCycleStatus = Boolean(onCycleStatus) && !isExternalReadOnly;
   const canConnect = Boolean(onConnectStart) && !isExternalReadOnly;
   const canInlineEdit = Boolean(inlineEdit) && !isExternalReadOnly;
   const isDone = isTaskDone(task);
@@ -142,6 +139,7 @@ export default function GanttRow({
   const [teamStates, setTeamStates] = useState<WorkflowState[] | null>(null);
   const [teamUsers, setTeamUsers] = useState<AssignableUser[] | null>(null);
   const statusAnchorRef = useRef<HTMLDivElement>(null);
+  const issueStatusAnchorRef = useRef<HTMLButtonElement>(null);
   const assigneeAnchorRef = useRef<HTMLDivElement>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
@@ -156,7 +154,7 @@ export default function GanttRow({
   }, [isEditingTitle]);
 
   const toggleMenu = (kind: 'status' | 'assignee') => {
-    if (!inlineEdit) return;
+    if (!canInlineEdit) return;
     if (menu === kind) {
       setMenu(null);
       return;
@@ -170,10 +168,10 @@ export default function GanttRow({
       setMenuErrors((prev) => ({ ...prev, [kind]: `Failed to load ${label}: ${(e as Error).message}` }));
     };
     if (kind === 'status' && !teamStates) {
-      inlineEdit.loadWorkflowStates(task.teamId).then(setTeamStates).catch(fail('statuses'));
+      inlineEdit?.loadWorkflowStates(task.teamId).then(setTeamStates).catch(fail('statuses'));
     }
     if (kind === 'assignee' && !teamUsers) {
-      inlineEdit.loadAssignableUsers(task.teamId).then(setTeamUsers).catch(fail('users'));
+      inlineEdit?.loadAssignableUsers(task.teamId).then(setTeamUsers).catch(fail('users'));
     }
   };
 
@@ -187,6 +185,24 @@ export default function GanttRow({
     [teamStates],
   );
   const activeStatusId = teamStates ? (findWorkflowStateForTask(task, teamStates)?.id ?? '') : '';
+
+  const renderStatusMenu = (anchorRef: React.RefObject<HTMLElement | null>) =>
+    canInlineEdit && menu === 'status' ? (
+      <CellMenu
+        anchorRef={anchorRef}
+        options={statusMenuOptions}
+        value={activeStatusId}
+        loading={!teamStates && !menuErrors.status}
+        error={menuErrors.status}
+        emptyMessage="No workflow states"
+        ariaLabel={`Status for ${task.id}`}
+        onClose={() => setMenu(null)}
+        onSelect={(id) => {
+          const state = teamStates?.find((st) => st.id === id);
+          if (state) void inlineEdit?.setStatus(task.uuid, state);
+        }}
+      />
+    ) : null;
 
   const assigneeMenuOptions = useMemo<CellMenuOption[]>(
     () => [
@@ -485,37 +501,41 @@ export default function GanttRow({
 
   const showsColumn = (key: ColumnKey) => visibleColumns.includes(key);
 
-  /** Status dot, clickable to cycle workflow states when the row is interactive */
-  const statusBubble =
-    canCycleStatus && onCycleStatus ? (
+  /** Status dot in the Issue cell when the status column is hidden */
+  const renderIssueStatusDot = () => {
+    if (!canInlineEdit) {
+      return (
+        <span
+          data-status-bubble={task.id}
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{ backgroundColor: statusDotColor }}
+          title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
+        />
+      );
+    }
+    return (
       <button
+        ref={issueStatusAnchorRef}
         type="button"
         data-status-bubble={task.id}
+        aria-haspopup="listbox"
+        aria-expanded={menu === 'status'}
+        aria-label={`Change status, currently ${task.status}`}
+        title={`${task.status} — click to change`}
         onClick={(e) => {
           e.stopPropagation();
-          void onCycleStatus(task.uuid);
+          toggleMenu('status');
         }}
         onMouseDown={(e) => e.stopPropagation()}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-        }}
         className="group/status w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        title={`${task.status} — click to cycle`}
-        aria-label={`${task.status} — click to cycle status`}
       >
         <span
           className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
           style={{ backgroundColor: statusDotColor }}
         />
       </button>
-    ) : (
-      <span
-        data-status-bubble={task.id}
-        className="w-2 h-2 rounded-full shrink-0"
-        style={{ backgroundColor: statusDotColor }}
-        title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
-      />
     );
+  };
 
   const dueColor = isDone
     ? 'var(--color-success)'
@@ -694,8 +714,13 @@ export default function GanttRow({
                     {task.title}
                   </div>
                 )}
-                {/* Keep click-to-cycle reachable when the status column is hidden */}
-                {!showsColumn('status') && <span className="ml-auto flex items-center shrink-0">{statusBubble}</span>}
+                {/* Keep status dropdown reachable when the status column is hidden */}
+                {!showsColumn('status') && (
+                  <span className="ml-auto flex items-center shrink-0">
+                    {renderIssueStatusDot()}
+                    {renderStatusMenu(issueStatusAnchorRef)}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -760,7 +785,12 @@ export default function GanttRow({
         if (!canInlineEdit) {
           return (
             <div className="flex items-center gap-2 min-w-0">
-              {statusBubble}
+              <span
+                data-status-bubble={task.id}
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: statusDotColor }}
+                title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
+              />
               <span className="text-[11.5px] text-text-secondary truncate" title={task.status}>
                 {task.status}
               </span>
@@ -780,33 +810,26 @@ export default function GanttRow({
             }}
             onDoubleClick={(e) => e.stopPropagation()}
           >
-            {statusBubble}
             <button
               type="button"
+              data-status-bubble={task.id}
               aria-haspopup="listbox"
               aria-expanded={menu === 'status'}
               aria-label={`Change status, currently ${task.status}`}
               title={`${task.status} — click to change`}
-              className="text-[11.5px] text-text-secondary truncate min-w-0 text-left cursor-pointer outline-none hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent rounded"
+              className="group/status flex items-center gap-2 min-w-0 text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
             >
-              {task.status}
+              <span className="w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0">
+                <span
+                  className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
+                  style={{ backgroundColor: statusDotColor }}
+                />
+              </span>
+              <span className="text-[11.5px] text-text-secondary truncate group-hover/status:text-text-primary">
+                {task.status}
+              </span>
             </button>
-            {menu === 'status' && (
-              <CellMenu
-                anchorRef={statusAnchorRef}
-                options={statusMenuOptions}
-                value={activeStatusId}
-                loading={!teamStates && !menuErrors.status}
-                error={menuErrors.status}
-                emptyMessage="No workflow states"
-                ariaLabel={`Status for ${task.id}`}
-                onClose={() => setMenu(null)}
-                onSelect={(id) => {
-                  const state = teamStates?.find((st) => st.id === id);
-                  if (state) void inlineEdit?.setStatus(task.uuid, state);
-                }}
-              />
-            )}
+            {renderStatusMenu(statusAnchorRef)}
           </div>
         );
 
@@ -992,10 +1015,10 @@ export default function GanttRow({
           e.preventDefault();
           if (isSafeUrl(task.url)) window.open(task.url, '_blank', 'noopener,noreferrer');
         }
-        if (e.key === 's' && canCycleStatus && onCycleStatus) {
+        if (e.key === 's' && !e.ctrlKey && !e.metaKey && !e.altKey && canInlineEdit) {
           if (targetEl?.closest('input, select, textarea')) return;
           e.preventDefault();
-          onCycleStatus(task.uuid);
+          toggleMenu('status');
         }
         // Alt+Arrow: move row up/down in the custom order
         if (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && onReorder) {
