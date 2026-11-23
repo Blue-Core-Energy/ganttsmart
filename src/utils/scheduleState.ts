@@ -2,18 +2,21 @@ import type { Task } from '@/types';
 import { daysBetween } from '@/utils/date';
 import { isTaskDone } from '@/utils/tasks';
 
+/** Legend states in the order the legend lists them. */
+export const SCHEDULE_STATES = ['done', 'overdue', 'in-progress', 'late-start', 'not-started'] as const;
+
 /**
  * How an issue is tracking against its schedule. This is what a Gantt bar's colour means:
  * one state per bar, picked by the precedence in `scheduleState`.
  */
-export type ScheduleState = 'done' | 'overdue' | 'in-progress' | 'late-start' | 'not-started';
+export type ScheduleState = (typeof SCHEDULE_STATES)[number];
 
 /** Bar / swatch class for a state. The colours themselves live in `src/index.css`. */
 export function scheduleStateClass(state: ScheduleState): string {
   return `bar-${state}`;
 }
 
-/** Legend wording for each state, in the order the legend lists them. */
+/** Legend wording for each state. */
 export const SCHEDULE_STATE_LABELS: Record<ScheduleState, string> = {
   done: 'Done',
   overdue: 'Overdue',
@@ -21,8 +24,6 @@ export const SCHEDULE_STATE_LABELS: Record<ScheduleState, string> = {
   'late-start': 'Late to start',
   'not-started': 'Not started',
 };
-
-export const SCHEDULE_STATES: ScheduleState[] = ['done', 'overdue', 'in-progress', 'late-start', 'not-started'];
 
 /**
  * Which schedule state an issue is in, first match wins:
@@ -41,6 +42,7 @@ export function scheduleState(
   today: Date,
 ): ScheduleState {
   if (isTaskDone(task)) return 'done';
+  // A task with an empty or missing due date cannot be overdue
   if (task.due && daysBetween(today, new Date(task.due + 'T00:00:00')) < 0) return 'overdue';
   if (task.statusType === 'started') return 'in-progress';
   if (task.startDate && daysBetween(today, new Date(task.startDate + 'T00:00:00')) < 0) return 'late-start';

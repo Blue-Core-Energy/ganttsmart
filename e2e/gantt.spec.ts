@@ -1840,6 +1840,7 @@ test.describe('GanttSmart GCP app', () => {
 
     // Done wins over a missed due date; overdue wins over being in progress
     await expect(bar('ENG-300')).toHaveClass(/\bbar-done\b/);
+    expect(await bar('ENG-300').evaluate((el) => getComputedStyle(el).backgroundImage)).toContain('rgb(34, 197, 94)');
     await expect(bar('ENG-301')).toHaveClass(/\bbar-overdue\b/);
     await expect(bar('ENG-302')).toHaveClass(/\bbar-in-progress\b/);
     await expect(bar('ENG-303')).toHaveClass(/\bbar-late-start\b/);
@@ -1848,9 +1849,10 @@ test.describe('GanttSmart GCP app', () => {
     await expect(bar('ENG-305')).toHaveClass(/\bbar-not-started\b/);
 
     // Red no longer pulses now that it is the only "late" signal
-    await expect(bar('ENG-301')).not.toHaveClass(/animate-pulse-bar/);
+    await expect(bar('ENG-301')).toHaveCSS('animation-name', 'none');
 
-    // Urgent issues take three different colours, so priority is not what the bar says
+    // ENG-301 is Low priority (formerly green) now rendering red, while
+    // ENG-302..ENG-304 are Urgent rendering blue/amber/grey, so priority is not what the bar says
     const backgrounds = await page.evaluate(() =>
       ['ENG-301', 'ENG-302', 'ENG-303', 'ENG-304'].map(
         (id) => getComputedStyle(document.querySelector(`[data-task-bar="${id}"]`)!).backgroundImage,

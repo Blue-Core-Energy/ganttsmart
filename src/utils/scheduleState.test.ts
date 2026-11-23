@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '@/types';
-import { scheduleState, scheduleStateClass } from './scheduleState';
+import { SCHEDULE_STATES, scheduleState, scheduleStateClass } from './scheduleState';
 
 const TODAY = new Date(2026, 4, 10); // 10 May 2026
 
@@ -73,6 +73,18 @@ describe('scheduleState', () => {
     for (const statusType of ['backlog', 'unstarted', 'triage']) {
       expect(scheduleState(makeTask({ statusType }), TODAY)).toBe('not-started');
     }
+  });
+
+  it('marks a canceled issue past its due date as overdue (filtered upstream before display)', () => {
+    expect(scheduleState(makeTask({ statusType: 'canceled', due: '2026-05-09' }), TODAY)).toBe('overdue');
+  });
+
+  it('treats an empty due date cleanly as not-started', () => {
+    expect(scheduleState(makeTask({ due: '' }), TODAY)).toBe('not-started');
+  });
+
+  it('defines SCHEDULE_STATES in legend order', () => {
+    expect(SCHEDULE_STATES).toEqual(['done', 'overdue', 'in-progress', 'late-start', 'not-started']);
   });
 
   it('names a bar class per state', () => {
