@@ -10,8 +10,6 @@ interface Props {
   statuses: string[];
   filters: Filters;
   onFiltersChange: (f: Filters) => void;
-  totalCount: number;
-  filteredCount: number;
   showBaselines?: boolean;
   onShowBaselinesChange?: (show: boolean) => void;
   externalCount?: number;
@@ -203,8 +201,6 @@ export default function FilterBar({
   statuses,
   filters,
   onFiltersChange,
-  totalCount,
-  filteredCount,
   showBaselines,
   onShowBaselinesChange,
   externalCount = 0,
@@ -435,11 +431,6 @@ export default function FilterBar({
             )}
           </>
         )}
-
-        {/* Count pill */}
-        <span className="ml-auto shrink-0 bg-bg-hover text-text-secondary text-[11px] font-medium font-mono tabular-nums px-2.5 h-7 rounded-full flex items-center">
-          {filteredCount}/{totalCount}
-        </span>
       </div>
 
       {/* Active filter chips row */}

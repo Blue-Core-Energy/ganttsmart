@@ -96,8 +96,6 @@ describe('FilterBar', () => {
         statuses: [],
         filters: { search: '', assignee: '', status: '', dateFrom: '', dateTo: '', showCompleted: true },
         onFiltersChange: vi.fn(),
-        totalCount: 0,
-        filteredCount: 0,
       }),
     );
 
