@@ -6075,8 +6075,18 @@ test.describe('GanttSmart GCP app', () => {
             data: {
               issues: {
                 nodes: [
-                  { id: 'uuid-1', identifier: 'ENG-101', relations: { nodes: [] }, children: { nodes: [] } },
-                  { id: 'uuid-2', identifier: 'ENG-102', relations: { nodes: [] }, children: { nodes: [] } },
+                  {
+                    id: 'uuid-1',
+                    identifier: 'ENG-101',
+                    relations: { nodes: [{ type: 'blocks', relatedIssue: { identifier: 'ENG-102' } }] },
+                    children: { nodes: [] },
+                  },
+                  {
+                    id: 'uuid-2',
+                    identifier: 'ENG-102',
+                    relations: { nodes: [{ type: 'blocked_by', relatedIssue: { identifier: 'ENG-101' } }] },
+                    children: { nodes: [] },
+                  },
                 ],
               },
             },
@@ -6237,6 +6247,79 @@ test.describe('GanttSmart GCP app', () => {
     const scrollAfterBarDrag = await scroller.evaluate((el) => el.scrollLeft);
     expect(scrollAfterBarDrag).toBe(scrollBeforeBarDrag);
     await expect.poll(() => updatedDates.length).toBeGreaterThan(0);
+
+    // IT-142: Zooming out and back in must not leave high-water mark / dead space past the end of the calendar.
+    // Also verify dependency arrows are mounted and remain visible across shrinking.
+    const depArrow = page.locator('svg path[data-arrow-source="ENG-101"][data-arrow-target="ENG-102"]');
+    await expect(depArrow).toBeVisible();
+
+    const initialDiff = await page.evaluate(() => {
+      const container = document.getElementById('gantt-export-target')!;
+      const table = container.querySelector('table')!;
+      return Math.abs(container.scrollWidth - Math.max(table.offsetWidth, container.clientWidth));
+    });
+    expect(initialDiff).toBeLessThanOrEqual(2);
+
+    // Zoom out deeply (multi-step wheel zoom out)
+    await page.keyboard.down('Control');
+    for (let i = 0; i < 8; i++) {
+      await page.mouse.wheel(0, 300);
+    }
+    await page.keyboard.up('Control');
+
+    // Zoom back in to day scale
+    for (let i = 0; i < 15; i++) {
+      await page.keyboard.press('+');
+    }
+    await expect(timelineHeader).toContainText(/\d+(Mo|Tu|We|Th|Fr|Sa|Su)/);
+
+    // After zooming back in, scrollWidth must shrink back to match Math.max(table.offsetWidth, container.clientWidth)
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const container = document.getElementById('gantt-export-target')!;
+          const table = container.querySelector('table')!;
+          return Math.abs(container.scrollWidth - Math.max(table.offsetWidth, container.clientWidth));
+        });
+      })
+      .toBeLessThanOrEqual(2);
+
+    // Dependency arrows still render and stay visible after shrinking
+    await expect(depArrow).toBeVisible();
+
+    // Zoom way in to wide day scale (widening the table), then zoom back out
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press('+');
+    }
+    for (let i = 0; i < 10; i++) {
+      await page.keyboard.press('-');
+    }
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const container = document.getElementById('gantt-export-target')!;
+          const table = container.querySelector('table')!;
+          return Math.abs(container.scrollWidth - Math.max(table.offsetWidth, container.clientWidth));
+        });
+      })
+      .toBeLessThanOrEqual(2);
+
+    await expect(depArrow).toBeVisible();
+
+    // Scrolling to the right edge leaves the last day visible with no empty dead space past the table
+    await scroller.evaluate((el) => {
+      el.scrollLeft = el.scrollWidth;
+    });
+    const rightEdgeState = await page.evaluate(() => {
+      const container = document.getElementById('gantt-export-target')!;
+      const table = container.querySelector('table')!;
+      const containerRect = container.getBoundingClientRect();
+      const tableRect = table.getBoundingClientRect();
+      // Table's right edge should be at or within 2px of container's right edge (no empty space to the right)
+      return { tableRight: tableRect.right, containerRight: containerRect.right };
+    });
+    expect(rightEdgeState.tableRight).toBeGreaterThanOrEqual(rightEdgeState.containerRight - 2);
 
     expect(errors).toEqual([]);
   });

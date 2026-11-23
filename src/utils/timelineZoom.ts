@@ -82,11 +82,17 @@ export function anchoredScrollLeft({
   pointerOffsetX,
   fixedColsWidth,
   dayWidth,
+  maxScrollLeft,
 }: {
   anchorDayOffset: number;
   pointerOffsetX: number;
   fixedColsWidth: number;
   dayWidth: number;
+  maxScrollLeft?: number;
 }): number {
-  return Math.max(0, fixedColsWidth + offsetDays * dayWidth - pointerOffsetX);
+  const target = Math.max(0, fixedColsWidth + offsetDays * dayWidth - pointerOffsetX);
+  if (maxScrollLeft !== undefined && Number.isFinite(maxScrollLeft)) {
+    return Math.min(target, Math.max(0, maxScrollLeft));
+  }
+  return target;
 }

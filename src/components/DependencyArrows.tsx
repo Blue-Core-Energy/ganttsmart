@@ -11,6 +11,8 @@ interface Props {
   edges: DependencyEdge[];
   containerRef: React.RefObject<HTMLDivElement | null>;
   depViolations?: Map<string, string[]>;
+  /** Explicit layout driver / SVG width matching the table content width */
+  contentWidth?: number;
   /** Layout drivers — ensure arrows recompute on zoom or column changes even if table width stays viewport-padded */
   dayWidth?: number;
   fixedColsWidth?: number;
@@ -79,6 +81,7 @@ export default memo(function DependencyArrows({
   edges,
   containerRef,
   depViolations,
+  contentWidth,
   dayWidth,
   fixedColsWidth,
   selectedArrow,
@@ -120,8 +123,11 @@ export default memo(function DependencyArrows({
 
     const routed = routeDependencyArrows(rawArrows);
     setArrows(routed);
-    setSize({ width: container.scrollWidth, height: container.scrollHeight });
-  }, [edges, containerRef, depViolations, dayWidth, fixedColsWidth]);
+    const table = container.querySelector('table');
+    const computedWidth = contentWidth ?? (table ? table.offsetWidth : container.clientWidth);
+    const computedHeight = table ? table.offsetHeight : container.clientHeight;
+    setSize({ width: computedWidth, height: computedHeight });
+  }, [edges, containerRef, depViolations, contentWidth, dayWidth, fixedColsWidth]);
 
   useEffect(() => {
     // Initial compute after paint
@@ -167,7 +173,7 @@ export default memo(function DependencyArrows({
     // today line, which shares z-[1] but comes earlier in the DOM
     <svg
       className="absolute top-0 left-0 pointer-events-none z-[1]"
-      width={size.width}
+      width={contentWidth ?? size.width}
       height={size.height}
       style={{ overflow: 'visible' }}
     >

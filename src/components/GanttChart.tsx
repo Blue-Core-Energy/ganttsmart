@@ -265,9 +265,12 @@ export default function GanttChart({
       // Show connection SVG
       const svg = connectionSvgRef.current;
       if (svg) {
+        const table = container.querySelector('table');
+        const computedWidth = table ? table.offsetWidth : container.clientWidth;
+        const computedHeight = table ? table.offsetHeight : container.clientHeight;
         svg.style.display = '';
-        svg.setAttribute('width', String(container.scrollWidth));
-        svg.setAttribute('height', String(container.scrollHeight));
+        svg.setAttribute('width', String(computedWidth));
+        svg.setAttribute('height', String(computedHeight));
       }
 
       document.body.style.cursor = 'crosshair';
@@ -416,7 +419,8 @@ export default function GanttChart({
     document.body.style.userSelect = 'none';
 
     const onMove = (ev: MouseEvent) => {
-      el.scrollLeft = startScrollLeft - (ev.clientX - startX);
+      const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth);
+      el.scrollLeft = Math.min(maxScroll, Math.max(0, startScrollLeft - (ev.clientX - startX)));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -584,8 +588,9 @@ export default function GanttChart({
     const dataDays = daysBetween(chartStart, chartEnd);
 
     const fixedCols = totalColumnWidth(visibleColumns, colWidths);
-    const viewportWidth = typeof window !== 'undefined' ? window.innerWidth - 80 : 1200;
-    const minDaysToFill = Math.ceil(Math.max(viewportWidth - fixedCols, 0) / dayWidth);
+    const targetViewportWidth =
+      viewportWidth > 0 ? viewportWidth : typeof window !== 'undefined' ? window.innerWidth : 1200;
+    const minDaysToFill = Math.ceil(Math.max(targetViewportWidth - fixedCols, 0) / dayWidth);
     let totalDays = Math.max(dataDays, minDaysToFill);
 
     if (timeScale === 'week') {
@@ -601,7 +606,7 @@ export default function GanttChart({
     }
 
     return { chartStart, totalDays };
-  }, [tasks, milestones, today, visibleColumns, colWidths, dayWidth, dateFrom, dateTo, timeScale]);
+  }, [tasks, milestones, today, visibleColumns, colWidths, dayWidth, dateFrom, dateTo, timeScale, viewportWidth]);
 
   // Calendar header (memoized): a top row of coarse groups (months, or years at month
   // scale) and a bottom row of cells matching the current time scale.
@@ -767,13 +772,16 @@ export default function GanttChart({
     zoomAnchorRef.current = null;
     const el = ganttRef.current;
     if (!el) return;
+    const contentWidth = fixedColsWidth + totalDays * dayWidth;
+    const maxScrollLeft = Math.max(0, Math.max(contentWidth, el.clientWidth) - el.clientWidth);
     el.scrollLeft = anchoredScrollLeft({
       anchorDayOffset: msToDayOffset(chartStart.getTime(), anchor.anchorMs),
       pointerOffsetX: anchor.pointerOffsetX,
       fixedColsWidth,
       dayWidth,
+      maxScrollLeft,
     });
-  }, [dayWidth, chartStart, fixedColsWidth]);
+  }, [dayWidth, chartStart, fixedColsWidth, totalDays]);
 
   // Early returns — after all hooks
   if (loading) {
@@ -1249,6 +1257,7 @@ export default function GanttChart({
           edges={dependencyEdges}
           containerRef={innerRef}
           depViolations={depViolations}
+          contentWidth={fixedColsWidth + totalDays * dayWidth}
           dayWidth={dayWidth}
           fixedColsWidth={fixedColsWidth}
           selectedArrow={activeSelectedArrow}
