@@ -321,9 +321,8 @@ describe('routeDependencyArrows', () => {
     ]);
     const [aT1, aT2, bT2, bT3] = routed.map((r) => verticals(r.path)[0]);
 
-    // One trunk per source
-    expect(aT1.x).toBe(aT2.x);
-    expect(bT2.x).toBe(bT3.x);
+    // A->T2 and B->T2 converge on the shared target trunk T2
+    expect(aT2.x).toBe(bT2.x);
     // A->T1 (50..162) and B->T3 (106..274) are unrelated and overlap, so they cannot share a column
     expect(Math.abs(aT1.x - bT3.x)).toBeGreaterThanOrEqual(ARROW_STAGGER_STEP);
     expectNoUnrelatedVerticalOverlap(routed);
@@ -466,6 +465,127 @@ describe('routeDependencyArrows', () => {
       expect(124 - pts[pts.length - 2].x).toBeGreaterThanOrEqual(ARROW_HEAD);
     }
     expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('converges forward arrows that share a target onto a single vertical trunk', () => {
+    const arrows = [
+      { sourceId: 'task-1', targetId: 'task-3', fromX: 100, fromY: 50, toX: 400, toY: 150 },
+      { sourceId: 'task-2', targetId: 'task-3', fromX: 200, fromY: 100, toX: 400, toY: 150 },
+    ];
+    const routed = route(arrows);
+    expect(routed).toHaveLength(2);
+
+    const [v1] = verticals(routed[0].path);
+    const [v2] = verticals(routed[1].path);
+    // Both vertical segments share the exact same x near the target (400 - ARROW_STUB = 388)
+    expect(v1.x).toBe(388);
+    expect(v2.x).toBe(388);
+    expect(v1.x).toBe(v2.x);
+
+    // Both enter (400, 150) along y = 150
+    expect(routed[0].path.endsWith('H 400')).toBe(true);
+    expect(routed[1].path.endsWith('H 400')).toBe(true);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('gives precedence to shared target trunk when arrows share both source and target (A->C, B->C, A->D)', () => {
+    const routed = route([
+      { sourceId: 'A', targetId: 'C', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'B', targetId: 'C', fromX: 200, fromY: 100, toX: 400, toY: 200 },
+      { sourceId: 'A', targetId: 'D', fromX: 100, fromY: 50, toX: 300, toY: 260 },
+    ]);
+    const [aC, bC, aD] = routed.map((r) => verticals(r.path)[0]);
+
+    // A->C and B->C share the target trunk near target C (400 - 12 = 388)
+    expect(aC.x).toBe(388);
+    expect(bC.x).toBe(388);
+    expect(aC.x).toBe(bC.x);
+
+    // A->D is the only arrow into D, so it stays with source trunk A near source (100 + 12 = 112)
+    expect(aD.x).toBe(112);
+    expect(aD.x).not.toBe(aC.x);
+
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('falls back cleanly to per-source behaviour when a target group is infeasible, rejoining multi-arrow source trunks', () => {
+    // Arrow 1: long gap (100 -> 300)
+    // Arrow 2: tight gap (285 -> 300), gap is 15px (< 2 * ARROW_STUB = 24px)
+    // Arrow 3: another arrow from source A (100 -> 300 to target D)
+    // Placing turn at 300 - 12 = 288 violates source clearance for arrow 2 (minX > maxX)
+    const routed = route([
+      { sourceId: 'A', targetId: 'C', fromX: 100, fromY: 50, toX: 300, toY: 150 },
+      { sourceId: 'B', targetId: 'C', fromX: 285, fromY: 100, toX: 300, toY: 150 },
+      { sourceId: 'A', targetId: 'D', fromX: 100, fromY: 50, toX: 300, toY: 260 },
+    ]);
+    const [vAC, vBC, vAD] = routed.map((r) => verticals(r.path)[0]);
+
+    // Infeasible to share target trunk C: A->C falls back and rejoins A's source trunk with A->D
+    expect(vAC.x).toBe(112);
+    expect(vAD.x).toBe(112);
+    expect(vAC.x).toBe(vAD.x);
+
+    // B->C falls back to B's source trunk, turning near target at 300 - 12 = 288 (defaultTurnX for gap 15)
+    expect(vBC.x).toBe(288);
+    expect(vBC.x).not.toBe(vAC.x);
+
+    // Neither arrow routes backwards across its source bar
+    for (const r of routed) {
+      const pts = points(r.path);
+      expect(pts[1].x).toBeGreaterThanOrEqual(pts[0].x);
+    }
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('staggers a shared target trunk to the left as one unit and respects fromX + 4 clearance', () => {
+    // Target C at toX = 400 (baseX = 388).
+    // Arrow B->C has fromX = 376, so fromX + 4 = 380 (and fromX + ARROW_STUB = 388 <= 388).
+    // An unrelated arrow occupies x = 388, forcing forward-target|C to shift left to 382.
+    const routed = route([
+      { sourceId: 'A', targetId: 'C', fromX: 100, fromY: 60, toX: 400, toY: 200 },
+      { sourceId: 'B', targetId: 'C', fromX: 376, fromY: 100, toX: 400, toY: 200 },
+      { sourceId: 'U1', targetId: 'U2', fromX: 376, fromY: 40, toX: 500, toY: 250 }, // baseX = 388
+    ]);
+
+    const [aC, bC] = routed.slice(0, 2).map((r) => verticals(r.path)[0]);
+    // Both members of forward-target|C shift left together from 388 to 382
+    expect(aC.x).toBe(382);
+    expect(bC.x).toBe(382);
+    expect(aC.x).toBe(bC.x);
+    // Both stay clear of B's source bar at fromX + 4 = 380
+    expect(bC.x).toBeGreaterThanOrEqual(376 + 4);
+    expectNoUnrelatedVerticalOverlap(routed);
+  });
+
+  it('preserves rounded elbows, crossing hops, and backwards lanes alongside shared target trunks', () => {
+    // Rounded elbows:
+    const rounded = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'C', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'B', targetId: 'C', fromX: 200, fromY: 100, toX: 400, toY: 200 },
+    ]);
+    // Both have rounded elbows (Q commands)
+    expect(rounded[0].path).toContain('Q');
+    expect(rounded[1].path).toContain('Q');
+    // Both end with rounded turn into target C
+    expect(rounded[0].path.endsWith('Q 388 200, 394 200 H 400')).toBe(true);
+    expect(rounded[1].path.endsWith('Q 388 200, 394 200 H 400')).toBe(true);
+    // Neither arrow hops over the other
+    expect(rounded[0].path).not.toContain('A ');
+    expect(rounded[1].path).not.toContain('A ');
+
+    // Coexists with backwards arrows:
+    const mixed = route([
+      { sourceId: 'F1', targetId: 'TF', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'F2', targetId: 'TF', fromX: 200, fromY: 100, toX: 400, toY: 200 },
+      { sourceId: 'B1', targetId: 'TB', fromX: 400, fromY: 250, toX: 100, toY: 350 },
+    ]);
+    const [f1, f2] = mixed.slice(0, 2).map((r) => verticals(r.path)[0]);
+    expect(f1.x).toBe(388);
+    expect(f2.x).toBe(388);
+    // Backwards arrow still routes through lane
+    const backH = horizontals(mixed[2].path);
+    expect(backH.some((h) => h.y === 250 + ARROW_LANE_OFFSET)).toBe(true);
+    expectNoUnrelatedVerticalOverlap(mixed);
   });
 });
 
@@ -714,6 +834,24 @@ describe('crossing hops', () => {
     expect(withHop.laneYOffset).toBe(alone.laneYOffset);
     expect(points(withHop.path)[0]).toEqual({ x: 100, y: 50 });
     expect(points(withHop.path).at(-1)).toEqual({ x: 300, y: 162 });
+  });
+
+  it('hops both converging forward arrows over an unrelated horizontal run that crosses their shared target trunk', () => {
+    const edges: DependencyArrowEdge[] = [
+      { sourceId: 'A', targetId: 'C', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'B', targetId: 'C', fromX: 200, fromY: 100, toX: 400, toY: 200 },
+      across('CROSS', 150, 50, 450),
+    ];
+    const routed = routeDependencyArrows(edges);
+    // Both converging arrows share the vertical trunk at x = 388, crossing y = 150
+    const aArcs = arcs(routed[0].path);
+    const bArcs = arcs(routed[1].path);
+    expect(aArcs).toHaveLength(1);
+    expect(bArcs).toHaveLength(1);
+    expect(aArcs[0]).toBe(`A ${R} ${R} 0 0 1 388 ${150 + R} `);
+    expect(bArcs[0]).toBe(`A ${R} ${R} 0 0 1 388 ${150 + R} `);
+    // The crossed line is flat
+    expect(arcs(routed[2].path)).toHaveLength(0);
   });
 });
 
