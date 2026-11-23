@@ -33,6 +33,14 @@ export default tseslint.config(
     },
   },
   {
+    // Test files do not use React Fast Refresh HMR
+    files: ['**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    ignores: ['server/**'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
+  {
     // Node server (Cloud Run): Node globals, no React rules.
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['server/**/*.ts'],

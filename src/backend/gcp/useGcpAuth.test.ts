@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,73 +16,13 @@ interface HookResult<T> {
   current: T;
 }
 
-interface MockElement {
-  tagName: string;
-  nodeType: number;
-  style: Record<string, string>;
-  setAttribute: (k: string, v: string) => void;
-  removeAttribute: (k: string) => void;
-  getAttribute: (k: string) => string | null;
-  childNodes: unknown[];
-  appendChild: <T>(child: T) => T;
-  removeChild: <T>(child: T) => T;
-  addEventListener: () => void;
-  removeEventListener: () => void;
-  ownerDocument: unknown;
-  parentNode?: unknown;
-}
-
-function setupDom() {
-  const windowStub = {
-    location: { href: 'https://example.com/', search: '', pathname: '/', hash: '' },
-    history: { state: null, replaceState: vi.fn() },
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    HTMLIFrameElement: class HTMLIFrameElement {},
-  };
-
-  const documentStub = {
-    createElement: (tag: string): MockElement => {
-      const el: MockElement = {
-        tagName: tag.toUpperCase(),
-        nodeType: 1,
-        style: {},
-        setAttribute: () => {},
-        removeAttribute: () => {},
-        getAttribute: () => null,
-        childNodes: [],
-        appendChild: <T>(child: T): T => {
-          el.childNodes.push(child);
-          (child as { parentNode?: unknown }).parentNode = el;
-          return child;
-        },
-        removeChild: <T>(child: T): T => {
-          const i = el.childNodes.indexOf(child);
-          if (i >= 0) el.childNodes.splice(i, 1);
-          return child;
-        },
-        addEventListener: () => {},
-        removeEventListener: () => {},
-        ownerDocument: documentStub,
-      };
-      return el;
-    },
-    createTextNode: (text: string) => ({ nodeType: 3, nodeValue: text }),
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    activeElement: null,
-    defaultView: windowStub,
-  };
-
-  vi.stubGlobal('window', windowStub);
-  vi.stubGlobal('document', documentStub);
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-}
+const cleanups = new Set<() => Promise<void>>();
 
 async function renderHook<T>(hook: () => T): Promise<{ result: HookResult<T>; unmount: () => Promise<void> }> {
   const result: HookResult<T> = { current: undefined as unknown as T };
   const container = document.createElement('div');
-  const root = createRoot(container as unknown as HTMLElement);
+  document.body.appendChild(container);
+  const root = createRoot(container);
 
   function Component() {
     result.current = hook();
@@ -92,24 +33,32 @@ async function renderHook<T>(hook: () => T): Promise<{ result: HookResult<T>; un
     root.render(createElement(Component));
   });
 
-  return {
-    result,
-    unmount: async () => {
-      await act(async () => {
-        root.unmount();
-      });
-    },
+  const unmount = async () => {
+    if (!cleanups.has(unmount)) return;
+    cleanups.delete(unmount);
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
   };
+
+  cleanups.add(unmount);
+
+  return { result, unmount };
 }
 
 describe('useGcpAuth', () => {
   beforeEach(() => {
-    setupDom();
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    for (const unmount of Array.from(cleanups)) {
+      await unmount();
+    }
+    cleanups.clear();
     vi.unstubAllGlobals();
   });
 
