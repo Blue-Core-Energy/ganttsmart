@@ -741,6 +741,9 @@ test.describe('GanttSmart GCP app', () => {
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
 
+    // No milestones in Demo Project, so pinned milestone row is omitted
+    await expect(page.locator('tr[data-milestone-row]')).toHaveCount(0);
+
     // Set a task search filter to verify Escape in project search doesn't clear task search
     const taskSearch = page.getByPlaceholder('Search tasks…');
     await taskSearch.fill('manifold');
@@ -5184,7 +5187,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
-  test('keeps frozen cells above milestone lines on completed rows while only fading cell contents', async ({
+  test('keeps frozen cells opaque on completed rows and renders pinned milestone row with diamond interactions', async ({
     page,
   }) => {
     const errors = trackErrors(page);
@@ -5203,6 +5206,8 @@ test.describe('GanttSmart GCP app', () => {
       });
     });
 
+    let updatedMilestoneTargetDate: string | null = null;
+
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as {
         query?: string;
@@ -5212,6 +5217,12 @@ test.describe('GanttSmart GCP app', () => {
       const query = payload?.query ?? '';
       const json = (data: unknown) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projectMilestoneUpdate')) {
+        updatedMilestoneTargetDate = (payload?.variables as { targetDate?: string } | undefined)?.targetDate ?? null;
+        await json({ projectMilestoneUpdate: { success: true } });
+        return;
+      }
 
       if (query.includes('projects(')) {
         await json({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
@@ -5235,6 +5246,15 @@ test.describe('GanttSmart GCP app', () => {
                   createdAt: '2026-01-01T00:00:00Z',
                   updatedAt: '2026-01-02T00:00:00Z',
                 },
+                {
+                  id: 'ms-2',
+                  name: 'RC1',
+                  description: 'Release Candidate 1',
+                  targetDate: isoOffsetDays(6),
+                  sortOrder: 2,
+                  createdAt: '2026-01-01T00:00:00Z',
+                  updatedAt: '2026-01-02T00:00:00Z',
+                },
               ],
             },
             issues: {
@@ -5254,6 +5274,21 @@ test.describe('GanttSmart GCP app', () => {
                   team: { id: 'team-1' },
                   projectMilestone: null,
                 },
+                ...Array.from({ length: 24 }, (_, idx) => ({
+                  id: `uuid-extra-${idx + 1}`,
+                  identifier: `ENG-${102 + idx}`,
+                  title: `Extra task ${idx + 1}`,
+                  description: `${startTagOffsetDays(-2)}\nDetails`,
+                  dueDate: isoOffsetDays(32 + idx),
+                  url: `https://linear.app/bluecoreenergy/issue/ENG-${102 + idx}`,
+                  priority: 2,
+                  state: { name: 'In Progress', type: 'started' },
+                  createdAt: '2026-01-01T00:00:00Z',
+                  completedAt: null,
+                  assignee: { name: 'Andrew Phillips' },
+                  team: { id: 'team-1' },
+                  projectMilestone: null,
+                })),
               ],
             },
             doneIssues: {
@@ -5308,8 +5343,33 @@ test.describe('GanttSmart GCP app', () => {
     const doneRow = page.locator('tr[data-task-id="ENG-100"]');
     await expect(doneRow).toHaveAttribute('data-task-done', 'true');
     const doneTaskCell = doneRow.locator('td[data-column-key="task"]');
-    const milestoneLine = page.locator('[data-milestone-line="ms-1"]');
-    await expect(milestoneLine).toHaveCount(1);
+
+    // Dashed vertical lines are removed; milestones render only on the pinned top row
+    await expect(page.locator('[data-milestone-line]')).toHaveCount(0);
+
+    const milestoneRow = page.locator('tr[data-milestone-row]');
+    await expect(milestoneRow).toHaveCount(1);
+
+    // Left frozen columns: "Milestones" in task column, other columns blank
+    const milestoneTaskCell = milestoneRow.locator('td[data-column-key="task"]');
+    await expect(milestoneTaskCell).toContainText('Milestones');
+    const milestoneIdCell = milestoneRow.locator('td[data-column-key="id"]');
+    expect((await milestoneIdCell.innerText()).trim()).toBe('');
+    const milestoneDueCell = milestoneRow.locator('td[data-column-key="due"]');
+    expect((await milestoneDueCell.innerText()).trim()).toBe('');
+
+    // Milestone diamonds and labels on target dates
+    const milestoneDiamond = page.locator('[data-milestone-diamond="ms-1"]');
+    const milestoneDiamond2 = page.locator('[data-milestone-diamond="ms-2"]');
+    await expect(milestoneDiamond).toBeVisible();
+    await expect(milestoneDiamond2).toBeVisible();
+    await expect(milestoneRow.getByText('Beta Release')).toBeVisible();
+    await expect(milestoneRow.getByText('RC1')).toBeVisible();
+
+    // Two nearby milestones stagger across two compact sub-row lanes (different Y coordinates)
+    const d1InitialBox = (await milestoneDiamond.boundingBox())!;
+    const d2InitialBox = (await milestoneDiamond2.boundingBox())!;
+    expect(Math.abs(d2InitialBox.y - d1InitialBox.y)).toBeGreaterThan(15);
 
     // The row must not create a stacking context: opacity is applied to cell contents, never the row or cells
     await page.mouse.move(0, 0);
@@ -5334,40 +5394,77 @@ test.describe('GanttSmart GCP app', () => {
       .poll(async () => doneTaskCell.evaluate((el) => getComputedStyle(el.firstElementChild as HTMLElement).opacity))
       .toBe('1');
 
-    // Scroll horizontally until the milestone line sits underneath the last frozen (due) column
+    // Vertical pinning: milestone row's sticky <td> cells stay pinned directly below the header while scrolling schedule
     const scrollContainer = page.locator('#gantt-export-target');
-    const doneDueCell = doneRow.locator('td[data-column-key="due"]');
-    const cellBox = (await doneDueCell.boundingBox())!;
-    const lineBox = (await milestoneLine.boundingBox())!;
+    const canScroll = await scrollContainer.evaluate((el) => el.scrollHeight > el.clientHeight);
+    expect(canScroll).toBe(true);
+
+    const theadTaskHeader = page.locator('#gantt-export-target thead th[data-column-key="task"]');
+    const theadBottom = (await theadTaskHeader.boundingBox())!.y + (await theadTaskHeader.boundingBox())!.height;
+    const milestoneTimelineCell = milestoneRow.locator('td').last();
+    expect(Math.abs((await milestoneTaskCell.boundingBox())!.y - theadBottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await milestoneTimelineCell.boundingBox())!.y - theadBottom)).toBeLessThanOrEqual(1);
+
+    await scrollContainer.evaluate((el) => {
+      el.scrollTop += 150;
+    });
+    expect(await scrollContainer.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    expect(Math.abs((await milestoneTaskCell.boundingBox())!.y - theadBottom)).toBeLessThanOrEqual(1);
+    expect(Math.abs((await milestoneTimelineCell.boundingBox())!.y - theadBottom)).toBeLessThanOrEqual(1);
+
+    await scrollContainer.evaluate((el) => {
+      el.scrollTop = 0;
+    });
+
+    // Horizontal pinning: scroll horizontally until diamond sits under the frozen due column
+    const cellBox = (await milestoneDueCell.boundingBox())!;
+    const diamondBox = (await milestoneDiamond.boundingBox())!;
     const targetX = cellBox.x + cellBox.width / 2;
     await scrollContainer.evaluate((el, delta) => {
       el.scrollLeft += delta;
-    }, lineBox.x - targetX);
+    }, diamondBox.x - targetX);
     await expect
-      .poll(async () => Math.round((await milestoneLine.boundingBox())!.x))
+      .poll(async () => Math.round((await milestoneDiamond.boundingBox())!.x))
       .toBeCloseTo(Math.round(targetX), -1);
 
-    // Hit-testing respects paint order, so make the (pointer-events: none) line hit-testable temporarily
+    // Hit-testing respects paint order: frozen column sits above the scrolling diamond
     const hit = await page.evaluate(() => {
-      const line = document.querySelector('[data-milestone-line="ms-1"]') as HTMLElement;
-      const cell = document.querySelector('tr[data-task-id="ENG-100"] td[data-column-key="due"]') as HTMLElement;
-      line.style.pointerEvents = 'auto';
-      const lineRect = line.getBoundingClientRect();
+      const diamondEl = document.querySelector('[data-milestone-diamond="ms-1"]') as HTMLElement;
+      const cell = document.querySelector('tr[data-milestone-row] td[data-column-key="due"]') as HTMLElement;
+      const diamondRect = diamondEl.getBoundingClientRect();
       const cellRect = cell.getBoundingClientRect();
-      const x = lineRect.left + lineRect.width / 2;
-      const y = cellRect.top + cellRect.height / 2;
+      const x = diamondRect.left + diamondRect.width / 2;
+      const y = diamondRect.top + diamondRect.height / 2;
       const top = document.elementFromPoint(x, y);
-      const result = {
-        lineInsideCell: x > cellRect.left && x < cellRect.right,
-        topIsLine: top === line || line.contains(top),
+      return {
+        diamondInsideCellBounds: x > cellRect.left && x < cellRect.right,
+        yInsideCell: y > cellRect.top && y < cellRect.bottom,
+        topIsDiamond: top === diamondEl || diamondEl.contains(top),
         topInCell: Boolean(top && cell.contains(top)),
       };
-      line.style.pointerEvents = '';
-      return result;
     });
-    expect(hit.lineInsideCell).toBe(true);
-    expect(hit.topIsLine).toBe(false);
+    expect(hit.diamondInsideCellBounds).toBe(true);
+    expect(hit.yInsideCell).toBe(true);
+    expect(hit.topIsDiamond).toBe(false);
     expect(hit.topInCell).toBe(true);
+
+    // Scroll back and click diamond to open milestone panel
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    await milestoneDiamond.click();
+    await expect(page.getByText('Beta Release').first()).toBeVisible();
+    await expect(page.getByText('Initial milestone')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByText('Initial milestone')).toHaveCount(0);
+
+    // Drag diamond horizontally to reschedule (drag left to stay well inside 1280px viewport)
+    const dBox = (await milestoneDiamond.boundingBox())!;
+    await page.mouse.move(dBox.x + dBox.width / 2, dBox.y + dBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dBox.x + dBox.width / 2 - 112, dBox.y + dBox.height / 2, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(() => updatedMilestoneTargetDate).not.toBeNull();
 
     expect(errors).toEqual([]);
   });

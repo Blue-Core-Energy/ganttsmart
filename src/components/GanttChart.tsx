@@ -29,6 +29,12 @@ import {
   type ColumnWidths,
 } from '@/utils/scheduleColumns';
 import { applyCollapsedParents, buildTaskHierarchy, computeDepViolations } from '@/utils/tasks';
+import {
+  assignMilestoneLanes,
+  estimateMilestoneWidth,
+  isMilestoneLabelFlipped,
+  MILESTONE_ROW_HEIGHT,
+} from '@/utils/milestones';
 import ColumnPicker from './ColumnPicker';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
@@ -219,12 +225,12 @@ export default function GanttChart({
     saveVisibleColumns(normalized);
   }, []);
 
-  // Milestone drag — live pixel offset for the flag + line, committed on mouseup
+  // Milestone drag — live pixel offset for the diamond, committed on mouseup
   const [milestoneDrag, setMilestoneDrag] = useState<{ id: string; delta: number } | null>(null);
   const milestoneDragRef = useRef<{ id: string; startX: number; didDrag: boolean } | null>(null);
 
-  // Header height drives where the milestone lines start (the header is sticky and
-  // its height varies with the time scale and the milestone band).
+  // Header height drives where the pinned milestone row sits under the sticky header
+  // (the header is sticky and its height varies with the time scale).
   const [headerHeight, setHeaderHeight] = useState(64);
   const headerObserverRef = useRef<ResizeObserver | null>(null);
 
@@ -325,15 +331,15 @@ export default function GanttChart({
     };
   }, []);
 
-  // Measure the header so milestone lines start exactly below it. A callback ref
+  // Measure the header so the pinned milestone row sits directly below it. A callback ref
   // (not an effect) because the table mounts after the loading/error early returns.
   const theadRef = useCallback((el: HTMLTableSectionElement | null) => {
     headerObserverRef.current?.disconnect();
     headerObserverRef.current = null;
     if (!el) return;
-    setHeaderHeight(el.offsetHeight);
+    setHeaderHeight(el.getBoundingClientRect().height);
     if (typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver(() => setHeaderHeight(el.offsetHeight));
+    const ro = new ResizeObserver(() => setHeaderHeight(el.getBoundingClientRect().height));
     ro.observe(el);
     headerObserverRef.current = ro;
   }, []);
@@ -387,7 +393,7 @@ export default function GanttChart({
   useEffect(() => () => wheelCleanupRef.current?.(), []);
 
   /**
-   * Drag the empty timeline background to pan. Bars, handles, milestone flags and
+   * Drag the empty timeline background to pan. Bars, handles, milestones and
    * connector dots sit above the background and are matched out, so this never
    * swallows a reschedule, a resize or a dependency drag.
    */
@@ -651,6 +657,15 @@ export default function GanttChart({
     [milestones, chartStart, totalDays],
   );
 
+  const todayOffset = daysBetween(chartStart, today);
+  const showTodayLine = timeScale !== 'day' && todayOffset >= 0 && todayOffset < totalDays;
+
+  // Stagger milestone labels across two compact sub-rows so nearby names don't collide
+  const milestoneLanes = useMemo(
+    () => assignMilestoneLanes(milestonesInRange, dayWidth, totalDays * dayWidth),
+    [milestonesInRange, dayWidth, totalDays],
+  );
+
   // Issues per milestone — powers the drawer's progress bar and issue list
   const issuesByMilestone = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -665,6 +680,7 @@ export default function GanttChart({
   // Drag a milestone horizontally to reschedule it; a click without movement opens the drawer.
   const handleMilestoneMouseDown = useCallback(
     (e: React.MouseEvent, milestone: Milestone & { dayOffset: number }) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
 
@@ -962,7 +978,7 @@ export default function GanttChart({
                         ? 'sticky top-0 z-[20]'
                         : isSticky
                           ? 'sticky top-0 z-[10]'
-                          : 'sticky top-0 z-[5]'
+                          : 'sticky top-0 z-[9]'
                     } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
                       width: colWidths[key],
@@ -991,49 +1007,9 @@ export default function GanttChart({
                 );
               })}
               <th
-                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-[5]"
+                className="p-0 border-b-2 border-border-primary bg-bg-header sticky top-0 z-[9]"
                 onContextMenu={togglePickerFromContextMenu}
               >
-                {/* Milestone band — flags sit above the calendar and act as drag handles */}
-                {milestonesInRange.length > 0 && (
-                  <div
-                    data-timeline-background
-                    className="relative h-[24px] border-b border-border-primary/50 cursor-grab"
-                  >
-                    {milestonesInRange.map((m) => {
-                      const dragging = milestoneDrag?.id === m.id;
-                      const dateLabel = draggedDateLabel(m);
-                      return (
-                        <div
-                          key={m.id}
-                          className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-10 flex items-center gap-1 px-1.5 h-[18px] rounded border whitespace-nowrap select-none ${
-                            onUpdateMilestoneDate ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
-                          } ${
-                            dragging
-                              ? 'bg-amber-500 border-amber-500 text-white shadow-lg'
-                              : 'bg-amber-500/15 border-amber-500/50 text-amber-600 dark:text-amber-400 hover:bg-amber-500/25'
-                          }`}
-                          style={{
-                            left: milestoneX(m),
-                            maxWidth: 180,
-                            transition: dragging ? 'none' : 'background-color 150ms',
-                          }}
-                          onMouseDown={(e) => handleMilestoneMouseDown(e, m)}
-                          title={
-                            onUpdateMilestoneDate
-                              ? `${m.name} — ${m.targetDate} · drag to reschedule, click for details`
-                              : `${m.name} — ${m.targetDate}`
-                          }
-                        >
-                          <span className="w-2 h-2 rotate-45 border border-current shrink-0" />
-                          <span className="text-[9.5px] font-bold uppercase tracking-wide overflow-hidden text-ellipsis">
-                            {dateLabel ?? m.name}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
                 <div data-timeline-background className="flex border-b border-border-primary cursor-grab">
                   {topCells.map((m, i) => (
                     <div
@@ -1074,19 +1050,161 @@ export default function GanttChart({
                       )}
                     </div>
                   ))}
-                  {/* Marker in the day row, aligned with the milestone's line below */}
-                  {milestonesInRange.map((m) => (
-                    <div
-                      key={m.id}
-                      className="absolute bottom-0 z-10 w-2 h-2 rotate-45 -translate-x-1/2 translate-y-1/2 border border-amber-500 bg-amber-500 pointer-events-none"
-                      style={{ left: milestoneX(m) }}
-                    />
-                  ))}
                 </div>
               </th>
             </tr>
           </thead>
           <tbody>
+            {milestonesInRange.length > 0 && (
+              <tr data-milestone-row role="row">
+                {visibleColumns.map((key, i) => {
+                  const stickyLeft = stickyColumnInfo.offsets[key];
+                  const isSticky = stickyLeft !== undefined;
+                  const isLastFrozen = key === stickyColumnInfo.lastFrozenKey;
+                  const isFirstCol = i === 0;
+
+                  return (
+                    <td
+                      key={key}
+                      data-column-key={key}
+                      data-frozen={isSticky ? 'true' : undefined}
+                      className={`border-b-2 border-r border-border-primary align-middle overflow-hidden bg-bg-primary gantt-sticky-cell sticky ${
+                        key === 'task' ? 'px-[18px]' : 'px-3'
+                      } ${isSticky ? 'z-[8]' : 'z-[7]'} ${isFirstCol ? 'border-l-2 border-l-transparent' : ''} ${
+                        isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''
+                      }`}
+                      style={{
+                        width: colWidths[key],
+                        minWidth: Math.min(getColumnDef(key).minWidth, colWidths[key]),
+                        maxWidth: colWidths[key],
+                        left: isSticky ? stickyLeft : undefined,
+                        top: headerHeight,
+                        height: MILESTONE_ROW_HEIGHT,
+                      }}
+                    >
+                      {key === 'task' && (
+                        <div className="flex items-center min-w-0">
+                          <span className="text-[12px] font-semibold text-text-secondary uppercase tracking-wider truncate">
+                            Milestones
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                  );
+                })}
+                <td
+                  className="p-0 border-b-2 border-border-primary align-middle bg-bg-primary sticky z-[7]"
+                  style={{
+                    top: headerHeight,
+                    height: MILESTONE_ROW_HEIGHT,
+                  }}
+                >
+                  <div className="relative h-full" style={{ width: totalDays * dayWidth }}>
+                    {/* Background grid for panning and visual continuity */}
+                    <div data-timeline-background className="absolute inset-0 flex cursor-grab">
+                      {bottomCells.map((d, i) => {
+                        const isToday = timeScale === 'day' && d.isCurrent;
+                        return (
+                          <div
+                            key={i}
+                            className={`shrink-0 h-full border-r border-border-primary/30 ${
+                              isToday ? 'bg-accent/[0.08]' : d.isWeekend ? 'bg-bg-hover/30' : ''
+                            } ${d.dayOff ? 'nonwork-company' : ''}`}
+                            style={{ width: d.days * dayWidth }}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    {/* Today line marker */}
+                    {showTodayLine && (
+                      <div
+                        className="absolute top-0 bottom-0 w-px bg-accent/50 pointer-events-none z-[1]"
+                        style={{ left: todayOffset * dayWidth + dayWidth / 2 }}
+                      />
+                    )}
+
+                    {/* Staggered milestone diamonds and labels */}
+                    {milestonesInRange.map((m) => {
+                      const dragging = milestoneDrag?.id === m.id;
+                      const dateLabel = draggedDateLabel(m);
+                      const x = milestoneX(m);
+                      const lane = milestoneLanes.get(m.id) ?? 0;
+                      const labelText = dateLabel ?? m.name;
+                      const width = estimateMilestoneWidth(labelText);
+                      const flipLeft = isMilestoneLabelFlipped(x, totalDays * dayWidth, width);
+
+                      return (
+                        <div
+                          key={m.id}
+                          className="absolute select-none pointer-events-auto"
+                          style={{
+                            left: x,
+                            top: lane === 0 ? 3 : 23,
+                            height: 18,
+                            zIndex: dragging ? 10 : 2,
+                          }}
+                        >
+                          {/* Diamond interactive handle */}
+                          <div
+                            data-milestone-diamond={m.id}
+                            role="button"
+                            tabIndex={0}
+                            className={`absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent rounded ${
+                              onUpdateMilestoneDate ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
+                            }`}
+                            onMouseDown={(e) => handleMilestoneMouseDown(e, m)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openMilestonePanel(m, issuesByMilestone.get(m.id) || []);
+                              }
+                            }}
+                            title={
+                              onUpdateMilestoneDate
+                                ? `${m.name} — ${m.targetDate} · drag to reschedule, click for details`
+                                : `${m.name} — ${m.targetDate}`
+                            }
+                            aria-label={
+                              onUpdateMilestoneDate
+                                ? `${m.name}, milestone target date ${m.targetDate}. Drag to reschedule, click for details.`
+                                : `${m.name}, milestone target date ${m.targetDate}`
+                            }
+                          >
+                            <span
+                              className={`w-2.5 h-2.5 rotate-45 transition-transform ${
+                                dragging
+                                  ? 'bg-accent border-2 border-accent scale-125 shadow-md'
+                                  : 'bg-amber-500 border border-amber-600 dark:border-amber-400 shadow-sm hover:scale-125'
+                              }`}
+                            />
+                          </div>
+
+                          {/* Milestone name beside the diamond */}
+                          <span
+                            className={`absolute top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] max-w-[150px] truncate ${
+                              flipLeft ? 'right-[11px] text-right' : 'left-[11px] text-left'
+                            } ${onUpdateMilestoneDate ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${
+                              dragging
+                                ? 'font-bold text-accent dark:text-accent'
+                                : 'font-medium text-text-primary hover:text-accent transition-colors'
+                            }`}
+                            onMouseDown={(e) => handleMilestoneMouseDown(e, m)}
+                            title={
+                              onUpdateMilestoneDate
+                                ? `${m.name} — ${m.targetDate} · drag to reschedule, click for details`
+                                : `${m.name} — ${m.targetDate}`
+                            }
+                          >
+                            {labelText}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </td>
+              </tr>
+            )}
             {visibleRows.map((task) => (
               <GanttRow
                 key={task.id}
@@ -1123,27 +1241,6 @@ export default function GanttChart({
             ))}
           </tbody>
         </table>
-
-        {/* Milestone lines — dotted verticals running down through every row.
-            Purely visual (pointer-events-none) so they never intercept bar drags;
-            the header flag is the drag/click handle. */}
-        {milestonesInRange.map((m) => {
-          const dragging = milestoneDrag?.id === m.id;
-          return (
-            <div
-              key={m.id}
-              data-milestone-line={m.id}
-              className="absolute pointer-events-none z-[4]"
-              style={{
-                left: fixedColsWidth + milestoneX(m),
-                top: headerHeight,
-                bottom: 0,
-                width: 0,
-                borderLeft: `2px dashed ${dragging ? 'var(--color-accent)' : 'rgba(245, 158, 11, 0.75)'}`,
-              }}
-            />
-          );
-        })}
 
         <DependencyArrows
           edges={dependencyEdges}
