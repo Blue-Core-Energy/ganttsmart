@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@/types';
 import { isIgnoredTask } from '@/utils/issues';
 import { loadSummaryCollapsed, saveSummaryCollapsed } from '@/utils/summaryCollapsed';
@@ -150,6 +150,16 @@ function buildScheduledCards(tasks: Task[]) {
 
 export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
   const [collapsed, setCollapsed] = useState(loadSummaryCollapsed);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const focusToggle = useRef(false);
+
+  // The two states render different buttons, so hand focus to the new one after a user toggle
+  useEffect(() => {
+    if (!focusToggle.current) return;
+    focusToggle.current = false;
+    toggleRef.current?.focus();
+  }, [collapsed]);
+
   const visibleTasks = tasks.filter((t) => !isIgnoredTask(t));
   const unscheduled = countUnscheduledTasks(unscheduledTasks);
   if (!visibleTasks.length && !unscheduled) return null;
@@ -171,6 +181,7 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
   ];
 
   const toggle = (next: boolean) => {
+    focusToggle.current = true;
     setCollapsed(next);
     saveSummaryCollapsed(next);
   };
@@ -178,6 +189,7 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
   if (collapsed) {
     return (
       <button
+        ref={toggleRef}
         type="button"
         data-summary-toggle
         aria-expanded={false}
@@ -215,6 +227,7 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
         })}
       </div>
       <button
+        ref={toggleRef}
         type="button"
         data-summary-toggle
         aria-label="Hide summary"
