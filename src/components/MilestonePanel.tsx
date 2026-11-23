@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Milestone, Task } from '@/types';
 import { formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
-import { priorityColors } from '@/utils/colors';
+import { priorityColorFor } from '@/utils/colors';
 import { isTaskDone } from '@/utils/tasks';
 import { openDetailPanel } from './detailPanelStore';
 import { closeMilestonePanel, getMilestoneDateHandler, registerMilestonePanelHandlers } from './milestonePanelStore';
@@ -225,7 +225,7 @@ export default function MilestonePanel() {
                 <div className="text-[11px] font-medium text-text-muted mb-2.5">Issues ({issues.length})</div>
                 <div className="space-y-1.5">
                   {issues.map((t) => {
-                    const color = priorityColors[t.priority] || '#52525b';
+                    const color = priorityColorFor(t.priority);
                     const done = isTaskDone(t);
                     return (
                       <button

@@ -14,8 +14,8 @@ export default memo(function Legend() {
         <div
           className="w-5 h-2 rounded-full"
           style={{
-            background: 'rgba(124,92,252,0.3)',
-            border: '1px dashed #7c5cfc',
+            background: 'color-mix(in srgb, var(--color-accent) 30%, transparent)',
+            border: '1px dashed var(--color-accent)',
           }}
         />
         Today

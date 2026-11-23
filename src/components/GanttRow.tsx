@@ -5,7 +5,7 @@ import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/schedul
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import { BAR_HEIGHT, CELL_HIT_PAD, INDENT_PER_DEPTH, ROW_HEIGHT } from '@/utils/ganttLayout';
-import { idColors, priorityBadgeClasses, priorityClass, statusDotColors } from '@/utils/colors';
+import { priorityBadgeClasses, priorityClass, priorityColors, statusDotColorFor } from '@/utils/colors';
 import {
   buildTimeCells,
   computeBarDayRange,
@@ -182,12 +182,7 @@ export default function GanttRow({
       sortWorkflowStatesForMenu(teamStates ?? []).map((s) => ({
         value: s.id,
         label: s.name,
-        icon: (
-          <span
-            className="w-2 h-2 rounded-full shrink-0"
-            style={{ backgroundColor: statusDotColors[s.type] || '#52525b' }}
-          />
-        ),
+        icon: <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusDotColorFor(s.type) }} />,
       })),
     [teamStates],
   );
@@ -466,7 +461,7 @@ export default function GanttRow({
   const showTodayLine = timeScale !== 'day' && todayOffset >= 0 && todayOffset < totalDays;
 
   const progressWidth = task.totalChildren > 0 ? `${task.progress}%` : undefined;
-  const statusDotColor = statusDotColors[task.statusType] || '#52525b';
+  const statusDotColor = statusDotColorFor(task.statusType);
 
   // Ghost bar for baseline (planned vs actual) — only show when dates have drifted
   const baselineBar = (() => {
@@ -871,7 +866,7 @@ export default function GanttRow({
           >
             <span
               className="w-[6px] h-[6px] rounded-full shrink-0"
-              style={{ backgroundColor: idColors[pCls], boxShadow: `0 0 5px ${idColors[pCls]}` }}
+              style={{ backgroundColor: priorityColors[pCls], boxShadow: `0 0 5px ${priorityColors[pCls]}` }}
             />
             {task.priority}
           </span>

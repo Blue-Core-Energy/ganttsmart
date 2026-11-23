@@ -592,11 +592,28 @@ test.describe('GanttSmart GCP app', () => {
     await page.keyboard.press('Escape');
     await expect(page.getByText('Manifold details')).toHaveCount(0);
 
-    // Theme toggle flips dark/light class on <html>
+    // Theme toggle flips dark/light class on <html>, and the inline colours follow it
     await expect(page.locator('html')).toHaveClass(/\bdark\b/);
+    const chartColours = async () => {
+      await page.locator('[data-task-bar="ENG-101"]').click();
+      const badge = page.locator('[data-priority-badge]');
+      await expect(badge).toBeVisible();
+      const colours = {
+        bar: await page.locator('[data-task-bar="ENG-102"]').evaluate((el) => getComputedStyle(el).backgroundImage),
+        priority: await badge.evaluate((el) => getComputedStyle(el).color),
+      };
+      await page.keyboard.press('Escape');
+      await expect(badge).toHaveCount(0);
+      return colours;
+    };
+    const darkColours = await chartColours();
     await page.getByTitle('Account').click();
     await page.locator('button[title*="mode"]').click();
     await expect(page.locator('html')).not.toHaveClass(/\bdark\b/);
+    const lightColours = await chartColours();
+    expect(darkColours.priority).toBe('rgb(249, 115, 22)'); // --color-high, dark theme
+    expect(lightColours.priority).toBe('rgb(234, 88, 12)'); // --color-high, light theme
+    expect(lightColours.bar).not.toBe(darkColours.bar);
 
     expect(errors).toEqual([]);
   });
