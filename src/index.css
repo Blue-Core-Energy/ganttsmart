@@ -25,6 +25,17 @@
   --color-none-dark: #52525b;
   --color-success: #22c55e;
   --color-success-hover: #16a34a;
+  /* Schedule state — what a Gantt bar's colour means (see src/utils/scheduleState.ts) */
+  --color-state-done: #22c55e;
+  --color-state-done-dark: #15803d;
+  --color-state-overdue: #ef4444;
+  --color-state-overdue-dark: #b91c1c;
+  --color-state-in-progress: #3b82f6;
+  --color-state-in-progress-dark: #1d4ed8;
+  --color-state-late-start: #f59e0b;
+  --color-state-late-start-dark: #b45309;
+  --color-state-not-started: #a1a1aa;
+  --color-state-not-started-dark: #52525b;
   --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
@@ -54,6 +65,16 @@ html.light {
   --color-none-dark: #52525b;
   --color-success: #16a34a;
   --color-success-hover: #15803d;
+  --color-state-done: #16a34a;
+  --color-state-done-dark: #15803d;
+  --color-state-overdue: #dc2626;
+  --color-state-overdue-dark: #991b1b;
+  --color-state-in-progress: #2563eb;
+  --color-state-in-progress-dark: #1d4ed8;
+  --color-state-late-start: #d97706;
+  --color-state-late-start-dark: #92400e;
+  --color-state-not-started: #71717a;
+  --color-state-not-started-dark: #52525b;
 }
 
 body {
@@ -102,20 +123,6 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
-@keyframes pulse-bar {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.75;
-  }
-}
-
-.animate-pulse-bar {
-  animation: pulse-bar 2s ease-in-out infinite;
-}
-
 /* Scrollbar — thinner, more refined */
 ::-webkit-scrollbar {
   height: 6px;
@@ -133,6 +140,12 @@ a {
 }
 
 /* Gantt bar gradients — subtle shimmer via pseudo-element */
+.gantt-bar,
+.bar-swatch {
+  /* Fallback colour, replaced by the schedule-state class the bar carries */
+  --bar-color: var(--color-state-not-started);
+  --bar-color-dark: var(--color-state-not-started-dark);
+}
 .gantt-bar {
   position: relative;
   overflow: hidden;
@@ -160,50 +173,37 @@ a {
   pointer-events: none;
 }
 
-/* Priority-specific bar backgrounds */
-.gantt-bar.bar-urgent {
-  background: #ef4444;
+/* Schedule-state bar colours: each class only names its pair of colour tokens */
+.bar-done {
+  --bar-color: var(--color-state-done);
+  --bar-color-dark: var(--color-state-done-dark);
 }
-.gantt-bar.bar-high {
-  background: #f97316;
+.bar-overdue {
+  --bar-color: var(--color-state-overdue);
+  --bar-color-dark: var(--color-state-overdue-dark);
 }
-.gantt-bar.bar-medium {
-  background: #f59e0b;
+.bar-in-progress {
+  --bar-color: var(--color-state-in-progress);
+  --bar-color-dark: var(--color-state-in-progress-dark);
 }
-.gantt-bar.bar-low {
-  background: #22c55e;
+.bar-late-start {
+  --bar-color: var(--color-state-late-start);
+  --bar-color-dark: var(--color-state-late-start-dark);
 }
-.gantt-bar.bar-none {
-  background: #a1a1aa;
-}
-.gantt-bar.bar-overdue {
-  background: #ef4444;
-}
-.gantt-bar.bar-done {
-  background: #22c55e;
+.bar-not-started {
+  --bar-color: var(--color-state-not-started);
+  --bar-color-dark: var(--color-state-not-started-dark);
 }
 
-html.light .gantt-bar.bar-urgent {
-  background: #dc2626;
+/* Chart bars and the legend swatches that stand for them */
+.gantt-bar,
+.bar-swatch {
+  background: linear-gradient(135deg, var(--bar-color-dark), var(--bar-color));
 }
-html.light .gantt-bar.bar-high {
-  background: #ea580c;
+.gantt-bar {
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--bar-color) 30%, transparent);
 }
-html.light .gantt-bar.bar-medium {
-  background: #d97706;
-}
-html.light .gantt-bar.bar-low {
-  background: #16a34a;
-}
-html.light .gantt-bar.bar-none {
-  background: #71717a;
-}
-html.light .gantt-bar.bar-overdue {
-  background: #dc2626;
-}
-html.light .gantt-bar.bar-done {
-  background: #16a34a;
-}
+
 html.light .gantt-bar::before {
   background: rgba(255, 255, 255, 0.22);
 }
