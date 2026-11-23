@@ -22,6 +22,7 @@ import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/wor
 import CellMenu, { type CellMenuOption } from './CellMenu';
 import { openDetailPanel } from './detailPanelStore';
 import DueDatePicker from './DueDatePicker';
+import SingleDatePicker from './SingleDatePicker';
 
 interface Props {
   task: Task;
@@ -37,7 +38,8 @@ interface Props {
   /** Name of the project being viewed, used by the Project column for local tasks */
   projectName?: string;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
-  onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
+  onRescheduleStart?: (taskUuid: string, newStartDate: string | null) => Promise<void>;
+  onRescheduleRange?: (taskUuid: string, newDueDate: string, newStartDate: string | null) => Promise<void>;
   /** Enables the status/assignee dropdowns and double-click title rename (never for read-only rows) */
   inlineEdit?: InlineEditHandlers;
   onConnectStart?: (taskId: string, e: React.MouseEvent) => void;
@@ -78,6 +80,7 @@ export default function GanttRow({
   projectName,
   onReschedule,
   onRescheduleStart,
+  onRescheduleRange,
   inlineEdit,
   onConnectStart,
   isConnecting,
@@ -354,14 +357,16 @@ export default function GanttRow({
         if (onReschedule && days !== 0) {
           const nd = new Date(dueDate);
           nd.setDate(nd.getDate() + days);
-          onReschedule(task.uuid, formatIsoDate(nd));
+          const nextDue = formatIsoDate(nd);
+          if (task.startDate && nextDue < task.startDate) return;
+          onReschedule(task.uuid, nextDue);
         }
       };
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [dayWidth, dueDate, onReschedule, task.uuid],
+    [dayWidth, dueDate, onReschedule, task.uuid, task.startDate],
   );
 
   // Start date drag (left edge)
@@ -392,14 +397,16 @@ export default function GanttRow({
         if (onRescheduleStart && days !== 0) {
           const nd = new Date(barStartBaseDate);
           nd.setDate(nd.getDate() + days);
-          onRescheduleStart(task.uuid, formatIsoDate(nd));
+          const nextStart = formatIsoDate(nd);
+          if (task.due && nextStart > task.due) return;
+          onRescheduleStart(task.uuid, nextStart);
         }
       };
 
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     },
-    [dayWidth, barStartBaseDate, onRescheduleStart, task.uuid],
+    [dayWidth, barStartBaseDate, onRescheduleStart, task.uuid, task.due],
   );
 
   // Whole bar move (shift both start and due dates while preserving workday duration)
@@ -434,11 +441,17 @@ export default function GanttRow({
           const moved = moveTaskDatesPreservingWorkdays(barStartBaseDate, dueDate, days, calendar);
           const nextDue = formatIsoDate(moved.due);
           const nextStart = formatIsoDate(moved.start);
-          if (onReschedule && nextDue !== task.due) {
-            onReschedule(task.uuid, nextDue);
-          }
-          if (onRescheduleStart && nextStart !== task.startDate) {
-            onRescheduleStart(task.uuid, nextStart);
+          if (onRescheduleRange) {
+            if (nextDue !== task.due || nextStart !== task.startDate || task.isDueImplicit) {
+              void onRescheduleRange(task.uuid, nextDue, nextStart);
+            }
+          } else {
+            if (onReschedule && nextDue !== task.due) {
+              onReschedule(task.uuid, nextDue);
+            }
+            if (onRescheduleStart && nextStart !== task.startDate) {
+              onRescheduleStart(task.uuid, nextStart);
+            }
           }
         }
       };
@@ -453,9 +466,11 @@ export default function GanttRow({
       calendar,
       onReschedule,
       onRescheduleStart,
+      onRescheduleRange,
       task.uuid,
       task.due,
       task.startDate,
+      task.isDueImplicit,
     ],
   );
 
@@ -833,15 +848,40 @@ export default function GanttRow({
           </div>
         );
 
-      case 'start':
+      case 'start': {
+        const startTitle = hasStartDate
+          ? formatDate(task.startDate!)
+          : 'No start date — the bar starts on its due date';
+        const startLabel = hasStartDate ? formatDate(task.startDate!) : <span className="text-text-muted">—</span>;
+        if (canDragStart && onRescheduleStart) {
+          return (
+            <SingleDatePicker
+              taskId={task.id}
+              kind="start"
+              value={task.startDate}
+              title={startTitle}
+              maxDate={task.due}
+              onClear={hasStartDate ? () => void onRescheduleStart(task.uuid, null) : undefined}
+              onChange={(iso) => {
+                if (iso === task.startDate) return;
+                if (task.due && iso > task.due) return;
+                void onRescheduleStart(task.uuid, iso);
+              }}
+            >
+              {startLabel}
+            </SingleDatePicker>
+          );
+        }
         return (
           <span
+            data-start-cell={task.id}
             className="text-[11.5px] font-mono tabular-nums text-text-secondary whitespace-nowrap"
-            title={hasStartDate ? formatDate(task.startDate!) : 'No start date — the bar starts on its due date'}
+            title={startTitle}
           >
-            {hasStartDate ? formatDate(task.startDate!) : <span className="text-text-muted">—</span>}
+            {startLabel}
           </span>
         );
+      }
 
       case 'due': {
         const dueTitle =
@@ -861,9 +901,11 @@ export default function GanttRow({
               value={task.due}
               title={dueTitle}
               color={dueColor}
+              minDate={task.startDate}
               onChange={(iso) => {
                 // Same explicit date is a no-op; an implicit (~) date still needs confirming as explicit
                 if (iso === task.due && !task.isDueImplicit) return;
+                if (task.startDate && iso < task.startDate) return;
                 void onReschedule(task.uuid, iso);
               }}
             >
@@ -873,6 +915,7 @@ export default function GanttRow({
         }
         return (
           <span
+            data-due-cell={task.id}
             className="text-[11.5px] font-mono tabular-nums whitespace-nowrap"
             style={{ color: dueColor }}
             title={dueTitle}

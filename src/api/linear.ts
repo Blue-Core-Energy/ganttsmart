@@ -246,6 +246,30 @@ export function parseStartDate(description: string): string | null {
   return match ? parseDateToken(match[1]) : null;
 }
 
+/** Strip any `start: ...` tag line (or inline token) from an issue description. */
+export function stripStartDateFromDescription(description: string): string {
+  if (!description) return '';
+  const lines = description.split(/\r?\n/);
+  const startLineRe = new RegExp(`^[ \\t>*_~\`-]*start:\\s*${DATE_TOKEN}[ \\t*_\`~-]*$`, 'i');
+  const inlineRe = new RegExp(`[ \\t]*[\`*_~]*start:\\s*${DATE_TOKEN}[\`*_~]*[ \\t]*`, 'gi');
+
+  const processed = lines
+    .filter((line) => !startLineRe.test(line))
+    .map((line) => {
+      if (!parseStartDate(line)) return line;
+      return line
+        .replace(inlineRe, ' ')
+        .replace(/^[ \\t]+/, '')
+        .replace(/[ \\t]+$/, '')
+        .replace(/[ \\t]{2,}/g, ' ');
+    });
+
+  return processed
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** Parse a GanttSmart schedule comment body. Returns null if it is not a schedule comment or has no valid date. */
 export function parseScheduleComment(body: string): { startDate: string | null; endDate: string | null } | null {
   const text = body.replace(/\\(?=[-_*])/g, '');
@@ -937,7 +961,7 @@ function enqueueScheduleWrite<T>(issueId: string, fn: () => Promise<T>): Promise
 function writeIssueSchedule(
   apiKey: string,
   issueId: string,
-  patch: { startDate?: string; dueDate?: string },
+  patch: { startDate?: string | null; dueDate?: string | null },
 ): Promise<void> {
   return enqueueScheduleWrite(issueId, async () => {
     const data = await gql(apiKey, ISSUE_SCHEDULE_QUERY, { id: issueId });
@@ -956,10 +980,13 @@ function writeIssueSchedule(
       issueUpdatedAt: issue.updatedAt,
       comment: existing,
     });
-    const body = formatScheduleComment({
-      startDate: patch.startDate ?? current.startDate,
-      dueDate: patch.dueDate ?? current.dueDate,
-    });
+
+    const nextStartDate = patch.startDate !== undefined ? patch.startDate : current.startDate;
+    const nextDueDate = patch.dueDate !== undefined ? patch.dueDate : current.dueDate;
+
+    if (nextStartDate && nextDueDate && nextStartDate > nextDueDate) {
+      throw new Error('Start date cannot be after due date.');
+    }
 
     // Write the native dueDate before the comment so the comment is never older than the issue.
     if (patch.dueDate) {
@@ -974,20 +1001,62 @@ function writeIssueSchedule(
       );
     }
 
-    if (existing) {
+    // When clearing start date, strip any legacy start: ... tag from description so it cannot resurrect
+    if (patch.startDate === null && issue.description && parseStartDate(issue.description)) {
+      const description = stripStartDateFromDescription(issue.description);
       const res = await gql(
         apiKey,
-        `mutation($commentId: String!, $body: String!) {
-          commentUpdate(id: $commentId, input: { body: $body }) {
+        `mutation($id: String!, $description: String!) {
+          issueUpdate(id: $id, input: { description: $description }) {
             success
           }
         }`,
-        { commentId: existing.id, body },
+        { id: issueId, description },
       );
-      if ((res.commentUpdate as { success?: boolean } | undefined)?.success === false) {
-        throw new Error('Linear did not confirm schedule comment update.');
+      if ((res.issueUpdate as { success?: boolean } | undefined)?.success === false) {
+        throw new Error('Linear did not confirm issue description update.');
       }
-    } else {
+    }
+
+    if (existing) {
+      if (nextStartDate || nextDueDate) {
+        const body = formatScheduleComment({
+          startDate: nextStartDate,
+          dueDate: nextDueDate,
+        });
+
+        const res = await gql(
+          apiKey,
+          `mutation($commentId: String!, $body: String!) {
+            commentUpdate(id: $commentId, input: { body: $body }) {
+              success
+            }
+          }`,
+          { commentId: existing.id, body },
+        );
+        if ((res.commentUpdate as { success?: boolean } | undefined)?.success === false) {
+          throw new Error('Linear did not confirm schedule comment update.');
+        }
+      } else {
+        const res = await gql(
+          apiKey,
+          `mutation($id: String!) {
+            commentDelete(id: $id) {
+              success
+            }
+          }`,
+          { id: existing.id },
+        );
+        if ((res.commentDelete as { success?: boolean } | undefined)?.success === false) {
+          throw new Error('Linear did not confirm schedule comment deletion.');
+        }
+      }
+    } else if (nextStartDate || patch.dueDate) {
+      const body = formatScheduleComment({
+        startDate: nextStartDate,
+        dueDate: nextDueDate,
+      });
+
       const res = await gql(
         apiKey,
         `mutation($issueId: String!, $body: String!) {
@@ -1008,8 +1077,16 @@ export async function updateIssueDueDate(apiKey: string, issueId: string, dueDat
   await debouncedApiCall(`due-${issueId}`, () => writeIssueSchedule(apiKey, issueId, { dueDate }));
 }
 
-export async function updateIssueStartDate(apiKey: string, issueId: string, startDate: string): Promise<void> {
+export async function updateIssueStartDate(apiKey: string, issueId: string, startDate: string | null): Promise<void> {
   await debouncedApiCall(`start-${issueId}`, () => writeIssueSchedule(apiKey, issueId, { startDate }));
+}
+
+export async function updateIssueSchedule(
+  apiKey: string,
+  issueId: string,
+  patch: { startDate?: string | null; dueDate?: string | null },
+): Promise<void> {
+  await debouncedApiCall(`schedule-${issueId}`, () => writeIssueSchedule(apiKey, issueId, patch));
 }
 
 /** Move a project milestone's target date. Debounced — driven by dragging on the chart. */

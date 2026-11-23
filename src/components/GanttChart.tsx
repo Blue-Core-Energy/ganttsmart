@@ -51,7 +51,8 @@ interface Props {
   /** Omit to render the timeline at a fixed zoom — e.g. exports and tests */
   onDayWidthChange?: (next: (current: number) => number) => void;
   onReschedule?: (taskUuid: string, newDueDate: string) => Promise<void>;
-  onRescheduleStart?: (taskUuid: string, newStartDate: string) => Promise<void>;
+  onRescheduleStart?: (taskUuid: string, newStartDate: string | null) => Promise<void>;
+  onRescheduleRange?: (taskUuid: string, newDueDate: string, newStartDate: string | null) => Promise<void>;
   /** Omit to keep status, assignee, and title read-only in the schedule table (shared views, exports) */
   inlineEdit?: InlineEditHandlers;
   onCreateRelation?: (sourceTaskId: string, targetTaskId: string) => Promise<void>;
@@ -116,6 +117,7 @@ export default function GanttChart({
   onDayWidthChange,
   onReschedule,
   onRescheduleStart,
+  onRescheduleRange,
   inlineEdit,
   onCreateRelation,
   onReorder,
@@ -1227,6 +1229,7 @@ export default function GanttChart({
                 projectName={projectName}
                 onReschedule={onReschedule}
                 onRescheduleStart={onRescheduleStart}
+                onRescheduleRange={onRescheduleRange}
                 inlineEdit={inlineEdit}
                 onConnectStart={onCreateRelation ? handleConnectStart : undefined}
                 isConnecting={isConnecting}

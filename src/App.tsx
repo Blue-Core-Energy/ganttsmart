@@ -97,6 +97,7 @@ function GanttView({
     zoomOut,
     reschedule,
     rescheduleStart,
+    rescheduleRange,
     snapTasksToDaysOff,
     updateMilestoneDate,
     loadTeamWorkflowStates,
@@ -138,20 +139,33 @@ function GanttView({
   const rescheduleWithHistory = useCallback(
     async (taskUuid: string, newDueDate: string) => {
       const task = tasks.find((t) => t.uuid === taskUuid);
-      if (task) logChange(task.id, 'due_date', task.due, newDueDate);
-      return reschedule(taskUuid, newDueDate);
+      const success = await reschedule(taskUuid, newDueDate);
+      if (success && task) logChange(task.id, 'due_date', task.due, newDueDate);
     },
     [reschedule, tasks, logChange],
   );
 
   // Wrap rescheduleStart to log start date changes
   const rescheduleStartWithHistory = useCallback(
-    async (taskUuid: string, newStartDate: string) => {
+    async (taskUuid: string, newStartDate: string | null) => {
       const task = tasks.find((t) => t.uuid === taskUuid);
-      if (task) logChange(task.id, 'start_date', task.startDate, newStartDate);
-      return rescheduleStart(taskUuid, newStartDate);
+      const success = await rescheduleStart(taskUuid, newStartDate);
+      if (success && task) logChange(task.id, 'start_date', task.startDate, newStartDate);
     },
     [rescheduleStart, tasks, logChange],
+  );
+
+  // Wrap rescheduleRange to log both date changes on whole-bar moves
+  const rescheduleRangeWithHistory = useCallback(
+    async (taskUuid: string, newDueDate: string, newStartDate: string | null) => {
+      const task = tasks.find((t) => t.uuid === taskUuid);
+      const success = await rescheduleRange(taskUuid, newDueDate, newStartDate);
+      if (success && task) {
+        if (task.due !== newDueDate) logChange(task.id, 'due_date', task.due, newDueDate);
+        if (task.startDate !== newStartDate) logChange(task.id, 'start_date', task.startDate, newStartDate);
+      }
+    },
+    [rescheduleRange, tasks, logChange],
   );
 
   // Shared days off calendar. Adding an entry snaps affected tasks off the new days.
@@ -331,6 +345,7 @@ function GanttView({
           timeScale={timeScale}
           onReschedule={rescheduleWithHistory}
           onRescheduleStart={rescheduleStartWithHistory}
+          onRescheduleRange={rescheduleRangeWithHistory}
           inlineEdit={inlineEdit}
           onCreateRelation={createRelation}
           onReorder={reorderTask}

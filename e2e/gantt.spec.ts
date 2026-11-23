@@ -89,6 +89,12 @@ function createScheduleMock(initial: { description?: string | null; dueDate?: st
       await respond(route, { commentUpdate: { success: true } });
       return true;
     }
+    if (query.includes('commentDelete')) {
+      const id = String(variables.id ?? '');
+      state.comments = state.comments.filter((c) => c.id !== id);
+      await respond(route, { commentDelete: { success: true } });
+      return true;
+    }
     return false;
   }
 
@@ -4002,6 +4008,464 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('edits start dates inline from the Start column without opening DetailPanel and keeps locked rows read-only', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+    const scheduleCreates: Array<{ issueId: string; body: string }> = [];
+    const scheduleUpdates: Array<{ commentId: string; body: string }> = [];
+    const scheduleDeletes: Array<{ id: string }> = [];
+    const descUpdates: Array<{ id: string; description: string }> = [];
+
+    const today = new Date();
+    const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const targetYear = nextMonth.getFullYear();
+    const targetMonth = nextMonth.getMonth();
+
+    const formatYMD = (year: number, month: number, day: number) => {
+      const mm = String(month + 1).padStart(2, '0');
+      const dd = String(day).padStart(2, '0');
+      return `${year}-${mm}-${dd}`;
+    };
+
+    const comm101Start = formatYMD(targetYear, targetMonth, 2);
+    const comm101NewStart = formatYMD(targetYear, targetMonth, 5);
+    const comm101Due = formatYMD(targetYear, targetMonth, 10);
+    const comm101AfterDue = formatYMD(targetYear, targetMonth, 11);
+
+    const comm102Due = formatYMD(targetYear, targetMonth, 20);
+    const comm102NewStart = formatYMD(targetYear, targetMonth, 15);
+
+    const comm103Start = formatYMD(targetYear, targetMonth, 4);
+
+    const ctrlDue = formatYMD(targetYear, targetMonth, 8);
+    const ctrlStart = formatYMD(targetYear, targetMonth, 3);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+      localStorage.setItem('gantt_columns', JSON.stringify(['id', 'task', 'assignee', 'status', 'start', 'due']));
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    let comm101Comments = [
+      {
+        id: 'comment-comm-1',
+        body: `**GanttSmart Schedule**\nstart: ${comm101Start}\nend: ${comm101Due}`,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+    let comm102Comments: Array<{ id: string; body: string; createdAt: string; updatedAt: string }> = [];
+    let comm103Comments = [
+      {
+        id: 'comment-comm-3',
+        body: `**GanttSmart Schedule**\nstart: ${comm103Start}`,
+        createdAt: '2026-01-01T00:00:00Z',
+        updatedAt: '2026-01-01T00:00:00Z',
+      },
+    ];
+    let comm101Desc = `start: ${comm101Start}\nLoop check details`;
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as {
+        query?: string;
+        variables?: Record<string, unknown>;
+      } | null;
+      const query = payload?.query ?? '';
+      const variables = payload?.variables ?? {};
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              projects: {
+                nodes: [
+                  { id: 'proj-1', name: 'Commissioning' },
+                  { id: 'proj-2', name: 'Controls' },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('externalLinks')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } } },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Commissioning',
+                startDate: comm101Start,
+                targetDate: comm102Due,
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-comm-1',
+                      identifier: 'COMM-101',
+                      title: 'Run commissioning loop check',
+                      description: comm101Desc,
+                      dueDate: comm101Due,
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-101',
+                      priority: 2,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-comm-2',
+                      identifier: 'COMM-102',
+                      title: 'Hand over documentation',
+                      description: 'Handover details without start tag',
+                      dueDate: comm102Due,
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-comm-3',
+                      identifier: 'COMM-103',
+                      title: 'Calibrate pressure transmitter',
+                      description: 'No due date set',
+                      dueDate: null,
+                      url: 'https://linear.app/bluecoreenergy/issue/COMM-103',
+                      priority: 4,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-comm' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    id: 'uuid-comm-1',
+                    identifier: 'COMM-101',
+                    relations: {
+                      nodes: [
+                        {
+                          type: 'blocked_by',
+                          relatedIssue: {
+                            id: 'uuid-ctrl-42',
+                            identifier: 'CTRL-42',
+                            title: 'Wire PLC cabinet',
+                            description: `start: ${ctrlStart}\nPLC cabinet wiring`,
+                            dueDate: ctrlDue,
+                            url: 'https://linear.app/bluecoreenergy/issue/CTRL-42',
+                            priority: 1,
+                            completedAt: null,
+                            canceledAt: null,
+                            state: { name: 'In Progress', type: 'started' },
+                            assignee: { name: 'Carol Vance' },
+                            team: { id: 'team-ctrl' },
+                            project: { id: 'proj-2', name: 'Controls', targetDate: comm102Due },
+                          },
+                        },
+                      ],
+                    },
+                    children: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('ScheduleComments')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  { id: 'uuid-comm-1', comments: { nodes: comm101Comments } },
+                  { id: 'uuid-comm-2', comments: { nodes: comm102Comments } },
+                  { id: 'uuid-comm-3', comments: { nodes: comm103Comments } },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('IssueSchedule')) {
+        const id = String(variables.id ?? '');
+        const isComm1 = id === 'uuid-comm-1';
+        const isComm3 = id === 'uuid-comm-3';
+        const comments = isComm1 ? comm101Comments : isComm3 ? comm103Comments : comm102Comments;
+        const dueDate = isComm1 ? comm101Due : isComm3 ? null : comm102Due;
+        const description = isComm1 ? comm101Desc : isComm3 ? 'No due date set' : 'Handover details without start tag';
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              issue: {
+                description,
+                dueDate,
+                updatedAt: '2026-01-01T00:00:00Z',
+                comments: { nodes: comments },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('commentCreate')) {
+        const body = String(variables.body ?? '');
+        const issueId = String(variables.issueId ?? '');
+        scheduleCreates.push({ issueId, body });
+        const newComment = {
+          id: `comment-${Date.now()}`,
+          body,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        if (issueId === 'uuid-comm-1') comm101Comments.push(newComment);
+        else if (issueId === 'uuid-comm-3') comm103Comments.push(newComment);
+        else comm102Comments.push(newComment);
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { commentCreate: { success: true } } }),
+        });
+        return;
+      }
+
+      if (query.includes('commentUpdate')) {
+        const commentId = String(variables.commentId ?? '');
+        const body = String(variables.body ?? '');
+        scheduleUpdates.push({ commentId, body });
+        for (const c of [...comm101Comments, ...comm102Comments, ...comm103Comments]) {
+          if (c.id === commentId) {
+            c.body = body;
+            c.updatedAt = new Date().toISOString();
+          }
+        }
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { commentUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      if (query.includes('commentDelete')) {
+        const id = String(variables.id ?? '');
+        scheduleDeletes.push({ id });
+        comm101Comments = comm101Comments.filter((c) => c.id !== id);
+        comm102Comments = comm102Comments.filter((c) => c.id !== id);
+        comm103Comments = comm103Comments.filter((c) => c.id !== id);
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { commentDelete: { success: true } } }),
+        });
+        return;
+      }
+
+      if (query.includes('issueUpdate')) {
+        const id = String(variables.id ?? '');
+        const desc = String(variables.description ?? '');
+        descUpdates.push({ id, description: desc });
+        if (id === 'uuid-comm-1') comm101Desc = desc;
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issueUpdate: { success: true } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { workflowStates: { nodes: [{ id: 'st-todo', name: 'Todo', type: 'unstarted', position: 0 }] } },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+    const popover = page.locator('[data-popover="start-date"]');
+    const startCell101 = page.locator('button[data-start-cell="COMM-101"]');
+    const startCell102 = page.locator('button[data-start-cell="COMM-102"]');
+    const startCell103 = page.locator('button[data-start-cell="COMM-103"]');
+    const startCellCtrl = page.locator('button[data-start-cell="CTRL-42"]');
+    const bar101 = page.locator('[data-task-bar="COMM-101"]');
+    const bar102 = page.locator('[data-task-bar="COMM-102"]');
+    const detailText = page.getByText('Loop check details');
+
+    await expect(bar101).toBeVisible();
+    await expect(bar102).toBeVisible();
+    await expect(page.locator('tr[data-task-id="CTRL-42"]')).toBeVisible();
+
+    // 1. Locked external rows are strictly non-editable (render as span, no button); local rows are editable
+    await expect(startCell101).toBeVisible();
+    await expect(startCell102).toBeVisible();
+    await expect(startCellCtrl).toHaveCount(0);
+    await expect(page.locator('span[data-start-cell="CTRL-42"]')).toBeVisible();
+
+    // 2. COMM-102 initially has no start date, displaying "—"
+    await expect(startCell102).toHaveText('—');
+
+    // 3. Clicking start cell for COMM-102 opens the picker without opening DetailPanel
+    await startCell102.click();
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('xpath=..')).toHaveJSProperty('tagName', 'BODY');
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveCount(0);
+    // Since COMM-102 has no start date yet, Clear button should not be present
+    await expect(popover.locator('[data-clear-date]')).toHaveCount(0);
+    await expect(detailText).toHaveCount(0);
+
+    // 4. Escape dismisses the picker
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+
+    // 5. Adding a start date to COMM-102 from "—" updates cell, expands bar, and calls Linear mutation
+    const bar102Before = (await bar102.boundingBox())!;
+    await startCell102.click();
+    await popover.locator(`[data-day="${comm102NewStart}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await expect(page.getByText('Start date updated')).toBeVisible();
+    await expect(startCell102).not.toHaveText('—');
+    await expect.poll(() => scheduleCreates.length).toBe(1);
+    expect(scheduleCreates[0].body).toContain(`start: ${comm102NewStart}`);
+    const bar102After = (await bar102.boundingBox())!;
+    expect(bar102After.width).toBeLessThan(bar102Before.width);
+
+    // 6. Changing an existing start date on COMM-101
+    const bar101Before = (await bar101.boundingBox())!;
+    await startCell101.click();
+    await expect(popover).toBeVisible();
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveAttribute('data-day', comm101Start);
+    // Clear button is present because COMM-101 has a start date
+    await expect(popover.locator('[data-clear-date]')).toBeVisible();
+    await popover.locator(`[data-day="${comm101NewStart}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await expect(page.getByText('Start date updated')).toBeVisible();
+    await expect.poll(() => scheduleUpdates.length).toBe(1);
+    expect(scheduleUpdates[0].body).toContain(`start: ${comm101NewStart}`);
+    const bar101After = (await bar101.boundingBox())!;
+    expect(bar101After.width).toBeLessThan(bar101Before.width);
+
+    // 6b. Re-selecting the current start date closes the picker without mutating
+    await startCell101.click();
+    await expect(popover.locator('[data-day][data-selected="true"]')).toHaveAttribute('data-day', comm101NewStart);
+    await popover.locator(`[data-day="${comm101NewStart}"] button`).click();
+    await expect(popover).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(scheduleUpdates).toHaveLength(1);
+
+    // 7. Dates after due date are disabled in picker (COMM-101 due date is comm101Due)
+    await startCell101.click();
+    await expect(popover).toBeVisible();
+    const afterDueDay = popover.locator(`[data-day="${comm101AfterDue}"] button`);
+    await expect(afterDueDay).toHaveCount(1);
+    await expect(afterDueDay).toBeDisabled();
+
+    // 8. Clearing the start date via the Clear button removes start date, widens bar back to today, and strips legacy tag
+    await popover.locator('[data-clear-date]').click();
+    await expect(popover).toHaveCount(0);
+    await expect(page.getByText('Start date cleared')).toBeVisible();
+    await expect(startCell101).toHaveText('—');
+    const bar101Cleared = (await bar101.boundingBox())!;
+    expect(bar101Cleared.width).toBeGreaterThan(bar101After.width);
+    // Verify comment update removed start: and description update stripped legacy start tag
+    await expect.poll(() => scheduleUpdates.length).toBe(2);
+    expect(scheduleUpdates[1].body).not.toContain('start:');
+    expect(scheduleUpdates[1].body).toContain(`end: ${comm101Due}`);
+    await expect.poll(() => descUpdates.length).toBe(1);
+    expect(descUpdates[0].description).not.toContain('start:');
+
+    // 8b. Clearing a task with only a start date (COMM-103) deletes the schedule comment
+    await startCell103.click();
+    await expect(popover.locator('[data-clear-date]')).toBeVisible();
+    await popover.locator('[data-clear-date]').click();
+    await expect(popover).toHaveCount(0);
+    await expect.poll(() => scheduleDeletes.length).toBe(1);
+    expect(scheduleDeletes[0].id).toBe('comment-comm-3');
+
+    // 9. Viewport clamping: popover does not overflow screen
+    await page.setViewportSize({ width: 780, height: 667 });
+    await startCell102.click();
+    await expect(popover).toBeVisible();
+    const popBox = (await popover.boundingBox())!;
+    expect(popBox.x).toBeGreaterThanOrEqual(8);
+    expect(popBox.x + popBox.width).toBeLessThanOrEqual(780 - 8);
+    await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+
+    // 10. Unlocking external edits makes external Start cell editable
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.getByRole('button', { name: 'Edit external' }).click();
+    await expect(startCellCtrl).toBeVisible();
+    await page.getByRole('button', { name: 'Editing external' }).click();
+    await expect(startCellCtrl).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
   test('preserves workday duration and skips weekends when moving a task bar across weekends', async ({ page }) => {
     const errors = trackErrors(page);
     const today = localOffsetDate(0);
@@ -4147,10 +4611,10 @@ test.describe('GanttSmart GCP app', () => {
     await page.mouse.up();
 
     await expect.poll(() => dueUpdates.length).toBe(1);
-    await expect.poll(() => schedule.state.creates.length + schedule.state.updates.length).toBe(2);
+    await expect.poll(() => schedule.state.creates.length + schedule.state.updates.length).toBe(1);
 
     expect(dueUpdates[0]).toBe(isoOffsetDays(tueNextOffset));
-    // Both dates land in one schedule comment (created once, then updated in place); the description is untouched
+    // Both dates land in one schedule comment written atomically; the description is untouched
     expect(schedule.state.comments).toHaveLength(1);
     expect(schedule.state.comments[0].body).toBe(
       `**GanttSmart Schedule**\nstart: ${isoOffsetDays(wedOffset)}\nend: ${isoOffsetDays(tueNextOffset)}`,
