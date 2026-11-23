@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Avatar } from '@/utils/avatar';
-import { priorityColorFor, statusDotColorFor } from '@/utils/colors';
+import { priorityBadgeStyle, priorityColorFor, statusDotColorFor } from '@/utils/colors';
 import { formatDate } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { isTaskDone } from '@/utils/tasks';
@@ -81,11 +81,7 @@ export default function Tooltip() {
           <div className="text-text-muted text-[10px] mb-0.5">Priority</div>
           <span
             className="inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
-            style={{
-              backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
-              color: priorityColor,
-              border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
-            }}
+            style={priorityBadgeStyle(task.priority)}
           >
             {task.priority}
           </span>

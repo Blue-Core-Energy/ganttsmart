@@ -49,10 +49,20 @@ export function priorityClass(val: number): string {
 
 /** Priority colour from the name Linear gives it ("Urgent", "High", "None", …). */
 export function priorityColorFor(priority: string): string {
-  return priorityColors[priority.toLowerCase()] ?? NEUTRAL_COLOR;
+  return priorityColors[priority.trim().toLowerCase()] ?? NEUTRAL_COLOR;
+}
+
+/** Inline pill styling for a priority badge, matching `priorityBadgeClasses` via CSS custom properties. */
+export function priorityBadgeStyle(priority: string) {
+  const color = priorityColorFor(priority);
+  return {
+    backgroundColor: `color-mix(in srgb, ${color} 15%, transparent)`,
+    color,
+    border: `1px solid color-mix(in srgb, ${color} 25%, transparent)`,
+  };
 }
 
 /** Status dot colour from a Linear workflow state type, for types we do not know about. */
 export function statusDotColorFor(statusType: string): string {
-  return statusDotColors[statusType] ?? NEUTRAL_COLOR;
+  return statusDotColors[statusType.trim().toLowerCase()] ?? NEUTRAL_COLOR;
 }

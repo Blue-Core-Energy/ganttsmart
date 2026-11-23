@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Task } from '@/types';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
-import { priorityColorFor, statusDotColorFor } from '@/utils/colors';
+import { priorityBadgeStyle, priorityColorFor, statusDotColorFor } from '@/utils/colors';
 import { countWorkdaysInclusive, formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { calendarFor } from '@/utils/daysOff';
@@ -111,11 +111,7 @@ export default function DetailPanel() {
             <span className="text-[10px] text-text-muted">·</span>
             <span
               className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
-              style={{
-                backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
-                color: priorityColor,
-                border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
-              }}
+              style={priorityBadgeStyle(currentTask.priority)}
             >
               {currentTask.priority}
             </span>
@@ -232,11 +228,7 @@ export default function DetailPanel() {
                 <span
                   data-priority-badge
                   className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
-                  style={{
-                    backgroundColor: `color-mix(in srgb, ${priorityColor} 15%, transparent)`,
-                    color: priorityColor,
-                    border: `1px solid color-mix(in srgb, ${priorityColor} 25%, transparent)`,
-                  }}
+                  style={priorityBadgeStyle(currentTask.priority)}
                 >
                   {currentTask.priority}
                 </span>

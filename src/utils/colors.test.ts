@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   NEUTRAL_COLOR,
+  priorityBadgeStyle,
   priorityClass,
   priorityColorFor,
   priorityColors,
@@ -24,15 +25,25 @@ describe('colour tokens', () => {
     expect(new Set(Object.values(priorityColors)).size).toBe(5);
   });
 
-  it('looks priorities up by the name Linear gives them', () => {
+  it('looks priorities up case-insensitively and falls back to neutral', () => {
     expect(priorityColorFor('Urgent')).toBe(priorityColors.urgent);
+    expect(priorityColorFor(' HIGH ')).toBe(priorityColors.high);
     expect(priorityColorFor('None')).toBe(priorityColors.none);
     expect(priorityColorFor('No priority')).toBe(NEUTRAL_COLOR);
     expect(priorityColorFor('')).toBe(NEUTRAL_COLOR);
   });
 
-  it('gives work in flight the accent and falls back for unknown state types', () => {
+  it('builds priority badge styles from the themed token', () => {
+    expect(priorityBadgeStyle('High')).toEqual({
+      backgroundColor: 'color-mix(in srgb, var(--color-high) 15%, transparent)',
+      color: 'var(--color-high)',
+      border: '1px solid color-mix(in srgb, var(--color-high) 25%, transparent)',
+    });
+  });
+
+  it('gives work in flight the accent, normalizes casing, and falls back for unknown state types', () => {
     expect(statusDotColorFor('started')).toBe('var(--color-accent)');
+    expect(statusDotColorFor(' STARTED ')).toBe('var(--color-accent)');
     expect(statusDotColorFor('completed')).toBe('var(--color-success)');
     expect(statusDotColorFor('backlog')).toBe(NEUTRAL_COLOR);
     expect(statusDotColorFor('something-new')).toBe(NEUTRAL_COLOR);
