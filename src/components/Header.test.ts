@@ -59,6 +59,33 @@ describe('Header project switcher', () => {
 
     expect(html).not.toContain('aria-haspopup="listbox"');
   });
+
+  it('does not render a "Roadmap" breadcrumb segment next to the project name', () => {
+    const html = renderToStaticMarkup(createElement(Header, headerProps));
+
+    expect(html).not.toContain('Roadmap');
+    expect(html).not.toMatch(/>\s*Roadmap\s*</);
+  });
+
+  it('truncates long project names cleanly in the breadcrumb trigger', () => {
+    const longProjectName = 'Enterprise Cloud Infrastructure Platform Migration Initiative 2026';
+    const html = renderToStaticMarkup(
+      createElement(Header, {
+        ...headerProps,
+        projectName: longProjectName,
+        projectId: 'proj-long',
+        projects: [{ id: 'proj-long', name: longProjectName }],
+      }),
+    );
+
+    expect(html).toContain('min-w-0');
+    expect(html).toContain('max-w-[240px]');
+    expect(html).toContain('truncate');
+    expect(html).toMatch(
+      /<span class="truncate">Enterprise Cloud Infrastructure Platform Migration Initiative 2026<\/span>/,
+    );
+    expect(html).not.toContain('Roadmap');
+  });
 });
 
 describe('FilterBar', () => {

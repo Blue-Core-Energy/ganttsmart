@@ -305,8 +305,6 @@ export default memo(function Header({
               emptyMessage="No projects found"
               ariaLabel="Projects"
             />
-            <span className="hidden xl:inline text-text-muted text-sm">/</span>
-            <span className="hidden xl:inline text-sm text-text-primary font-medium whitespace-nowrap">Roadmap</span>
           </>
         )}
       </div>
