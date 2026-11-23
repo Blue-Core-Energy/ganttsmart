@@ -37,8 +37,8 @@ export interface NonWorkDayRange {
 }
 
 /**
- * Which custom non-work days apply to a calculation: every company-wide entry plus the PTO entries
- * whose `assigneeName` equals `assignee`. Omit the calendar (or pass no entries) for plain
+ * Which custom non-work days apply to a calculation: every company-wide entry plus the per-person
+ * entries whose `assigneeName` equals `assignee`. Omit the calendar (or pass no entries) for plain
  * Monday–Friday math.
  */
 export interface WorkCalendar {
@@ -83,7 +83,7 @@ function seekWorkday(d: Date, direction: 1 | -1, calendar?: WorkCalendar): void 
 }
 
 /**
- * Snap a non-work date (weekend, holiday or the assignee's PTO) to the next (direction = 1) or
+ * Snap a non-work date (weekend or a day off that applies to the assignee) to the next (direction = 1) or
  * previous (direction = -1) workday.
  */
 export function snapToWorkday(date: Date, direction: 1 | -1, calendar?: WorkCalendar): Date {
@@ -130,7 +130,7 @@ export function addWorkdaysInclusive(start: Date, workdays: number, calendar?: W
 
 /**
  * Shift a task's `[start, due]` schedule by `calendarDeltaDays` while preserving
- * the task's workday duration and skipping weekends (and holidays / PTO in `calendar`).
+ * the task's workday duration and skipping weekends (and the days off in `calendar`).
  *
  * Example: Mon→Fri (5 workdays) moved +2 days starts on Wed and finishes on Tue
  * (Wed, Thu, Fri, Mon, Tue = 5 workdays) instead of landing on Sunday.

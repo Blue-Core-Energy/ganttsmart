@@ -31,8 +31,8 @@
 - **Dependency arrows** between blocking/blocked issues (uses Linear's native relations)
 - **Milestone markers** rendered as diamonds on the timeline
 - **Progress bars** showing sub-issue completion percentage on each Gantt bar
-- **Drag entire bars** to shift both start and due dates simultaneously, keeping the workday count (weekends, holidays and PTO are skipped)
-- **Holidays / PTO** — add company-wide holidays and shutdowns or one person's vacation from the **Holidays / PTO** button. They are shaded on the timeline, left out of workday counts, and any open task that starts or ends on a new day off moves to the next workday (with Undo). The calendar is stored by the backend: shared by the whole team on Google Cloud, per account on Supabase (apply `supabase/migrations/009_create_non_work_days.sql`)
+- **Drag entire bars** to shift both start and due dates simultaneously, keeping the workday count (weekends and days off are skipped)
+- **Days Off** — add company-wide closures (for example holidays or shutdowns) or one person's time off from **Days Off** in the account menu. They are shaded on the timeline, left out of workday counts, and any open task that starts or ends on a new day off moves to the next workday (with Undo). The calendar is stored by the backend: shared by the whole team on Google Cloud, per account on Supabase (apply `supabase/migrations/009_create_non_work_days.sql`)
 - **Inline status cycling** — click the status dot to advance through workflow states
 - **Slide-out detail panel** — click any bar for full issue details, description, and a direct link to Linear
 - **Shareable roadmap links** — public or password-protected URLs for external stakeholders
@@ -124,13 +124,13 @@ ganttsmart/
 3. Deploy Edge Functions from `supabase/functions/`
 4. Register a [Linear OAuth app](https://linear.app/settings/api/applications) with your redirect URI
 5. (Optional) Configure Google OAuth in Supabase dashboard
-6. Apply the SQL files in `supabase/migrations/` (the latest, `009_create_non_work_days.sql`, adds the Holidays / PTO table; until it is applied the calendar stays empty)
+6. Apply the SQL files in `supabase/migrations/` (the latest, `009_create_non_work_days.sql`, adds the Days Off table, still named `non_work_days`; until it is applied the calendar stays empty)
 
 ---
 
 ## Self-hosting on Google Cloud
 
-GanttSmart can also run entirely on Google Cloud, without Supabase: one Cloud Run container serves the app and a small Node API (`server/`), Firestore stores Linear connections, planning history and the team's shared holidays / PTO calendar, and Identity-Aware Proxy (IAP) restricts sign-in to one Google Workspace domain.
+GanttSmart can also run entirely on Google Cloud, without Supabase: one Cloud Run container serves the app and a small Node API (`server/`), Firestore stores Linear connections, planning history and the team's shared Days Off calendar, and Identity-Aware Proxy (IAP) restricts sign-in to one Google Workspace domain.
 
 The backend is chosen at build time with `VITE_BACKEND`:
 

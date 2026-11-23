@@ -1,16 +1,16 @@
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
-import type { NewNonWorkDay, NonWorkDay } from '@/types';
-import { formatNonWorkRange, parseNonWorkDayInput } from '@/utils/nonWorkDays';
+import type { NewDayOff, DayOff } from '@/types';
+import { formatDayOffRange, parseDayOffInput } from '@/utils/daysOff';
 
 interface Props {
-  entries: NonWorkDay[];
-  /** Names offered for per-person PTO (the people on the loaded project); any name can still be typed */
+  entries: DayOff[];
+  /** Names offered for one person's time off (the people on the loaded project); any name can still be typed */
   assignees: string[];
   loaded: boolean;
   /** Whether the calendar is team-wide (true) or private to the signed-in account (false) */
   shared: boolean;
   /** Saves the entry. Rejects with a message to show in the form. */
-  onAdd: (entry: NewNonWorkDay) => Promise<void>;
+  onAdd: (entry: NewDayOff) => Promise<void>;
   onRemove: (id: string) => void | Promise<void>;
   onClose: () => void;
 }
@@ -20,7 +20,7 @@ const inputCls =
 
 type Scope = 'company' | 'person';
 
-export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, onAdd, onRemove, onClose }: Props) {
+export default function DaysOffDialog({ entries, assignees, loaded, shared, onAdd, onRemove, onClose }: Props) {
   const [label, setLabel] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -31,7 +31,7 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
   const labelRef = useRef<HTMLInputElement>(null);
   const ids = { label: useId(), start: useId(), end: useId(), scope: useId(), person: useId(), people: useId() };
 
-  // Offer the people on the project plus anyone who already has PTO listed
+  // Offer the people on the project plus anyone who already has time off listed
   const people = useMemo(
     () =>
       [...new Set([...assignees, ...entries.map((e) => e.assigneeName ?? '')])]
@@ -61,10 +61,10 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
     e.preventDefault();
     if (saving) return;
     if (scope === 'person' && !person.trim()) {
-      setError('Pick or type the person this PTO is for.');
+      setError('Pick or type the person this time off is for.');
       return;
     }
-    const parsed = parseNonWorkDayInput({
+    const parsed = parseDayOffInput({
       label,
       startDate,
       endDate,
@@ -90,7 +90,7 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
   };
 
   const company = entries.filter((e) => !e.assigneeName);
-  const pto = entries.filter((e) => e.assigneeName);
+  const perPerson = entries.filter((e) => e.assigneeName);
 
   return (
     <div
@@ -100,13 +100,13 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Holidays and PTO"
+        aria-label="Days Off"
         className="bg-bg-card border border-border-secondary rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto m-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border-primary">
           <div>
-            <h2 className="text-base font-bold text-text-primary">Holidays / PTO</h2>
+            <h2 className="text-base font-bold text-text-primary">Days Off</h2>
             <p className="text-xs text-text-secondary mt-0.5">
               Days off are skipped when counting workdays and moving tasks.{' '}
               {shared ? 'Everyone on the team sees this shared calendar.' : 'Saved to your account calendar.'}
@@ -134,7 +134,7 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
               type="text"
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="Thanksgiving, Plant shutdown, Alex PTO…"
+              placeholder="Thanksgiving, Plant shutdown, Alex on vacation…"
               maxLength={200}
               className={inputCls}
             />
@@ -178,7 +178,7 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
                 className={`${inputCls} cursor-pointer`}
               >
                 <option value="company">Company-wide</option>
-                <option value="person">One person (PTO)</option>
+                <option value="person">One person</option>
               </select>
             </div>
             {scope === 'person' && (
@@ -223,13 +223,13 @@ export default function NonWorkDaysDialog({ entries, assignees, loaded, shared, 
           </div>
         </form>
 
-        <div className="px-6 py-4 flex flex-col gap-4" data-testid="non-work-day-list">
+        <div className="px-6 py-4 flex flex-col gap-4" data-testid="days-off-list">
           {!loaded && <p className="text-xs text-text-muted">Loading…</p>}
           {loaded && entries.length === 0 && (
-            <p className="text-xs text-text-muted">No holidays or PTO yet. Weekends are always skipped.</p>
+            <p className="text-xs text-text-muted">No days off yet. Weekends are always skipped.</p>
           )}
           <EntryGroup title="Company-wide" entries={company} onRemove={onRemove} />
-          <EntryGroup title="Per-person PTO" entries={pto} onRemove={onRemove} />
+          <EntryGroup title="Per-person" entries={perPerson} onRemove={onRemove} />
         </div>
       </div>
     </div>
@@ -242,7 +242,7 @@ function EntryGroup({
   onRemove,
 }: {
   title: string;
-  entries: NonWorkDay[];
+  entries: DayOff[];
   onRemove: (id: string) => void | Promise<void>;
 }) {
   if (entries.length === 0) return null;
@@ -253,7 +253,7 @@ function EntryGroup({
         {entries.map((e) => (
           <li
             key={e.id}
-            data-non-work-entry={e.label}
+            data-day-off-entry={e.label}
             className="flex items-center gap-3 px-3 py-2 bg-bg-primary border border-border-primary rounded-lg"
           >
             <span
@@ -265,7 +265,7 @@ function EntryGroup({
                 {e.label}
               </div>
               <div className="text-[11px] text-text-muted truncate">
-                {formatNonWorkRange(e)}
+                {formatDayOffRange(e)}
                 {e.assigneeName ? ` · ${e.assigneeName}` : ''}
               </div>
             </div>

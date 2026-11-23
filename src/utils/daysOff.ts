@@ -1,10 +1,10 @@
-import type { NewNonWorkDay, NonWorkDay, Task } from '@/types';
+import type { NewDayOff, DayOff, Task } from '@/types';
 import { daysBetween, entryAppliesTo, formatDateShort, formatIsoDate, snapToWorkday, type WorkCalendar } from './date';
 import { isTaskDone } from './tasks';
 
-/** Matches the server's limits (server/src/routes/nonWorkDays.ts). */
-export const MAX_NON_WORK_LABEL_LENGTH = 200;
-export const MAX_NON_WORK_RANGE_DAYS = 366;
+/** Matches the server's limits (server/src/routes/daysOff.ts). */
+export const MAX_DAY_OFF_LABEL_LENGTH = 200;
+export const MAX_DAY_OFF_RANGE_DAYS = 366;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,24 +19,24 @@ export function isValidIsoDate(value: string): boolean {
  * Validates and tidies form input. A blank end date makes a single-day entry and a blank assignee
  * makes it company-wide. Returns `{ error }` with a message fit to show the user.
  */
-export function parseNonWorkDayInput(input: {
+export function parseDayOffInput(input: {
   label: string;
   startDate: string;
   endDate: string;
   assigneeName: string | null;
-}): { value: NewNonWorkDay } | { error: string } {
+}): { value: NewDayOff } | { error: string } {
   const label = input.label.trim();
-  if (!label) return { error: 'Give the entry a name, like "Thanksgiving" or "Alex PTO".' };
-  if (label.length > MAX_NON_WORK_LABEL_LENGTH) {
-    return { error: `Keep the name under ${MAX_NON_WORK_LABEL_LENGTH} characters.` };
+  if (!label) return { error: 'Give the entry a name, like "Thanksgiving" or "Alex on vacation".' };
+  if (label.length > MAX_DAY_OFF_LABEL_LENGTH) {
+    return { error: `Keep the name under ${MAX_DAY_OFF_LABEL_LENGTH} characters.` };
   }
   if (!isValidIsoDate(input.startDate)) return { error: 'Pick a valid start date.' };
   const endDate = input.endDate || input.startDate;
   if (!isValidIsoDate(endDate)) return { error: 'Pick a valid end date.' };
   if (endDate < input.startDate) return { error: 'The end date cannot be before the start date.' };
   const span = daysBetween(new Date(input.startDate + 'T00:00:00'), new Date(endDate + 'T00:00:00')) + 1;
-  if (span > MAX_NON_WORK_RANGE_DAYS) {
-    return { error: `A single entry can cover at most ${MAX_NON_WORK_RANGE_DAYS} days. Split it into several.` };
+  if (span > MAX_DAY_OFF_RANGE_DAYS) {
+    return { error: `A single entry can cover at most ${MAX_DAY_OFF_RANGE_DAYS} days. Split it into several.` };
   }
   const assigneeName = input.assigneeName?.trim() || null;
   if (assigneeName?.toLowerCase() === 'unassigned') {
@@ -46,12 +46,12 @@ export function parseNonWorkDayInput(input: {
 }
 
 /** The calendar that applies to one assignee's tasks (or to company-wide days only for `null`). */
-export function calendarFor(entries: readonly NonWorkDay[], assignee?: string | null): WorkCalendar {
+export function calendarFor(entries: readonly DayOff[], assignee?: string | null): WorkCalendar {
   return { entries, assignee };
 }
 
 /** Entries sorted by start date, then end date, then label. */
-export function sortNonWorkDays(entries: readonly NonWorkDay[]): NonWorkDay[] {
+export function sortDaysOff(entries: readonly DayOff[]): DayOff[] {
   return [...entries].sort(
     (a, b) =>
       a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate) || a.label.localeCompare(b.label),
@@ -59,16 +59,17 @@ export function sortNonWorkDays(entries: readonly NonWorkDay[]): NonWorkDay[] {
 }
 
 /** "Nov 26, 2026" or "Dec 24, 2026 – Jan 1, 2027". */
-export function formatNonWorkRange(entry: Pick<NonWorkDay, 'startDate' | 'endDate'>): string {
+export function formatDayOffRange(entry: Pick<DayOff, 'startDate' | 'endDate'>): string {
   return entry.startDate === entry.endDate
     ? formatDateShort(entry.startDate)
     : `${formatDateShort(entry.startDate)} – ${formatDateShort(entry.endDate)}`;
 }
 
+/** A shaded span of non-working time, built from Days Off entries (weekends are shaded separately). */
 export interface NonWorkSpan {
   id: string;
   label: string;
-  scope: 'company' | 'pto';
+  scope: 'company' | 'person';
   /** Day offset from the chart start (clamped to the chart) and length in days */
   offset: number;
   days: number;
@@ -79,7 +80,7 @@ export interface NonWorkSpan {
  * `assignee` matches. Entries outside `[chartStart, chartStart + totalDays)` are dropped and the rest clamped.
  */
 export function buildNonWorkSpans(
-  entries: readonly NonWorkDay[],
+  entries: readonly DayOff[],
   assignee: string | null | undefined,
   chartStart: Date,
   totalDays: number,
@@ -95,7 +96,7 @@ export function buildNonWorkSpans(
     spans.push({
       id: e.id,
       label: e.label,
-      scope: e.assigneeName ? 'pto' : 'company',
+      scope: e.assigneeName ? 'person' : 'company',
       offset,
       days: end - offset + 1,
     });
@@ -103,7 +104,7 @@ export function buildNonWorkSpans(
   return spans;
 }
 
-/** One task's date changes from snapping it off newly added non-work days. */
+/** One task's date changes from snapping it off newly added days off. */
 export interface ScheduleSnap {
   task: Task;
   startDate?: string;
@@ -148,19 +149,15 @@ export async function saveScheduleSnap(
 }
 
 /**
- * Which tasks have to move because `added` just made their start or due date a non-work day.
+ * Which tasks have to move because `added` just made their start or due date a day off.
  *
  * A start date moves forward to the next workday and a due date moves forward to the next workday
- * (both skipping weekends, holidays and that assignee's PTO in `entries`), so a due date never
- * moves earlier than planned. A start that would then land after its due date pulls the due date
+ * (both skipping weekends and the days off in `entries` that apply to that assignee), so a due
+ * date never moves earlier than planned. A start that would then land after its due date pulls the due date
  * along. Completed and cross-project (external) tasks are left alone, as are implicit due dates
  * (derived from the project's target date, so there is no Linear due date to change).
  */
-export function planNonWorkDaySnap(
-  tasks: readonly Task[],
-  entries: readonly NonWorkDay[],
-  added: NonWorkDay,
-): ScheduleSnap[] {
+export function planDayOffSnap(tasks: readonly Task[], entries: readonly DayOff[], added: DayOff): ScheduleSnap[] {
   const snaps: ScheduleSnap[] = [];
   const toDate = (iso: string) => new Date(iso + 'T00:00:00');
   const forward = (iso: string, cal: WorkCalendar) => formatIsoDate(snapToWorkday(toDate(iso), 1, cal));

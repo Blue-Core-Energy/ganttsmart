@@ -1,6 +1,6 @@
 import { FieldValue, type DocumentReference, type Firestore } from '@google-cloud/firestore';
-import { sortNonWorkDays } from './nonWorkDays.js';
-import type { Baseline, ChangeEvent, LinearTokens, NonWorkDay, Store } from './types.js';
+import { sortDaysOff } from './daysOff.js';
+import type { Baseline, ChangeEvent, LinearTokens, DayOff, Store } from './types.js';
 
 /** gRPC status code Firestore returns from create() when the document already exists. */
 const ALREADY_EXISTS = 6;
@@ -22,7 +22,7 @@ interface ChangeDoc extends ChangeEvent {
   sort_key: string;
 }
 
-interface NonWorkDayDoc extends Omit<NonWorkDay, 'id'> {
+interface DayOffDoc extends Omit<DayOff, 'id'> {
   created_by: string;
   created_at: string;
 }
@@ -67,7 +67,9 @@ async function runWithConcurrency<T>(items: T[], concurrency: number, fn: (item:
  * - users/{sub}/baselines/{issueId}
  * - users/{sub}/issueChanges/{issueId}/events/{auto} (keyed by issue so ordering needs no composite index)
  * - users/{sub}/transitions/{auto}
- * - nonWorkDays/{auto}: the team's shared holidays and PTO (not per user)
+ * - nonWorkDays/{auto}: the team's shared days off (not per user). The collection keeps the feature's
+ *   original name on purpose: Firestore cannot rename a collection, and moving documents would make a
+ *   rollback silently lose edits.
  */
 export function createFirestoreStore(db: Firestore): Store {
   let seq = 0;
@@ -189,11 +191,12 @@ export function createFirestoreStore(db: Firestore): Store {
       });
     },
 
-    async listNonWorkDays() {
+    async listDaysOff() {
+      // Stored name is the feature's original one (see the layout note above)
       const snap = await db.collection('nonWorkDays').get();
-      return sortNonWorkDays(
+      return sortDaysOff(
         snap.docs.map((doc) => {
-          const d = doc.data() as NonWorkDayDoc;
+          const d = doc.data() as DayOffDoc;
           return {
             id: doc.id,
             label: d.label,
@@ -205,8 +208,8 @@ export function createFirestoreStore(db: Firestore): Store {
       );
     },
 
-    async addNonWorkDay(sub, input) {
-      const doc: NonWorkDayDoc = {
+    async addDayOff(sub, input) {
+      const doc: DayOffDoc = {
         label: input.label,
         startDate: input.startDate,
         endDate: input.endDate,
@@ -214,11 +217,13 @@ export function createFirestoreStore(db: Firestore): Store {
         created_by: sub,
         created_at: new Date().toISOString(),
       };
+      // Stored name is the feature's original one (see the layout note above)
       const ref = await db.collection('nonWorkDays').add(doc);
       return { id: ref.id, ...input };
     },
 
-    async deleteNonWorkDay(id) {
+    async deleteDayOff(id) {
+      // Stored name is the feature's original one (see the layout note above)
       const ref = db.collection('nonWorkDays').doc(id);
       // delete() with exists:true fails with NOT_FOUND, so a missing id is reported without a read
       try {

@@ -12,7 +12,7 @@ describe('@/backend', () => {
       sharing: true,
       passwordLogin: true,
       marketingPages: true,
-      sharedNonWorkDays: false,
+      sharedDaysOff: false,
     });
   });
 });

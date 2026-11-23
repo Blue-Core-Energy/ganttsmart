@@ -217,17 +217,17 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
       });
     });
 
-    describe('non-work days', () => {
+    describe('days off', () => {
       // The calendar is shared by every user, so a shared backend (the Firestore emulator) can hold
       // entries from other tests: these look entries up by the unique label of this run.
       let tag: string;
       beforeEach(() => {
         tag = alice.replace('alice-', 'nwd-');
       });
-      const mine = async () => (await store.listNonWorkDays()).filter((e) => e.label.startsWith(tag));
+      const mine = async () => (await store.listDaysOff()).filter((e) => e.label.startsWith(tag));
 
       it('adds a company-wide entry and lists it with its generated id', async () => {
-        const added = await store.addNonWorkDay(alice, {
+        const added = await store.addDayOff(alice, {
           label: `${tag} Thanksgiving`,
           startDate: '2026-11-26',
           endDate: '2026-11-26',
@@ -245,14 +245,14 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
       });
 
       it('stores a per-assignee range and gives every entry its own id', async () => {
-        const a = await store.addNonWorkDay(alice, {
-          label: `${tag} Alex PTO`,
+        const a = await store.addDayOff(alice, {
+          label: `${tag} Alex Out`,
           startDate: '2026-12-21',
           endDate: '2026-12-31',
           assigneeName: 'Alex Rivera',
         });
-        const b = await store.addNonWorkDay(alice, {
-          label: `${tag} Alex PTO`,
+        const b = await store.addDayOff(alice, {
+          label: `${tag} Alex Out`,
           startDate: '2026-12-21',
           endDate: '2026-12-31',
           assigneeName: 'Alex Rivera',
@@ -263,7 +263,7 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
 
       it('lists by start date, then end date, then label', async () => {
         const add = (label: string, startDate: string, endDate: string) =>
-          store.addNonWorkDay(alice, { label: `${tag} ${label}`, startDate, endDate, assigneeName: null });
+          store.addDayOff(alice, { label: `${tag} ${label}`, startDate, endDate, assigneeName: null });
         await add('c', '2026-12-24', '2026-12-26');
         await add('b', '2026-12-24', '2026-12-24');
         await add('z', '2026-11-26', '2026-11-26');
@@ -272,7 +272,7 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
       });
 
       it('shares the calendar between users', async () => {
-        const added = await store.addNonWorkDay(alice, {
+        const added = await store.addDayOff(alice, {
           label: `${tag} Shutdown`,
           startDate: '2026-12-28',
           endDate: '2026-12-31',
@@ -280,32 +280,32 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
         });
         // The list takes no user: bob sees alice's entry and can remove it
         expect(await mine()).toEqual([added]);
-        expect(await store.deleteNonWorkDay(added.id)).toBe(true);
+        expect(await store.deleteDayOff(added.id)).toBe(true);
         expect(await mine()).toEqual([]);
         expect(bob).toBeTruthy();
       });
 
       it('deletes only the named entry and reports a missing one', async () => {
-        const keep = await store.addNonWorkDay(alice, {
+        const keep = await store.addDayOff(alice, {
           label: `${tag} keep`,
           startDate: '2026-11-26',
           endDate: '2026-11-26',
           assigneeName: null,
         });
-        const drop = await store.addNonWorkDay(alice, {
+        const drop = await store.addDayOff(alice, {
           label: `${tag} drop`,
           startDate: '2026-11-27',
           endDate: '2026-11-27',
           assigneeName: null,
         });
-        expect(await store.deleteNonWorkDay(drop.id)).toBe(true);
+        expect(await store.deleteDayOff(drop.id)).toBe(true);
         expect(await mine()).toEqual([keep]);
-        expect(await store.deleteNonWorkDay(drop.id)).toBe(false);
-        expect(await store.deleteNonWorkDay('does-not-exist')).toBe(false);
+        expect(await store.deleteDayOff(drop.id)).toBe(false);
+        expect(await store.deleteDayOff('does-not-exist')).toBe(false);
       });
 
       it('does not let callers mutate stored entries through returned objects', async () => {
-        const added = await store.addNonWorkDay(alice, {
+        const added = await store.addDayOff(alice, {
           label: `${tag} immutable`,
           startDate: '2026-11-26',
           endDate: '2026-11-26',

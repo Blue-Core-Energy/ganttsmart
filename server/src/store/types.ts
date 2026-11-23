@@ -43,8 +43,8 @@ export interface TransitionInput {
   toStatus: string;
 }
 
-/** A holiday, shutdown or vacation shared by the whole team. Without `assigneeName` it is company-wide. */
-export interface NonWorkDay {
+/** A company closure or one person's time off, shared by the whole team. Without `assigneeName` it is company-wide. */
+export interface DayOff {
   id: string;
   label: string;
   /** `YYYY-MM-DD`, inclusive. */
@@ -54,11 +54,11 @@ export interface NonWorkDay {
   assigneeName: string | null;
 }
 
-export type NonWorkDayInput = Omit<NonWorkDay, 'id'>;
+export type DayOffInput = Omit<DayOff, 'id'>;
 
 /**
  * Persistence for Linear tokens and planning history (per user; `sub` is the user's stable identity)
- * and the non-work-day calendar (shared by everyone).
+ * and the days off calendar (shared by everyone).
  */
 export interface Store {
   getTokens(sub: string): Promise<LinearTokens | null>;
@@ -84,9 +84,9 @@ export interface Store {
   listChanges(sub: string, issueId: string, limit: number): Promise<ChangeEvent[]>;
   addTransition(sub: string, t: TransitionInput): Promise<void>;
   /** The shared calendar, sorted by start date, then end date, then label. */
-  listNonWorkDays(): Promise<NonWorkDay[]>;
+  listDaysOff(): Promise<DayOff[]>;
   /** Adds an entry to the shared calendar; `sub` is recorded as its author. */
-  addNonWorkDay(sub: string, input: NonWorkDayInput): Promise<NonWorkDay>;
+  addDayOff(sub: string, input: DayOffInput): Promise<DayOff>;
   /** Removes an entry. Returns false if there was none with that id. */
-  deleteNonWorkDay(id: string): Promise<boolean>;
+  deleteDayOff(id: string): Promise<boolean>;
 }

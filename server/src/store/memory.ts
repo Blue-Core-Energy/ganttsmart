@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { sortNonWorkDays } from './nonWorkDays.js';
-import type { Baseline, BaselineRow, ChangeEvent, LinearTokens, NonWorkDay, Store, TransitionInput } from './types.js';
+import { sortDaysOff } from './daysOff.js';
+import type { Baseline, BaselineRow, ChangeEvent, LinearTokens, DayOff, Store, TransitionInput } from './types.js';
 
 interface UserData {
   email: string | null;
@@ -15,7 +15,7 @@ interface UserData {
 /** In-memory Store for local development and tests. Data is lost on restart. */
 export function createMemoryStore(): Store {
   const users = new Map<string, UserData>();
-  const nonWorkDays = new Map<string, NonWorkDay>();
+  const daysOff = new Map<string, DayOff>();
   let seq = 0;
 
   function user(sub: string): UserData {
@@ -126,18 +126,18 @@ export function createMemoryStore(): Store {
       user(sub).transitions.push({ ...t, transitionedAt: new Date().toISOString() });
     },
 
-    async listNonWorkDays() {
-      return sortNonWorkDays([...nonWorkDays.values()].map((e) => ({ ...e })));
+    async listDaysOff() {
+      return sortDaysOff([...daysOff.values()].map((e) => ({ ...e })));
     },
 
-    async addNonWorkDay(_sub, input) {
-      const entry: NonWorkDay = { id: randomUUID(), ...input };
-      nonWorkDays.set(entry.id, entry);
+    async addDayOff(_sub, input) {
+      const entry: DayOff = { id: randomUUID(), ...input };
+      daysOff.set(entry.id, entry);
       return { ...entry };
     },
 
-    async deleteNonWorkDay(id) {
-      return nonWorkDays.delete(id);
+    async deleteDayOff(id) {
+      return daysOff.delete(id);
     },
   };
 }

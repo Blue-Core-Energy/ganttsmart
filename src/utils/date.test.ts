@@ -161,7 +161,7 @@ describe('workday duration helpers', () => {
   });
 });
 
-describe('custom non-work days (holidays and PTO)', () => {
+describe('custom non-work days (days off)', () => {
   // Nov 2026: Thu 26 is Thanksgiving; Alex is out Mon 16 – Tue 17
   const calendar: WorkCalendar = {
     entries: [
@@ -172,40 +172,40 @@ describe('custom non-work days (holidays and PTO)', () => {
   };
   const alex: WorkCalendar = { ...calendar, assignee: 'Alex' };
 
-  it('entryAppliesTo matches company-wide entries for everyone and PTO only for the named assignee', () => {
+  it('entryAppliesTo matches company-wide entries for everyone and per-person entries only for the named assignee', () => {
     const holiday = { startDate: '2026-11-26', endDate: '2026-11-27' };
     expect(entryAppliesTo(holiday, '2026-11-26', null)).toBe(true);
     expect(entryAppliesTo(holiday, '2026-11-27', 'Anyone')).toBe(true);
     expect(entryAppliesTo(holiday, '2026-11-28', 'Anyone')).toBe(false);
     expect(entryAppliesTo(holiday, '2026-11-25', 'Anyone')).toBe(false);
 
-    const pto = { startDate: '2026-11-16', endDate: '2026-11-17', assigneeName: 'Alex' };
-    expect(entryAppliesTo(pto, '2026-11-16', 'Alex')).toBe(true);
-    expect(entryAppliesTo(pto, '2026-11-17', 'Sam')).toBe(false);
-    expect(entryAppliesTo(pto, '2026-11-17', null)).toBe(false);
-    expect(entryAppliesTo(pto, '2026-11-18', 'Alex')).toBe(false);
+    const person = { startDate: '2026-11-16', endDate: '2026-11-17', assigneeName: 'Alex' };
+    expect(entryAppliesTo(person, '2026-11-16', 'Alex')).toBe(true);
+    expect(entryAppliesTo(person, '2026-11-17', 'Sam')).toBe(false);
+    expect(entryAppliesTo(person, '2026-11-17', null)).toBe(false);
+    expect(entryAppliesTo(person, '2026-11-18', 'Alex')).toBe(false);
   });
 
   it('entryAppliesTo compares assignee names ignoring case and surrounding spaces', () => {
-    const pto = { startDate: '2026-11-16', endDate: '2026-11-17', assigneeName: 'Alex Kim' };
-    expect(entryAppliesTo(pto, '2026-11-16', 'alex kim')).toBe(true);
-    expect(entryAppliesTo(pto, '2026-11-16', '  ALEX KIM ')).toBe(true);
-    expect(entryAppliesTo({ ...pto, assigneeName: ' Alex Kim ' }, '2026-11-16', 'Alex Kim')).toBe(true);
-    expect(entryAppliesTo(pto, '2026-11-16', 'Alex')).toBe(false);
+    const person = { startDate: '2026-11-16', endDate: '2026-11-17', assigneeName: 'Alex Kim' };
+    expect(entryAppliesTo(person, '2026-11-16', 'alex kim')).toBe(true);
+    expect(entryAppliesTo(person, '2026-11-16', '  ALEX KIM ')).toBe(true);
+    expect(entryAppliesTo({ ...person, assigneeName: ' Alex Kim ' }, '2026-11-16', 'Alex Kim')).toBe(true);
+    expect(entryAppliesTo(person, '2026-11-16', 'Alex')).toBe(false);
   });
 
-  it('isNonWorkDay keeps weekends and adds holidays and the matching assignee PTO', () => {
+  it('isNonWorkDay keeps weekends and adds company-wide days off and the matching assignee’s own', () => {
     expect(isNonWorkDay(d('2026-11-14'))).toBe(true); // Sat, no calendar
     expect(isNonWorkDay(d('2026-11-26'))).toBe(false); // Thu, no calendar: backward compatible
     expect(isNonWorkDay(d('2026-11-26'), calendar)).toBe(true);
     expect(isNonWorkDay(d('2026-11-14'), calendar)).toBe(true);
-    expect(isNonWorkDay(d('2026-11-16'), calendar)).toBe(false); // Alex's PTO is not Sam's
+    expect(isNonWorkDay(d('2026-11-16'), calendar)).toBe(false); // Alex's day off is not Sam's
     expect(isNonWorkDay(d('2026-11-16'), alex)).toBe(true);
     expect(isNonWorkDay(d('2026-11-18'), alex)).toBe(false);
     expect(isNonWorkDay(d('2026-11-16'), { entries: calendar.entries })).toBe(false); // unassigned
   });
 
-  it('snapToWorkday skips holidays, PTO and the weekend after them in either direction', () => {
+  it('snapToWorkday skips days off and the weekend after them in either direction', () => {
     expect(formatIsoDate(snapToWorkday(d('2026-11-26'), 1, calendar))).toBe('2026-11-27'); // Thu -> Fri
     expect(formatIsoDate(snapToWorkday(d('2026-11-26'), -1, calendar))).toBe('2026-11-25');
     expect(formatIsoDate(snapToWorkday(d('2026-11-16'), 1, alex))).toBe('2026-11-18');
@@ -216,7 +216,7 @@ describe('custom non-work days (holidays and PTO)', () => {
     expect(formatIsoDate(snapToWorkday(d('2026-11-27'), 1, longWeekend))).toBe('2026-11-30'); // Fri off -> Mon
   });
 
-  it('countWorkdaysInclusive excludes holidays and only the assignee’s own PTO', () => {
+  it('countWorkdaysInclusive excludes company-wide days off and only the assignee’s own', () => {
     // Mon Nov 23 -> Fri Nov 27, Thanksgiving on Thu
     expect(countWorkdaysInclusive(d('2026-11-23'), d('2026-11-27'))).toBe(5);
     expect(countWorkdaysInclusive(d('2026-11-23'), d('2026-11-27'), calendar)).toBe(4);
@@ -226,17 +226,17 @@ describe('custom non-work days (holidays and PTO)', () => {
     expect(countWorkdaysInclusive(d('2026-11-26'), d('2026-11-26'), calendar)).toBe(0);
   });
 
-  it('addWorkdaysInclusive skips the holiday when counting out the duration', () => {
+  it('addWorkdaysInclusive skips the company-wide day off when counting out the duration', () => {
     // 3 workdays from Tue Nov 24: Tue, Wed, (Thu off) Fri
     expect(formatIsoDate(addWorkdaysInclusive(d('2026-11-24'), 3))).toBe('2026-11-26');
     expect(formatIsoDate(addWorkdaysInclusive(d('2026-11-24'), 3, calendar))).toBe('2026-11-27');
     // A start on the holiday begins on the next workday
     expect(formatIsoDate(addWorkdaysInclusive(d('2026-11-26'), 1, calendar))).toBe('2026-11-27');
-    // Alex's PTO pushes the first day to Wednesday
+    // Alex's day off pushes the first day to Wednesday
     expect(formatIsoDate(addWorkdaysInclusive(d('2026-11-16'), 2, alex))).toBe('2026-11-19');
   });
 
-  it('moveTaskDatesPreservingWorkdays keeps the workday count around holidays and PTO', () => {
+  it('moveTaskDatesPreservingWorkdays keeps the workday count around days off', () => {
     // Mon Nov 16 -> Wed Nov 18 (3 workdays for Sam) moved +7d lands Mon Nov 23 -> Wed Nov 25
     const plain = moveTaskDatesPreservingWorkdays(d('2026-11-16'), d('2026-11-18'), 7, calendar);
     expect(formatIsoDate(plain.start)).toBe('2026-11-23');

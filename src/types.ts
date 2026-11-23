@@ -37,10 +37,10 @@ export interface Task {
 }
 
 /**
- * A holiday, shutdown or vacation: one date or an inclusive range (`YYYY-MM-DD`).
+ * A day off: a company closure or one person's time off, as one date or an inclusive range (`YYYY-MM-DD`).
  * Without `assigneeName` it is company-wide; with it, only that person's tasks skip the days.
  */
-export interface NonWorkDay {
+export interface DayOff {
   id: string;
   label: string;
   startDate: string;
@@ -48,7 +48,7 @@ export interface NonWorkDay {
   assigneeName: string | null;
 }
 
-export type NewNonWorkDay = Omit<NonWorkDay, 'id'>;
+export type NewDayOff = Omit<DayOff, 'id'>;
 
 export interface Project {
   id: string;
