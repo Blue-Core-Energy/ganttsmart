@@ -115,3 +115,56 @@ describe('GanttRow - Plan vs Actual baseline ghost overlay', () => {
     expect(html).not.toContain('data-baseline-bar');
   });
 });
+
+describe('GanttRow - Task column hierarchy indent and mobile status dot', () => {
+  it('applies standard 18px-per-depth indent on desktop viewports', () => {
+    const task = makeTask({ id: 'ENG-7', title: 'Deep task' });
+    const html = renderToStaticMarkup(
+      createElement(GanttRow, {
+        ...defaultProps,
+        task,
+        depth: 7,
+      }),
+    );
+
+    // 7 * 18 = 126px padding-left
+    expect(html).toContain('padding-left:126px');
+  });
+
+  it('applies bounded indent and renders status dot in task column on narrow viewports', () => {
+    const task = makeTask({ id: 'ENG-7', title: 'Deep task', status: 'In Progress' });
+    const html = renderToStaticMarkup(
+      createElement(GanttRow, {
+        ...defaultProps,
+        task,
+        depth: 7,
+        visibleColumns: ['id', 'task'],
+        colWidths: { ...defaultProps.colWidths, id: 80, task: 200 },
+        isNarrow: true,
+      }),
+    );
+
+    // Depth 7 narrow indent is 62px (5 * 10 + 2 * 6)
+    expect(html).toContain('padding-left:62px');
+    expect(html).not.toContain('padding-left:126px');
+    // Status dot is rendered in the task cell since the status column is hidden
+    expect(html).toContain('data-status-bubble="ENG-7"');
+  });
+
+  it('keeps 18px-per-depth desktop indent on wide columns (300px) even when status column is omitted', () => {
+    const task = makeTask({ id: 'ENG-7', title: 'Deep task' });
+    const html = renderToStaticMarkup(
+      createElement(GanttRow, {
+        ...defaultProps,
+        task,
+        depth: 7,
+        visibleColumns: ['id', 'task', 'assignee'],
+        colWidths: { ...defaultProps.colWidths, task: 300 },
+      }),
+    );
+
+    // Wide column keeps standard 7 * 18 = 126px padding-left
+    expect(html).toContain('padding-left:126px');
+    expect(html).not.toContain('padding-left:62px');
+  });
+});
