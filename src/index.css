@@ -314,7 +314,8 @@ tr:focus-visible {
     print-color-adjust: exact;
   }
 
-  .gantt-sticky-cell {
+  .gantt-sticky-cell,
+  tr[data-milestone-row] td {
     background-color: transparent !important;
     position: static !important;
   }

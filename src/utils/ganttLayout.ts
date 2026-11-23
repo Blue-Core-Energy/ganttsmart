@@ -1,6 +1,9 @@
 /** Height of every schedule row, in px (including its 1px bottom border) */
 export const ROW_HEIGHT = 40;
 
+/** Height of the pinned milestone row, in px */
+export const MILESTONE_ROW_HEIGHT = 44;
+
 /** Height of a task bar on the timeline, in px */
 export const BAR_HEIGHT = 24;
 
