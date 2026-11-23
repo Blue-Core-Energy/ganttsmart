@@ -5,14 +5,7 @@ import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/schedul
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import { BAR_HEIGHT, CELL_HIT_PAD, INDENT_PER_DEPTH, ROW_HEIGHT } from '@/utils/ganttLayout';
-import {
-  barGradients,
-  barShadows,
-  idColors,
-  priorityBadgeClasses,
-  priorityClass,
-  statusDotColors,
-} from '@/utils/colors';
+import { idColors, priorityBadgeClasses, priorityClass, statusDotColors } from '@/utils/colors';
 import {
   buildTimeCells,
   computeBarDayRange,
@@ -23,6 +16,7 @@ import {
   moveTaskDatesPreservingWorkdays,
 } from '@/utils/date';
 import { buildNonWorkSpans, calendarFor, formatDayOffRange } from '@/utils/daysOff';
+import { scheduleState, scheduleStateClass } from '@/utils/scheduleState';
 import { isTaskDone } from '@/utils/tasks';
 import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/workflowStates';
 import CellMenu, { type CellMenuOption } from './CellMenu';
@@ -119,6 +113,9 @@ export default function GanttRow({
     () => (task.startDate ? new Date(task.startDate + 'T00:00:00') : null),
     [task.startDate],
   );
+
+  // What the bar's colour says: how this issue is tracking, not how important it is
+  const barState = useMemo(() => scheduleState(task, today), [task, today]);
 
   // Drag state — due date (right edge)
   const [dragDelta, setDragDelta] = useState(0);
@@ -1129,21 +1126,11 @@ export default function GanttRow({
               data-task-bar={task.id}
               data-external-bar={task.isExternal ? 'true' : undefined}
               data-highlighted={isHighlighted ? 'true' : undefined}
-              className={`gantt-bar absolute rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${isDone ? 'bar-done' : overdue ? 'bar-overdue animate-pulse-bar' : `bar-${pCls}`} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
+              className={`gantt-bar absolute rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${scheduleStateClass(barState)} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
                 left: 0,
                 width: displayBarWidth,
                 height: BAR_HEIGHT,
-                background: isDone
-                  ? 'linear-gradient(135deg, #15803d, #22c55e)'
-                  : overdue
-                    ? 'linear-gradient(135deg, #b91c1c, #ef4444)'
-                    : barGradients[pCls],
-                boxShadow: isDone
-                  ? '0 2px 8px rgba(34,197,94,0.3)'
-                  : overdue
-                    ? '0 2px 12px rgba(239,68,68,0.4)'
-                    : barShadows[pCls],
                 overflow: 'hidden',
                 outline: task.isExternal
                   ? '1.5px dashed rgba(255,255,255,0.6)'

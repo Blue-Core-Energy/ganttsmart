@@ -1716,6 +1716,135 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('colours task bars by schedule state rather than priority', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    // Priorities are deliberately mismatched with the states, so any priority colour would show
+    const issue = (
+      identifier: string,
+      title: string,
+      state: { name: string; type: string },
+      startOffset: number | null,
+      dueOffset: number,
+      priority: number,
+    ) => ({
+      id: `uuid-${identifier}`,
+      identifier,
+      title,
+      description: startOffset === null ? title : `${startTagOffsetDays(startOffset)}\n${title}`,
+      dueDate: isoOffsetDays(dueOffset),
+      url: `https://linear.app/bluecoreenergy/issue/${identifier}`,
+      priority,
+      state,
+      createdAt: '2026-01-01T00:00:00Z',
+      completedAt: state.type === 'completed' ? '2026-01-05T12:00:00Z' : null,
+      assignee: { name: 'Andrew Phillips' },
+      team: { id: 'team-1' },
+      projectMilestone: null,
+    });
+
+    const started = { name: 'In Progress', type: 'started' };
+    const todo = { name: 'Todo', type: 'unstarted' };
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+      const reply = (data: unknown) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) });
+
+      if (query.includes('projects(')) return reply({ projects: { nodes: [{ id: 'proj-1', name: 'State Colours' }] } });
+      if (query.includes('externalLinks')) {
+        return reply({
+          project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } },
+        });
+      }
+      if (query.includes('project(id:')) {
+        return reply({
+          project: {
+            name: 'State Colours',
+            startDate: isoOffsetDays(-14),
+            targetDate: isoOffsetDays(20),
+            projectMilestones: { nodes: [] },
+            issues: {
+              nodes: [
+                issue('ENG-301', 'Overdue while in progress', started, -6, -2, 4),
+                issue('ENG-302', 'Being worked on', started, -1, 5, 1),
+                issue('ENG-303', 'Should have started', todo, -3, 4, 1),
+                issue('ENG-304', 'No start date', todo, null, 6, 1),
+                issue('ENG-305', 'Starts later', todo, 2, 8, 1),
+              ],
+            },
+            doneIssues: {
+              nodes: [issue('ENG-300', 'Finished late', { name: 'Done', type: 'completed' }, -10, -4, 1)],
+            },
+          },
+        });
+      }
+      if (query.includes('relations')) return reply({ issues: { nodes: [] } });
+      if (query.includes('workflowStates')) {
+        return reply({
+          workflowStates: {
+            nodes: [
+              { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+              { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+              { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+            ],
+          },
+        });
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.goto('/app');
+
+    const bar = (id: string) => page.locator(`[data-task-bar="${id}"]`);
+    await expect(bar('ENG-300')).toBeVisible();
+
+    // Done wins over a missed due date; overdue wins over being in progress
+    await expect(bar('ENG-300')).toHaveClass(/\bbar-done\b/);
+    await expect(bar('ENG-301')).toHaveClass(/\bbar-overdue\b/);
+    await expect(bar('ENG-302')).toHaveClass(/\bbar-in-progress\b/);
+    await expect(bar('ENG-303')).toHaveClass(/\bbar-late-start\b/);
+    // No start date is never "late to start", and a start date still ahead is simply not started
+    await expect(bar('ENG-304')).toHaveClass(/\bbar-not-started\b/);
+    await expect(bar('ENG-305')).toHaveClass(/\bbar-not-started\b/);
+
+    // Red no longer pulses now that it is the only "late" signal
+    await expect(bar('ENG-301')).not.toHaveClass(/animate-pulse-bar/);
+
+    // Urgent issues take three different colours, so priority is not what the bar says
+    const backgrounds = await page.evaluate(() =>
+      ['ENG-301', 'ENG-302', 'ENG-303', 'ENG-304'].map(
+        (id) => getComputedStyle(document.querySelector(`[data-task-bar="${id}"]`)!).backgroundImage,
+      ),
+    );
+    expect(backgrounds[0]).toContain('rgb(239, 68, 68)'); // overdue red
+    expect(backgrounds[1]).toContain('rgb(59, 130, 246)'); // in-progress blue
+    expect(backgrounds[2]).toContain('rgb(245, 158, 11)'); // late-start amber
+    expect(backgrounds[3]).toContain('rgb(161, 161, 170)'); // not-started grey
+    expect(new Set(backgrounds).size).toBe(4);
+    // ...and the in-progress blue stays clear of the accent purple used for selection
+    expect(backgrounds[1]).not.toContain('rgb(124, 92, 252)');
+
+    expect(errors).toEqual([]);
+  });
+
   test('hops a dependency arrow over an unrelated arrow it crosses', async ({ page }) => {
     const errors = trackErrors(page);
 

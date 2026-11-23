@@ -26,6 +26,7 @@
 ## What It Does
 
 - **Interactive Gantt timeline** with start dates, due dates, and drag-to-reschedule (writes back to Linear via API)
+- **Bars coloured by schedule state** — green when done, red when overdue, blue when in progress, amber when it should have started, grey when not started yet (priority stays in the Priority column)
 - **Multi-project switching** across your entire Linear workspace
 - **Smart filtering** by assignee, status, and date range from one Filter dropdown — with instant search across all tasks
 - **Dependency arrows** between blocking/blocked issues (uses Linear's native relations)
