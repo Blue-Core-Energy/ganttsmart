@@ -1,16 +1,22 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import { getValidLinearToken } from '../_shared/linear-token.ts';
+import {
+  computeClientIpHash,
+  extractClientIp,
+  hashPasswordPBKDF2,
+  MAX_AGGREGATE_ATTEMPTS,
+  MAX_PASSWORD_ATTEMPTS,
+  RATE_LIMIT_WINDOW_MS,
+  STALE_TTL_MS,
+  validateExpiresInDays,
+  validatePassword,
+  verifyPassword,
+} from '../_shared/share-utils.ts';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const LINEAR_API = 'https://api.linear.app/graphql';
-const MAX_EXPIRY_DAYS = 90;
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const MAX_PASSWORD_ATTEMPTS = 5;
-// Auto-refresh cached share data when older than this. Acts as a built-in throttle:
-// at most one Linear API call per share per window, regardless of viewer volume.
-const STALE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const PRIORITY_MAP: Record<number, string> = { 0: 'None', 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low' };
 
 const corsHeaders = {
@@ -25,104 +31,11 @@ function json(data: unknown, status = 200) {
   });
 }
 
-// --- PBKDF2 password hashing (AUTH-VULN-02 fix) ---
+// --- Rate limiting (AUTH-VULN-03 & IT-153 fix) ---
 
-function toHex(buf: Uint8Array): string {
-  return Array.from(buf)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-function fromHex(hex: string): Uint8Array {
-  return new Uint8Array(hex.match(/.{2}/g)!.map((b) => parseInt(b, 16)));
-}
-
-async function hashPasswordPBKDF2(pw: string): Promise<string> {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, [
-    'deriveBits',
-  ]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-    keyMaterial,
-    256,
-  );
-  return `pbkdf2:${toHex(salt)}:${toHex(new Uint8Array(bits))}`;
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
-
-async function verifyPassword(pw: string, stored: string): Promise<boolean> {
-  if (stored.startsWith('pbkdf2:')) {
-    const [, saltHex, expectedHash] = stored.split(':');
-    const salt = fromHex(saltHex);
-    const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, [
-      'deriveBits',
-    ]);
-    const bits = await crypto.subtle.deriveBits(
-      { name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' },
-      keyMaterial,
-      256,
-    );
-    return constantTimeEqual(toHex(new Uint8Array(bits)), expectedHash);
-  } else {
-    // Legacy SHA-256 format — verify then caller re-hashes
-    const data = new TextEncoder().encode(pw + 'ganttsmart-salt-2024');
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return constantTimeEqual(toHex(new Uint8Array(buf)), stored);
-  }
-}
-
-// --- Rate limiting (AUTH-VULN-03 fix) ---
-
-async function checkRateLimit(
-  supabase: ReturnType<typeof createClient>,
-  shareToken: string,
-): Promise<{ blocked: boolean; retryAfterSeconds?: number }> {
-  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
-  const { data } = await supabase
-    .from('share_access_attempts')
-    .select('*')
-    .eq('share_token', shareToken)
-    .gte('first_attempt_at', windowStart)
-    .order('first_attempt_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (data && data.attempt_count >= MAX_PASSWORD_ATTEMPTS) {
-    const lockedUntil = new Date(new Date(data.first_attempt_at).getTime() + RATE_LIMIT_WINDOW_MS);
-    const retryAfterSeconds = Math.ceil((lockedUntil.getTime() - Date.now()) / 1000);
-    if (retryAfterSeconds > 0) return { blocked: true, retryAfterSeconds };
-  }
-  return { blocked: false };
-}
-
-async function recordFailedAttempt(supabase: ReturnType<typeof createClient>, shareToken: string): Promise<void> {
-  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
-  const { data } = await supabase
-    .from('share_access_attempts')
-    .select('id, attempt_count')
-    .eq('share_token', shareToken)
-    .gte('first_attempt_at', windowStart)
-    .order('first_attempt_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  if (data) {
-    await supabase
-      .from('share_access_attempts')
-      .update({ attempt_count: data.attempt_count + 1, last_attempt_at: new Date().toISOString() })
-      .eq('id', data.id);
-  } else {
-    await supabase.from('share_access_attempts').insert({ share_token: shareToken });
-  }
+async function getClientIpHash(req: Request): Promise<string> {
+  const rawIp = extractClientIp(req.headers);
+  return computeClientIpHash(rawIp);
 }
 
 // --- GraphQL with variables (INJ-VULN-01 fix) ---
@@ -367,10 +280,21 @@ Deno.serve(async (req: Request) => {
       if (!user) return json({ error: 'Unauthorized' }, 401);
 
       const projectId = body.projectId;
-      if (!projectId) return json({ error: 'projectId required' }, 400);
+      if (!projectId || typeof projectId !== 'string') return json({ error: 'projectId required' }, 400);
 
-      const days = Math.min(Math.max(1, body.expiresInDays || 3), MAX_EXPIRY_DAYS);
+      const expValidation = validateExpiresInDays(body.expiresInDays);
+      if (!expValidation.valid) {
+        return json({ error: expValidation.error }, 400);
+      }
+      const days = expValidation.value!;
       const expiresAt = new Date(Date.now() + days * 86400000).toISOString();
+
+      if (body.password !== undefined && body.password !== null && body.password !== '') {
+        const pwValidation = validatePassword(body.password);
+        if (!pwValidation.valid) {
+          return json({ error: pwValidation.error }, 400);
+        }
+      }
 
       const linearToken = await getValidLinearToken(supabase, user.id);
       if (!linearToken) return json({ error: 'No Linear token. Connect Linear first.' }, 400);
@@ -415,62 +339,141 @@ Deno.serve(async (req: Request) => {
 
     if (action === 'get') {
       const { shareToken, password } = body;
-      if (!shareToken) return json({ error: 'shareToken required' }, 400);
+      if (!shareToken || typeof shareToken !== 'string') return json({ error: 'shareToken required' }, 400);
 
-      const { data: share } = await supabase.from('shared_roadmaps').select('*').eq('share_token', shareToken).single();
+      const { data: share, error: shareErr } = await supabase
+        .from('shared_roadmaps')
+        .select('*')
+        .eq('share_token', shareToken)
+        .single();
+
+      if (shareErr) {
+        if (shareErr.code === 'PGRST116') {
+          return json({ error: 'Share not found' }, 404);
+        }
+        return json({ error: 'Database error: ' + shareErr.message }, 500);
+      }
       if (!share) return json({ error: 'Share not found' }, 404);
       if (new Date(share.expires_at) < new Date())
         return json({ error: 'This shared link has expired', expired: true }, 410);
 
       if (share.password_hash) {
-        // Rate limit check
-        const rateCheck = await checkRateLimit(supabase, shareToken);
-        if (rateCheck.blocked) {
+        const clientIpHash = await getClientIpHash(req);
+
+        // Pre-auth prompt: password omitted or empty string
+        if (password === undefined || password === null || password === '') {
+          // Read-only rate-limit check without burning an attempt slot
+          const { data: checkData, error: checkErr } = await supabase.rpc('check_share_rate_limit', {
+            p_share_token: shareToken,
+            p_client_ip_hash: clientIpHash,
+            p_max_attempts: MAX_PASSWORD_ATTEMPTS,
+            p_window_seconds: Math.floor(RATE_LIMIT_WINDOW_MS / 1000),
+            p_max_aggregate_attempts: MAX_AGGREGATE_ATTEMPTS,
+          });
+
+          if (checkErr || !checkData) {
+            console.error('check_share_rate_limit DB error:', checkErr?.message);
+            return json({ error: 'Service temporarily unavailable' }, 503);
+          }
+
+          const checkRow = Array.isArray(checkData) ? checkData[0] : checkData;
+          if (!checkRow || typeof checkRow.blocked !== 'boolean') {
+            return json({ error: 'Service temporarily unavailable' }, 503);
+          }
+
+          if (checkRow.blocked) {
+            return json(
+              { error: 'Too many attempts. Try again later.', retryAfterSeconds: checkRow.retry_after_seconds },
+              429,
+            );
+          }
+
+          // Pre-auth prompt: omit projectName to prevent information disclosure
+          return json({ requiresPassword: true, needsPassword: true });
+        }
+
+        // Validate password format
+        const pwValidation = validatePassword(password);
+        if (!pwValidation.valid) {
+          return json({ error: pwValidation.error }, 400);
+        }
+
+        // Atomically reserve attempt slot BEFORE running 100k PBKDF2 verifyPassword
+        const { data: reserveData, error: reserveErr } = await supabase.rpc('reserve_share_attempt', {
+          p_share_token: shareToken,
+          p_client_ip_hash: clientIpHash,
+          p_max_attempts: MAX_PASSWORD_ATTEMPTS,
+          p_window_seconds: Math.floor(RATE_LIMIT_WINDOW_MS / 1000),
+          p_max_aggregate_attempts: MAX_AGGREGATE_ATTEMPTS,
+        });
+
+        if (reserveErr || !reserveData) {
+          console.error('reserve_share_attempt DB error:', reserveErr?.message);
+          return json({ error: 'Service temporarily unavailable' }, 503);
+        }
+
+        const reserveRow = Array.isArray(reserveData) ? reserveData[0] : reserveData;
+        if (!reserveRow || typeof reserveRow.blocked !== 'boolean') {
+          return json({ error: 'Service temporarily unavailable' }, 503);
+        }
+
+        if (reserveRow.blocked) {
           return json(
-            { error: 'Too many attempts. Try again later.', retryAfterSeconds: rateCheck.retryAfterSeconds },
+            { error: 'Too many attempts. Try again later.', retryAfterSeconds: reserveRow.retry_after_seconds },
             429,
           );
         }
 
-        if (!password) return json({ needsPassword: true, projectName: share.project_name });
-
+        // Attempt slot reserved: run verification
         const valid = await verifyPassword(password, share.password_hash);
         if (!valid) {
-          await recordFailedAttempt(supabase, shareToken);
-          return json({ error: 'Incorrect password', needsPassword: true }, 403);
+          return json({ error: 'Incorrect password', requiresPassword: true, needsPassword: true }, 403);
         }
 
-        // Migrate legacy SHA-256 hash to PBKDF2 on successful verification
-        if (!share.password_hash.startsWith('pbkdf2:')) {
-          const newHash = await hashPasswordPBKDF2(password);
-          await supabase.from('shared_roadmaps').update({ password_hash: newHash }).eq('id', share.id);
-        }
+        // Reset failed attempts on successful verification
+        await supabase.rpc('reset_share_failed_attempts', {
+          p_share_token: shareToken,
+          p_client_ip_hash: clientIpHash,
+        });
       }
 
-      // Auto-refresh: if the cache is older than STALE_TTL_MS, fetch fresh data from Linear
-      // using the owner's stored token. The token never leaves the server. On any failure
-      // (token revoked, Linear down, project deleted) we fall back to the existing cache so
-      // viewers never see a broken page.
+      // Auto-refresh: prevent cache stampede with atomic lease
       let cachedData = share.cached_data;
       let cachedAt = share.cached_at;
-      const ageMs = Date.now() - new Date(cachedAt).getTime();
-      if (ageMs > STALE_TTL_MS) {
-        try {
-          const linearToken = await getValidLinearToken(supabase, share.owner_id);
-          if (linearToken) {
-            let fresh = await fetchLinearData(linearToken, share.project_id);
-            fresh = withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder));
-            const newCachedAt = new Date().toISOString();
-            await supabase
-              .from('shared_roadmaps')
-              .update({ cached_data: fresh, cached_at: newCachedAt })
-              .eq('id', share.id);
-            cachedData = fresh;
-            cachedAt = newCachedAt;
+      const isStale = !cachedAt || Date.now() - new Date(cachedAt).getTime() > STALE_TTL_MS;
+
+      if (isStale) {
+        const { data: claimed, error: claimErr } = await supabase.rpc('claim_share_refresh', {
+          p_share_id: share.id,
+          p_lease_seconds: 30,
+          p_stale_age_seconds: Math.floor(STALE_TTL_MS / 1000),
+        });
+
+        if (claimErr) {
+          console.warn('Failed to claim share refresh lease:', claimErr.message);
+        } else if (claimed) {
+          try {
+            const linearToken = await getValidLinearToken(supabase, share.owner_id);
+            if (linearToken) {
+              let fresh = await fetchLinearData(linearToken, share.project_id);
+              fresh = withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder));
+              const newCachedAt = new Date().toISOString();
+              const { error: updateErr } = await supabase
+                .from('shared_roadmaps')
+                .update({ cached_data: fresh, cached_at: newCachedAt, refreshing_until: null })
+                .eq('id', share.id);
+              if (updateErr) {
+                console.error('Failed to update cached_data:', updateErr.message);
+              } else {
+                cachedData = fresh;
+                cachedAt = newCachedAt;
+              }
+            }
+            // If linearToken is missing, let the 30s lease expire naturally as a backoff
+          } catch (e) {
+            console.warn('share-roadmap auto-refresh failed for', share.id, (e as Error).message);
+            // Let the 30s lease expire naturally as a backoff, never failing the cached response
           }
-        } catch (e) {
-          // Silently fall back to cached data — never break the viewer experience.
-          console.warn('share-roadmap auto-refresh failed for', share.id, (e as Error).message);
         }
       }
 
@@ -486,7 +489,10 @@ Deno.serve(async (req: Request) => {
         .select('id, share_token, project_id, project_name, expires_at, cached_at, password_hash, created_at')
         .eq('owner_id', user.id)
         .order('created_at', { ascending: false });
-      if (body.projectId) q = q.eq('project_id', body.projectId);
+      if (body.projectId) {
+        if (typeof body.projectId !== 'string') return json({ error: 'projectId must be a string' }, 400);
+        q = q.eq('project_id', body.projectId);
+      }
 
       const { data, error: err } = await q;
       if (err) return json({ error: err.message }, 500);
@@ -509,20 +515,26 @@ Deno.serve(async (req: Request) => {
       const user = await getUser(req);
       if (!user) return json({ error: 'Unauthorized' }, 401);
       const { shareId } = body;
-      if (!shareId) return json({ error: 'shareId required' }, 400);
+      if (!shareId || typeof shareId !== 'string') return json({ error: 'shareId required' }, 400);
 
-      const { data: share } = await supabase
+      const { data: share, error: fetchErr } = await supabase
         .from('shared_roadmaps')
         .select('project_id, cached_data')
         .eq('id', shareId)
         .eq('owner_id', user.id)
         .single();
+
+      if (fetchErr) {
+        if (fetchErr.code === 'PGRST116') {
+          return json({ error: 'Share not found' }, 404);
+        }
+        return json({ error: 'Database error: ' + fetchErr.message }, 500);
+      }
       if (!share) return json({ error: 'Share not found' }, 404);
 
       const linearToken = await getValidLinearToken(supabase, user.id);
       if (!linearToken) return json({ error: 'No Linear token' }, 400);
 
-      // Owner may send an updated order; otherwise keep the one stored with the share.
       const customOrder =
         body.customOrder !== undefined
           ? sanitizeCustomOrder(body.customOrder)
@@ -530,19 +542,30 @@ Deno.serve(async (req: Request) => {
 
       let cachedData = await fetchLinearData(linearToken, share.project_id);
       cachedData = withCustomOrder(cachedData, customOrder);
-      await supabase
+      const newCachedAt = new Date().toISOString();
+      const { error: updateErr } = await supabase
         .from('shared_roadmaps')
-        .update({ cached_data: cachedData, cached_at: new Date().toISOString() })
-        .eq('id', shareId);
-      return json({ success: true, cachedAt: new Date().toISOString() });
+        .update({ cached_data: cachedData, cached_at: newCachedAt, refreshing_until: null })
+        .eq('id', shareId)
+        .eq('owner_id', user.id);
+      if (updateErr) return json({ error: 'Database error: ' + updateErr.message }, 500);
+
+      return json({ success: true, cachedAt: newCachedAt });
     }
 
     if (action === 'delete') {
       const user = await getUser(req);
       if (!user) return json({ error: 'Unauthorized' }, 401);
       const { shareId } = body;
-      if (!shareId) return json({ error: 'shareId required' }, 400);
-      await supabase.from('shared_roadmaps').delete().eq('id', shareId).eq('owner_id', user.id);
+      if (!shareId || typeof shareId !== 'string') return json({ error: 'shareId required' }, 400);
+
+      const { error: deleteErr } = await supabase
+        .from('shared_roadmaps')
+        .delete()
+        .eq('id', shareId)
+        .eq('owner_id', user.id);
+
+      if (deleteErr) return json({ error: 'Database error: ' + deleteErr.message }, 500);
       return json({ success: true });
     }
 
