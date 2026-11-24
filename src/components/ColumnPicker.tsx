@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useId, useRef } from 'react';
+import { useCallback, useId, useRef } from 'react';
+import AnchoredPopover from '@/components/AnchoredPopover';
 import { COLUMN_DEFS, DEFAULT_VISIBLE_COLUMNS, type ColumnKey } from '@/utils/scheduleColumns';
 
 interface Props {
@@ -37,9 +38,7 @@ function ColumnsIcon() {
  * alone would be out of reach for keyboard and touch users.
  */
 export default function ColumnPicker({ open, onOpenChange, visible, narrow = false, onChange }: Props) {
-  const ref = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
 
   const close = useCallback(
@@ -50,30 +49,6 @@ export default function ColumnPicker({ open, onOpenChange, visible, narrow = fal
     [onOpenChange],
   );
 
-  // Move focus into the menu on open, so Escape has somewhere sensible to return it
-  // even when the picker was opened by right-clicking a header
-  useEffect(() => {
-    if (!open) return;
-    const first = menuRef.current?.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)');
-    first?.focus();
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onMouseDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) close();
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close({ returnFocus: true });
-    };
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open, close]);
-
   const toggle = (key: ColumnKey) => {
     onChange(visible.includes(key) ? visible.filter((k) => k !== key) : [...visible, key]);
   };
@@ -81,7 +56,7 @@ export default function ColumnPicker({ open, onOpenChange, visible, narrow = fal
   const optionalVisibleCount = COLUMN_DEFS.filter((d) => !d.required && visible.includes(d.key)).length;
 
   return (
-    <span className="relative inline-flex" ref={ref}>
+    <span className="inline-flex">
       <button
         ref={triggerRef}
         type="button"
@@ -99,12 +74,20 @@ export default function ColumnPicker({ open, onOpenChange, visible, narrow = fal
       </button>
 
       {open && (
-        <div
-          ref={menuRef}
+        <AnchoredPopover
+          anchorRef={triggerRef}
+          open={open}
+          onClose={(returnFocus) => close({ returnFocus })}
+          gap={6}
+          closeOnScroll={false}
+          onPlaced={(el) => {
+            const first = el.querySelector<HTMLInputElement>('input[type="checkbox"]:not(:disabled)');
+            first?.focus();
+          }}
           id={menuId}
           role="group"
           aria-label="Columns"
-          className="absolute top-full left-0 mt-1.5 z-50 w-[196px] bg-bg-card border border-border-secondary rounded-lg shadow-xl py-1 normal-case tracking-normal"
+          className="z-50 w-[196px] bg-bg-card border border-border-secondary rounded-lg shadow-xl py-1 normal-case tracking-normal"
         >
           {narrow && (
             <p className="px-3 py-1.5 text-[11px] leading-snug text-text-muted whitespace-normal">
@@ -151,7 +134,7 @@ export default function ColumnPicker({ open, onOpenChange, visible, narrow = fal
               Reset to defaults
             </button>
           </div>
-        </div>
+        </AnchoredPopover>
       )}
     </span>
   );

@@ -1,7 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DayPicker } from 'react-day-picker';
 import type { DateRange } from 'react-day-picker';
 import { format } from 'date-fns';
+import AnchoredPopover from '@/components/AnchoredPopover';
 
 interface Props {
   from: string; // YYYY-MM-DD or ''
@@ -26,8 +27,7 @@ const VIEWPORT_MARGIN = 8;
 export default function DateRangePicker({ from, to, onChange }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [popoverLeft, setPopoverLeft] = useState(0);
+  const triggerBtnRef = useRef<HTMLButtonElement>(null);
 
   // Two months need ~620px; show one on narrow screens so the popover fits
   const [wideEnough, setWideEnough] = useState(
@@ -41,30 +41,6 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
     mq.addEventListener('change', update);
     return () => mq.removeEventListener('change', update);
   }, []);
-
-  // The popover is anchored to its field, which can sit anywhere along the filter bar, so
-  // shift it left when it would otherwise run off the right edge of the viewport
-  useLayoutEffect(() => {
-    if (!open) return;
-    const place = () => {
-      const popover = popoverRef.current;
-      const host = ref.current;
-      if (!popover || !host) return;
-      const hostLeft = host.getBoundingClientRect().left;
-      const maxLeft = document.documentElement.clientWidth - popover.offsetWidth - VIEWPORT_MARGIN;
-      setPopoverLeft(Math.round(Math.max(VIEWPORT_MARGIN, Math.min(hostLeft, maxLeft)) - hostLeft));
-    };
-    place();
-    window.addEventListener('resize', place);
-    // The popover's own width can change while it is open (e.g. the footer label grows
-    // as a range is picked), which a window resize alone would miss
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    if (popoverRef.current) observer?.observe(popoverRef.current);
-    return () => {
-      window.removeEventListener('resize', place);
-      observer?.disconnect();
-    };
-  }, [open, wideEnough]);
 
   // Draft state — only committed on Apply
   const [draft, setDraft] = useState<DateRange | undefined>(undefined);
@@ -92,26 +68,6 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
     setOpen(false);
   };
 
-  // Close on click outside
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
-
-  // Close on Escape
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleCancel();
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [open]);
-
   const hasRange = from && to;
   const draftComplete = draft?.from && draft?.to;
   const label = hasRange
@@ -128,6 +84,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
   return (
     <div ref={ref} className="relative flex items-center gap-1.5">
       <button
+        ref={triggerBtnRef}
         onClick={() => setOpen(!open)}
         className={`inline-flex items-center gap-1.5 py-[7px] px-3 bg-bg-card border rounded-md text-xs font-medium cursor-pointer outline-none transition-colors hover:border-text-muted ${
           hasRange ? 'border-accent text-accent' : 'border-border-secondary text-text-secondary'
@@ -177,11 +134,16 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
       )}
 
       {open && (
-        <div
-          ref={popoverRef}
+        <AnchoredPopover
+          anchorRef={ref}
+          returnFocusRef={triggerBtnRef}
+          open={open}
+          onClose={handleCancel}
+          gap={6}
+          closeOnScroll={false}
+          viewportMargin={VIEWPORT_MARGIN}
           data-popover="date-range"
-          style={{ left: popoverLeft }}
-          className="absolute top-full left-0 mt-1.5 z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-4rem)]"
+          className="z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-4rem)]"
         >
           <DayPicker
             mode="range"
@@ -236,7 +198,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
               </button>
             </div>
           </div>
-        </div>
+        </AnchoredPopover>
       )}
     </div>
   );

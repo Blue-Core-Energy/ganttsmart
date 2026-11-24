@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import AnchoredPopover from '@/components/AnchoredPopover';
 import { filterDropdownOptions, getInitialHighlightIndex, getNextHighlightIndex } from '@/utils/dropdown';
 
 export interface CellMenuOption {
@@ -49,14 +49,12 @@ export default function CellMenu({
 }: Props) {
   const [query, setQuery] = useState('');
   const [highlightedIndex, setHighlightedIndex] = useState(() => getInitialHighlightIndex(options, value, false));
-  const [position, setPosition] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const previousFocusRef = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
-  const anchorRectRef = useRef<{ top: number; left: number } | null>(null);
   const listboxId = useId();
 
   const filtered = useMemo(
@@ -66,89 +64,13 @@ export default function CellMenu({
   const activeIndex = highlightedIndex >= filtered.length ? (filtered.length > 0 ? 0 : -1) : highlightedIndex;
 
   const close = useCallback(
-    (returnFocus: boolean) => {
+    (returnFocus?: boolean) => {
       onClose();
       const prev = previousFocusRef.current;
       if (returnFocus && prev && prev.isConnected && prev !== document.body) prev.focus();
     },
     [onClose],
   );
-
-  // Position against the anchor; flip above it when there is no room below.
-  // Clamp within the viewport so it never overflows narrow screens (e.g. 375px mobile).
-  useLayoutEffect(() => {
-    const place = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const rect = anchor.getBoundingClientRect();
-      anchorRectRef.current = { top: rect.top, left: rect.left };
-      const menuEl = menuRef.current;
-      const menuWidth = menuEl?.offsetWidth || MENU_WIDTH;
-      const clientWidth = document.documentElement.clientWidth || window.innerWidth;
-      const clientHeight = document.documentElement.clientHeight || window.innerHeight;
-      const maxLeft = clientWidth - menuWidth - VIEWPORT_MARGIN;
-      const left = Math.round(Math.max(VIEWPORT_MARGIN, Math.min(rect.left, maxLeft)));
-      const spaceBelow = clientHeight - rect.bottom - VIEWPORT_MARGIN;
-      const spaceAbove = rect.top - VIEWPORT_MARGIN;
-      setPosition((prev) => {
-        const next =
-          spaceBelow < Math.min(MENU_MAX_HEIGHT, 180) && spaceAbove > spaceBelow
-            ? { left, bottom: clientHeight - rect.top + 4 }
-            : { left, top: rect.bottom + 4 };
-        if (prev && prev.left === next.left && prev.top === next.top && prev.bottom === next.bottom) {
-          return prev;
-        }
-        return next;
-      });
-    };
-    place();
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
-    if (menuRef.current) observer?.observe(menuRef.current);
-    return () => {
-      observer?.disconnect();
-    };
-  }, [anchorRef]);
-
-  useEffect(() => {
-    if (!position) return;
-    if (searchable) searchRef.current?.focus();
-    else menuRef.current?.focus();
-  }, [position, searchable]);
-
-  // Dismiss on outside press (capture phase, so elements that stop propagation still dismiss), on scroll/resize (the anchor moves), and on Escape. Escape is caught in
-  // the capture phase on window so it is consumed here wherever focus is — other Escape handlers
-  // (detail panel, filter search) never see it.
-  useEffect(() => {
-    const onPointerDown = (e: PointerEvent) => {
-      const target = e.target as Node;
-      if (menuRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
-      close(false);
-    };
-    const onScroll = (e: Event) => {
-      if (menuRef.current?.contains(e.target as Node)) return;
-      // Close once the anchor has moved away from where the menu was anchored (sticky columns stay put)
-      const t = anchorRef.current?.getBoundingClientRect();
-      const a = anchorRectRef.current;
-      if (!t || !a || Math.abs(t.top - a.top) > 1 || Math.abs(t.left - a.left) > 1) close(false);
-    };
-    const onResize = () => close(false);
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault();
-      e.stopPropagation();
-      close(true);
-    };
-    document.addEventListener('pointerdown', onPointerDown, true);
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown, true);
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('keydown', onKeyDown, true);
-    };
-  }, [anchorRef, close]);
 
   useEffect(() => {
     if (activeIndex >= 0) optionRefs.current[activeIndex]?.scrollIntoView?.({ block: 'nearest' });
@@ -179,26 +101,27 @@ export default function CellMenu({
     }
   };
 
-  if (typeof document === 'undefined') return null;
-
-  return createPortal(
-    <div
+  return (
+    <AnchoredPopover
       ref={menuRef}
+      anchorRef={anchorRef}
+      onClose={close}
+      restoreFocusOnClose={false}
+      gap={4}
+      viewportMargin={VIEWPORT_MARGIN}
+      minSpaceBelowToAvoidFlip={180}
+      onPlaced={() => {
+        if (searchable) searchRef.current?.focus();
+        else menuRef.current?.focus();
+      }}
       data-inline-menu={ariaLabel}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      onMouseDown={(e) => e.stopPropagation()}
-      onClick={(e) => e.stopPropagation()}
-      onDoubleClick={(e) => e.stopPropagation()}
-      className="fixed z-[300] flex flex-col bg-bg-card border border-border-secondary rounded-lg shadow-xl outline-none"
+      className="z-[300] flex flex-col bg-bg-card border border-border-secondary rounded-lg shadow-xl outline-none"
       style={{
         width: MENU_WIDTH,
         maxWidth: `calc(100vw - ${VIEWPORT_MARGIN * 2}px)`,
         maxHeight: MENU_MAX_HEIGHT,
-        visibility: position ? 'visible' : 'hidden',
-        left: position?.left ?? 0,
-        top: position?.top,
-        bottom: position?.bottom,
       }}
     >
       {searchable && (
@@ -288,7 +211,6 @@ export default function CellMenu({
           })
         )}
       </div>
-    </div>,
-    document.body,
+    </AnchoredPopover>
   );
 }
