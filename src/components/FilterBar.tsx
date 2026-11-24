@@ -239,12 +239,16 @@ export default function FilterBar({
   };
 
   // The trigger, the panel and the active-chip row form one filter surface:
-  // working in any of them keeps the panel open.
+  // working in any of them keeps the panel open. Nested portalled pickers (date range)
+  // are also treated as inside the filter surface.
   const isInsideFilter = useCallback(
     (node: Node | null) =>
       Boolean(
         node &&
-        (panelRef.current?.contains(node) || triggerRef.current?.contains(node) || chipRowRef.current?.contains(node)),
+        (panelRef.current?.contains(node) ||
+          triggerRef.current?.contains(node) ||
+          chipRowRef.current?.contains(node) ||
+          (node instanceof Element && Boolean(node.closest('[data-popover="date-range"]')))),
       ),
     [],
   );
@@ -282,7 +286,8 @@ export default function FilterBar({
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (panelRef.current?.querySelector('[role="listbox"], [data-popover="date-range"]')) return;
+      if (panelRef.current?.querySelector('[role="listbox"]') || document.querySelector('[data-popover="date-range"]'))
+        return;
       closeFilter({ returnFocus: true });
     };
     const onFocusIn = (e: FocusEvent) => {
