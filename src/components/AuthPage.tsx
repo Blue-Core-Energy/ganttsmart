@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Logo from './Logo';
 
 interface Props {
   onSignIn: (email: string, password: string) => Promise<void>;
@@ -40,6 +41,9 @@ export default function AuthPage({ onSignIn, onSignUp, onGoogleSignIn }: Props) 
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center z-200">
       <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[440px] w-full text-center">
+        <div className="flex justify-center mb-4">
+          <Logo size={40} />
+        </div>
         <h1 className="text-2xl font-bold text-white mb-1 tracking-tight">GanttSmart</h1>
         <p className="text-[13px] text-text-secondary mb-8 leading-relaxed">
           {isSignUp ? 'Create an account to get started' : 'Sign in to your account'}
