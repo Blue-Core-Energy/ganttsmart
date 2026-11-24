@@ -181,8 +181,8 @@ test.describe('GanttSmart GCP app', () => {
     await expect(exportButton).toHaveAttribute('aria-expanded', 'false');
     await expect(page.getByRole('group', { name: 'Export options' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Disconnect Linear' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
-    await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out of GanttSmart', exact: true })).toBeVisible();
+    await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toHaveCount(0);
 
     // Opening Export expands the inline submenu with role="group"
     await exportButton.click();
