@@ -652,13 +652,8 @@ export default memo(function Header({
                     }}
                     className="w-full text-left px-3 py-2 text-xs text-urgent hover:bg-bg-hover transition-colors cursor-pointer"
                   >
-                    Sign out
+                    Sign out of GanttSmart
                   </button>
-                  {backend.kind === 'gcp' && (
-                    <p className="px-3 pb-2 text-[11px] text-text-muted leading-snug">
-                      Signs out of GanttSmart only, not Google.
-                    </p>
-                  )}
                 </>
               )}
             </div>

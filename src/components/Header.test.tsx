@@ -371,4 +371,28 @@ describe('Header account menu export options (happy-dom)', () => {
     expect(reopenedExportBtn.getAttribute('aria-expanded')).toBe('false');
     expect(container!.querySelector('[role="group"][aria-label="Export options"]')).toBeNull();
   });
+
+  it('renders "Sign out of GanttSmart", omits Google note, and triggers onSignOut when clicked', async () => {
+    await act(async () => {
+      root!.render(<Header {...headerProps} />);
+    });
+
+    await openAccountMenu();
+
+    const signOutBtn = Array.from(container!.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.trim() === 'Sign out of GanttSmart',
+    );
+    expect(signOutBtn).toBeDefined();
+
+    // Verify old note is absent
+    expect(container!.textContent).not.toContain('Signs out of GanttSmart only, not Google.');
+
+    // Clicking Sign out of GanttSmart calls onSignOut and closes account menu
+    await act(async () => {
+      signOutBtn!.click();
+    });
+
+    expect(headerProps.onSignOut).toHaveBeenCalledTimes(1);
+    expect(container!.textContent).not.toContain('Sign out of GanttSmart');
+  });
 });
