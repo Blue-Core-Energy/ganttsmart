@@ -11,7 +11,8 @@ RUN npm ci
 
 COPY . .
 RUN VITE_BACKEND=gcp npm run build \
-  && npm run build:server
+  && npm run build:server \
+  && find dist -name '*.map' -delete
 
 # ---- Runtime stage: production dependencies + built output only ----
 FROM node:22-slim

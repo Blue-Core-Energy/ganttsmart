@@ -152,6 +152,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   // 3. The built React app. Not behind the identity middleware: IAP protects it in production.
   const root = config.staticDir;
+  // Sourcemaps must never be served publicly
+  app.use('*', async (c, next) => {
+    if (c.req.path.toLowerCase().endsWith('.map')) {
+      return c.text('not found', 404);
+    }
+    return next();
+  });
   app.use('/assets/*', staticFiles(root, IMMUTABLE));
   // A missing hashed asset is a 404: answering with index.html would hand HTML to a <script> tag.
   app.get('/assets/*', (c) => c.text('not found', 404));

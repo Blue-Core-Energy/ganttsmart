@@ -14,6 +14,7 @@ const MAX_BODY_BYTES = 16 * 1024;
 
 /** Same id shape the store hands out: Firestore auto ids and UUIDs. */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const FIRESTORE_RESERVED_ID = /^__.*__$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Thrown by the validators below; turned into a 400 by the route. */
@@ -109,7 +110,7 @@ export function daysOffRoutes(deps: { store: Store; legacyKeys?: boolean }): Hon
 
   routes.delete('/:id', async (c) => {
     const id = c.req.param('id');
-    if (!ID_PATTERN.test(id)) throw new InvalidInput('id is invalid');
+    if (!ID_PATTERN.test(id) || FIRESTORE_RESERVED_ID.test(id)) throw new InvalidInput('id is invalid');
     if (!(await store.deleteDayOff(id))) return c.json({ error: 'not found' }, 404);
     return c.json({ ok: true });
   });

@@ -154,6 +154,27 @@ describe('createTokenService.getAccessToken', () => {
     expect(refreshTokensSeen).toEqual([]);
   });
 
+  it('does not clear new tokens when user reconnected while expiring non-refreshable token was handled', async () => {
+    const { oauth } = stubLinear();
+    const staleTokens = { ...old(4 * MINUTE), refreshToken: null };
+    const baseStore = await storeWith(staleTokens);
+    // Simulate a concurrent reconnect that saves fresh tokens before CAS clear
+    const store: Store = {
+      ...baseStore,
+      async clearTokens(sub, expected) {
+        await baseStore.saveTokens(sub, EMAIL, {
+          accessToken: 'fresh-access',
+          refreshToken: null,
+          expiresAt: NOW + 60 * MINUTE,
+        });
+        return baseStore.clearTokens(sub, expected);
+      },
+    };
+    const tokens = createTokenService({ store, oauth, now: () => NOW });
+    await expect(tokens.getAccessToken(SUB)).resolves.toBe('fresh-access');
+    expect((await store.getTokens(SUB))?.accessToken).toBe('fresh-access');
+  });
+
   it('handles two simultaneous calls on an expiring token (Review Focus 2)', async () => {
     const { oauth } = stubLinear();
     const store = await storeWith(old(4 * MINUTE));

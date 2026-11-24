@@ -203,6 +203,9 @@ describe('days off: delete', () => {
     expect((await app.request('/api/days-off/unknown-id', send('DELETE'))).status).toBe(404);
     expect((await app.request(`/api/days-off/${'a'.repeat(129)}`, send('DELETE'))).status).toBe(400);
     expect((await app.request('/api/days-off/a.b', send('DELETE'))).status).toBe(400);
+    expect((await app.request('/api/days-off/__name__', send('DELETE'))).status).toBe(400);
+    expect((await app.request('/api/days-off/__foo__', send('DELETE'))).status).toBe(400);
+    expect((await app.request('/api/non-work-days/__name__', send('DELETE'))).status).toBe(400);
   });
 });
 

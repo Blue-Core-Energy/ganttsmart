@@ -79,6 +79,44 @@ export function runStoreContract(name: string, makeStore: () => Store, enabled =
         expect(await store.getTokens(alice)).toBeNull();
       });
 
+      it('clearTokens with null expectedRefreshToken clears when stored refresh token is null', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', { ...tokensA, refreshToken: null });
+        expect(await store.clearTokens(alice, null)).toBe(true);
+        expect(await store.getTokens(alice)).toBeNull();
+      });
+
+      it('clearTokens with matching object { refreshToken, accessToken } clears and returns true', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice, { refreshToken: 'refresh-a', accessToken: 'access-a' })).toBe(true);
+        expect(await store.getTokens(alice)).toBeNull();
+      });
+
+      it('clearTokens with matching refreshToken but mismatched accessToken does not clear', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice, { refreshToken: 'refresh-a', accessToken: 'access-new' })).toBe(false);
+        expect(await store.getTokens(alice)).toEqual(tokensA);
+      });
+
+      it('clearTokens with matching null refreshToken but mismatched accessToken does not clear', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', {
+          ...tokensA,
+          refreshToken: null,
+          accessToken: 'access-new',
+        });
+        expect(await store.clearTokens(alice, { refreshToken: null, accessToken: 'access-old' })).toBe(false);
+        expect(await store.getTokens(alice)).toEqual({
+          ...tokensA,
+          refreshToken: null,
+          accessToken: 'access-new',
+        });
+      });
+
+      it('clearTokens with null expectedRefreshToken does not clear when stored has refresh token', async () => {
+        await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
+        expect(await store.clearTokens(alice, null)).toBe(false);
+        expect(await store.getTokens(alice)).toEqual(tokensA);
+      });
+
       it('clearTokens with non-matching expectedRefreshToken does not clear and returns false', async () => {
         await store.saveTokens(alice, 'alice@bluecore.energy', tokensA);
         expect(await store.clearTokens(alice, 'stale-refresh')).toBe(false);

@@ -67,7 +67,7 @@ interface LinearCall {
 }
 
 /** A stub Linear GraphQL endpoint answering with `replies` in order (the last one repeats). */
-function stubFetch(replies: (() => Response)[]) {
+function stubFetch(replies: (() => Response | Promise<Response>)[]) {
   const calls: LinearCall[] = [];
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
@@ -76,7 +76,7 @@ function stubFetch(replies: (() => Response)[]) {
       authorization: headers.get('authorization'),
       body: JSON.parse(String(init?.body)),
     });
-    return replies[Math.min(calls.length - 1, replies.length - 1)]();
+    return await replies[Math.min(calls.length - 1, replies.length - 1)]();
   }) as typeof globalThis.fetch;
   return { fetch, calls };
 }
@@ -86,7 +86,7 @@ const json =
   () =>
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 
-function setup(opts: { oauth?: OAuthStub; replies?: (() => Response)[]; store?: Store } = {}) {
+function setup(opts: { oauth?: OAuthStub; replies?: (() => Response | Promise<Response>)[]; store?: Store } = {}) {
   const store = opts.store ?? createMemoryStore();
   const oauth = opts.oauth ?? stubOAuth();
   const linear = stubFetch(opts.replies ?? [json({ data: { viewer: { id: 'u1' } } })]);
@@ -446,7 +446,8 @@ describe('GET /api/linear/callback', () => {
     expect(res.headers.get('location')).toBe('/app?linear_error=invalid_state');
     expect(oauth.exchanged).toEqual([]);
     await expect(store.getTokens(USER.sub)).resolves.toBeNull();
-    expectCookieCleared(res);
+    // In-flight OAuth cookie must NOT be cleared on invalid state
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
   it.each([
@@ -460,7 +461,7 @@ describe('GET /api/linear/callback', () => {
     expect(res.headers.get('location')).toBe('/app?linear_error=invalid_state');
     expect(oauth.exchanged).toEqual([]);
     await expect(store.getTokens(USER.sub)).resolves.toBeNull();
-    expectCookieCleared(res);
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
   it('passes through error=access_denied (Review Focus 5)', async () => {
@@ -471,6 +472,26 @@ describe('GET /api/linear/callback', () => {
     expect(oauth.exchanged).toEqual([]);
     await expect(store.getTokens(USER.sub)).resolves.toBeNull();
     expectCookieCleared(res);
+  });
+
+  it('does not honour ?error= and preserves cookies when state does not match', async () => {
+    const { app, store, oauth } = setup();
+    const res = await callback(app, 'error=access_denied&state=wrong-state');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/app?linear_error=invalid_state');
+    expect(oauth.exchanged).toEqual([]);
+    await expect(store.getTokens(USER.sub)).resolves.toBeNull();
+    expect(res.headers.get('set-cookie')).toBeNull();
+  });
+
+  it('does not honour ?error= and preserves cookies when state is missing', async () => {
+    const { app, store, oauth } = setup();
+    const res = await callback(app, 'error=access_denied');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('/app?linear_error=invalid_state');
+    expect(oauth.exchanged).toEqual([]);
+    await expect(store.getTokens(USER.sub)).resolves.toBeNull();
+    expect(res.headers.get('set-cookie')).toBeNull();
   });
 
   it.each(['https://evil.example', 'Access Denied', 'x&next=//evil', 'a'.repeat(65)])(
@@ -597,6 +618,51 @@ describe('POST /api/linear/graphql', () => {
     await expect(res.json()).resolves.toEqual(RECONNECT);
     expect(linear.calls).toHaveLength(2);
     await expect(store.getTokens(USER.sub)).resolves.toBeNull();
+  });
+
+  it('does not clear freshly reconnected tokens when a double-401 races with a reconnect', async () => {
+    const reconnectedTokens = { accessToken: 'access-fresh', refreshToken: 'refresh-fresh', expiresAt: null };
+    const store = createMemoryStore();
+    const { app, linear } = await connected({
+      store,
+      replies: [
+        json({ error: 'unauthorized' }, 401),
+        async () => {
+          // While the second Linear call is in flight, the user reconnects and saves new tokens.
+          await store.saveTokens(USER.sub, USER.email, reconnectedTokens);
+          return json({ error: 'unauthorized' }, 401)();
+        },
+      ],
+    });
+
+    const res = await app.request('/api/linear/graphql', post(JSON.stringify(QUERY)));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual(RECONNECT);
+    expect(linear.calls).toHaveLength(2);
+    // Freshly saved tokens must NOT be wiped by the stale double-401
+    await expect(store.getTokens(USER.sub)).resolves.toEqual(reconnectedTokens);
+  });
+
+  it('does not clear freshly reconnected grant with refreshToken: null when a double-401 races', async () => {
+    const reconnectedTokens = { accessToken: 'access-fresh-no-rt', refreshToken: null, expiresAt: null };
+    const store = createMemoryStore();
+    const { app, linear } = await connected({
+      store,
+      replies: [
+        json({ error: 'unauthorized' }, 401),
+        async () => {
+          // Reconnect saves tokens with refreshToken: null
+          await store.saveTokens(USER.sub, USER.email, reconnectedTokens);
+          return json({ error: 'unauthorized' }, 401)();
+        },
+      ],
+    });
+
+    const res = await app.request('/api/linear/graphql', post(JSON.stringify(QUERY)));
+    expect(res.status).toBe(401);
+    await expect(res.json()).resolves.toEqual(RECONNECT);
+    expect(linear.calls).toHaveLength(2);
+    await expect(store.getTokens(USER.sub)).resolves.toEqual(reconnectedTokens);
   });
 
   it('asks to reconnect when not connected', async () => {

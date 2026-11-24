@@ -4,6 +4,11 @@ import { LinearReauthRequired, type LinearOAuth } from './oauth.js';
 /** Refresh when the access token has less than this long left. */
 const REFRESH_MARGIN_MS = 5 * 60_000;
 
+export interface TokenSnapshot {
+  accessToken: string;
+  refreshToken: string | null;
+}
+
 export interface TokenService {
   /**
    * The user's Linear access token, refreshed first if it expires within 5 minutes or
@@ -12,6 +17,7 @@ export interface TokenService {
    * and leave the stored tokens alone.
    */
   getAccessToken(sub: string, opts?: { forceRefresh?: boolean; rejectedToken?: string }): Promise<string>;
+  getTokenSnapshot(sub: string, opts?: { forceRefresh?: boolean; rejectedToken?: string }): Promise<TokenSnapshot>;
 }
 
 export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now?: () => number }): TokenService {
@@ -19,14 +25,9 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
   const now = deps.now ?? Date.now;
   // One refresh per user at a time in this process. Across instances, swapTokens plus Linear's
   // 30-minute grace period for the previous refresh token keep concurrent refreshes safe.
-  const inFlight = new Map<string, Promise<string>>();
+  const inFlight = new Map<string, Promise<TokenSnapshot>>();
 
-  async function reauth(sub: string): Promise<never> {
-    await store.clearTokens(sub);
-    throw new LinearReauthRequired();
-  }
-
-  async function refresh(sub: string, refreshToken: string): Promise<string> {
+  async function refresh(sub: string, refreshToken: string): Promise<TokenSnapshot> {
     let next: LinearTokens;
     try {
       next = await oauth.refresh(refreshToken);
@@ -37,7 +38,9 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
       const cleared = await store.clearTokens(sub, refreshToken);
       if (!cleared) {
         const current = await store.getTokens(sub);
-        if (current && current.refreshToken !== refreshToken) return current.accessToken;
+        if (current && current.refreshToken !== refreshToken) {
+          return { accessToken: current.accessToken, refreshToken: current.refreshToken };
+        }
       }
       throw new LinearReauthRequired();
     }
@@ -54,7 +57,7 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
       ]);
       throw new LinearReauthRequired();
     }
-    return saved.accessToken;
+    return { accessToken: saved.accessToken, refreshToken: saved.refreshToken };
   }
 
   /**
@@ -63,18 +66,23 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
    */
   async function joinRefresh(
     sub: string,
-    promise: Promise<string>,
+    promise: Promise<TokenSnapshot>,
     opts?: { forceRefresh?: boolean; rejectedToken?: string },
-  ): Promise<string> {
-    const token = await promise;
-    if (opts?.rejectedToken && token === opts.rejectedToken) {
-      return service.getAccessToken(sub, { forceRefresh: true });
+  ): Promise<TokenSnapshot> {
+    const snapshot = await promise;
+    if (opts?.rejectedToken && snapshot.accessToken === opts.rejectedToken) {
+      return service.getTokenSnapshot(sub, { forceRefresh: true });
     }
-    return token;
+    return snapshot;
   }
 
   const service: TokenService = {
     async getAccessToken(sub, opts) {
+      const snapshot = await service.getTokenSnapshot(sub, opts);
+      return snapshot.accessToken;
+    },
+
+    async getTokenSnapshot(sub, opts) {
       const pending = inFlight.get(sub);
       if (pending) {
         return joinRefresh(sub, pending, opts);
@@ -86,8 +94,19 @@ export function createTokenService(deps: { store: Store; oauth: LinearOAuth; now
 
       const rejected = opts?.rejectedToken !== undefined && tokens.accessToken === opts.rejectedToken;
       const expiring = tokens.expiresAt !== null && tokens.expiresAt - now() < REFRESH_MARGIN_MS;
-      if (!opts?.forceRefresh && !expiring && !rejected) return tokens.accessToken;
-      if (tokens.refreshToken === null) return reauth(sub);
+      if (!opts?.forceRefresh && !expiring && !rejected) {
+        return { accessToken: tokens.accessToken, refreshToken: tokens.refreshToken };
+      }
+      if (tokens.refreshToken === null) {
+        const cleared = await store.clearTokens(sub, { refreshToken: null, accessToken: tokens.accessToken });
+        if (!cleared) {
+          const current = await store.getTokens(sub);
+          if (current && (current.refreshToken !== null || current.accessToken !== tokens.accessToken)) {
+            return { accessToken: current.accessToken, refreshToken: current.refreshToken };
+          }
+        }
+        throw new LinearReauthRequired();
+      }
 
       // Re-check: another call may have started a refresh while we awaited the store.
       const raced = inFlight.get(sub);

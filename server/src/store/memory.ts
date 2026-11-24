@@ -42,11 +42,19 @@ export function createMemoryStore(): Store {
       data.linear = copy(tokens);
     },
 
-    async clearTokens(sub, expectedRefreshToken) {
+    async clearTokens(sub, expected) {
       const data = users.get(sub);
-      if (expectedRefreshToken !== undefined) {
-        if (!data || data.linear === null || data.linear.refreshToken !== expectedRefreshToken) {
-          return false;
+      if (expected !== undefined) {
+        if (!data || data.linear === null) return false;
+        if (typeof expected === 'string' || expected === null) {
+          if (data.linear.refreshToken !== expected) return false;
+        } else {
+          if (expected.refreshToken !== undefined && data.linear.refreshToken !== expected.refreshToken) {
+            return false;
+          }
+          if (expected.accessToken !== undefined && data.linear.accessToken !== expected.accessToken) {
+            return false;
+          }
         }
         data.linear = null;
         return true;
