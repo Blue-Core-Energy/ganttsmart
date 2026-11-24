@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
 import type { Project } from '@/types';
@@ -191,6 +191,25 @@ function CheckCircleIcon() {
   );
 }
 
+function ChevronDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
 export default memo(function Header({
   projectName,
   loading,
@@ -213,36 +232,59 @@ export default memo(function Header({
 }: Props) {
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showExportSubmenu, setShowExportSubmenu] = useState(false);
   const [showFeedbackDialog, setShowFeedbackDialog] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<'png' | 'pdf' | null>(null);
   const accountRef = useRef<HTMLDivElement>(null);
+  const accountBtnRef = useRef<HTMLButtonElement>(null);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const exportSubmenuId = useId();
 
   const projectOptions: DropdownOption[] = useMemo(
     () => projects.map((p) => ({ value: p.id, label: p.name, icon: <FolderIcon /> })),
     [projects],
   );
 
-  // Close menus on outside click or Escape
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (accountRef.current && !accountRef.current.contains(e.target as Node)) setShowAccountMenu(false);
-    };
-    const keyHandler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowAccountMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    document.addEventListener('keydown', keyHandler);
-    return () => {
-      document.removeEventListener('mousedown', handler);
-      document.removeEventListener('keydown', keyHandler);
-    };
+  const closeAccountMenu = useCallback((opts?: { returnFocus?: boolean }) => {
+    setShowAccountMenu(false);
+    setShowExportSubmenu(false);
+    if (opts?.returnFocus) {
+      accountBtnRef.current?.focus();
+    }
   }, []);
 
+  // Close menus on outside click or Escape
+  useEffect(() => {
+    if (!showAccountMenu) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (accountRef.current && !accountRef.current.contains(e.target as Node)) {
+        closeAccountMenu();
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (showExportSubmenu) {
+          setShowExportSubmenu(false);
+          exportBtnRef.current?.focus();
+        } else {
+          closeAccountMenu({ returnFocus: true });
+        }
+      }
+    };
+    document.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [showAccountMenu, showExportSubmenu, closeAccountMenu]);
+
   const handleExport = async (format: 'png' | 'pdf') => {
-    setShowAccountMenu(false);
-    setExporting(true);
+    if (exportingFormat !== null) return;
+    closeAccountMenu();
+    setExportingFormat(format);
     try {
       const el = document.getElementById('gantt-export-target');
       if (!el) {
@@ -255,13 +297,13 @@ export default memo(function Header({
     } catch (e) {
       toastError(`Export failed: ${(e as Error).message}`);
     } finally {
-      setExporting(false);
+      setExportingFormat(null);
     }
   };
 
   const toggleTheme = () => {
     onThemeChange(theme === 'dark' ? 'light' : 'dark');
-    setShowAccountMenu(false);
+    closeAccountMenu();
   };
 
   return (
@@ -389,8 +431,9 @@ export default memo(function Header({
         {/* Account menu */}
         <div className="relative" ref={accountRef}>
           <button
+            ref={accountBtnRef}
             type="button"
-            onClick={() => setShowAccountMenu((v) => !v)}
+            onClick={() => (showAccountMenu ? closeAccountMenu() : setShowAccountMenu(true))}
             className={iconBtn}
             title="Account"
             aria-label="Account"
@@ -411,7 +454,7 @@ export default memo(function Header({
             </svg>
           </button>
           {showAccountMenu && (
-            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] py-1">
+            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] max-w-[calc(100vw-1rem)] py-1">
               {/* Linear project resource link */}
               {projectId && onAddToLinear && (
                 <>
@@ -421,7 +464,7 @@ export default memo(function Header({
                         href={linearProjectUrl!}
                         target="_blank"
                         rel="noopener noreferrer"
-                        onClick={() => setShowAccountMenu(false)}
+                        onClick={() => closeAccountMenu()}
                         className="w-full text-left px-3 py-2 text-xs text-low hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
                         aria-label="Open in Linear"
                         title="Linked in Linear — open project in Linear"
@@ -446,7 +489,7 @@ export default memo(function Header({
                     <button
                       type="button"
                       onClick={() => {
-                        setShowAccountMenu(false);
+                        closeAccountMenu();
                         onAddToLinear();
                       }}
                       disabled={linkingToLinear || loading}
@@ -472,7 +515,7 @@ export default memo(function Header({
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAccountMenu(false);
+                      closeAccountMenu();
                       onOpenDaysOff();
                     }}
                     className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
@@ -491,41 +534,82 @@ export default memo(function Header({
               )}
 
               {/* Export */}
-              <div className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                Export
-              </div>
               <button
+                ref={exportBtnRef}
                 type="button"
-                onClick={() => handleExport('png')}
-                disabled={exporting}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={() => setShowExportSubmenu((v) => !v)}
+                aria-expanded={showExportSubmenu}
+                aria-controls={showExportSubmenu ? exportSubmenuId : undefined}
+                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
               >
-                <span>Export as PNG</span>
-                {exporting && (
-                  <span className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
-                )}
+                <span className="flex items-center gap-2">
+                  <span>Export</span>
+                  {exportingFormat && (
+                    <span className="text-[11px] text-text-muted font-normal">
+                      Exporting {exportingFormat.toUpperCase()}…
+                    </span>
+                  )}
+                </span>
+                <span className="flex items-center gap-1.5 text-text-muted">
+                  {exportingFormat && !showExportSubmenu && (
+                    <span
+                      className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin shrink-0"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <ChevronDownIcon
+                    className={`shrink-0 transition-transform ${showExportSubmenu ? 'rotate-180' : ''}`}
+                  />
+                </span>
               </button>
-              <button
-                type="button"
-                onClick={() => handleExport('pdf')}
-                disabled={exporting}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span>Export as PDF</span>
-                {exporting && (
-                  <span className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowAccountMenu(false);
-                  window.print();
-                }}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
-              >
-                Print
-              </button>
+              {showExportSubmenu && (
+                <div
+                  id={exportSubmenuId}
+                  role="group"
+                  aria-label="Export options"
+                  className="bg-bg-hover/30 border-y border-border-primary/50 py-0.5"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleExport('png')}
+                    disabled={exportingFormat !== null}
+                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span>Export as PNG</span>
+                    {exportingFormat === 'png' && (
+                      <span
+                        className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin shrink-0"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExport('pdf')}
+                    disabled={exportingFormat !== null}
+                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span>Export as PDF</span>
+                    {exportingFormat === 'pdf' && (
+                      <span
+                        className="inline-block w-3 h-3 border-2 border-text-muted border-t-accent rounded-full animate-spin shrink-0"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeAccountMenu();
+                      window.print();
+                    }}
+                    disabled={exportingFormat !== null}
+                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Print
+                  </button>
+                </div>
+              )}
 
               <div className="border-t border-border-primary my-0.5" />
 
@@ -550,7 +634,7 @@ export default memo(function Header({
               <button
                 type="button"
                 onClick={() => {
-                  setShowAccountMenu(false);
+                  closeAccountMenu();
                   onDisconnectLinear();
                 }}
                 className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
@@ -563,7 +647,7 @@ export default memo(function Header({
                   <button
                     type="button"
                     onClick={() => {
-                      setShowAccountMenu(false);
+                      closeAccountMenu();
                       onSignOut();
                     }}
                     className="w-full text-left px-3 py-2 text-xs text-urgent hover:bg-bg-hover transition-colors cursor-pointer"

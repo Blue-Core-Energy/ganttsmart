@@ -173,15 +173,78 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
-    // Account menu shows GCP Sign out + note and export actions
-    await page.getByTitle('Account').click();
-    await expect(page.getByRole('button', { name: 'Export as PNG' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Export as PDF' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Print' })).toBeVisible();
+    // Account menu nests export options under a single Export item
+    const accountButton = page.getByTitle('Account');
+    await accountButton.click();
+    const exportButton = page.getByRole('button', { name: 'Export', exact: true });
+    await expect(exportButton).toBeVisible();
+    await expect(exportButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('group', { name: 'Export options' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Disconnect Linear' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
     await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toBeVisible();
-    await page.getByTitle('Account').click();
+
+    // Opening Export expands the inline submenu with role="group"
+    await exportButton.click();
+    await expect(exportButton).toHaveAttribute('aria-expanded', 'true');
+    const exportGroup = page.getByRole('group', { name: 'Export options' });
+    await expect(exportGroup).toBeVisible();
+    await expect(exportGroup.getByRole('button', { name: 'Export as PNG' })).toBeVisible();
+    await expect(exportGroup.getByRole('button', { name: 'Export as PDF' })).toBeVisible();
+    await expect(exportGroup.getByRole('button', { name: 'Print' })).toBeVisible();
+
+    // Assert inline placement: submenu renders directly below Export disclosure button
+    const exportBtnBox = (await exportButton.boundingBox())!;
+    const submenuBox = (await exportGroup.boundingBox())!;
+    expect(submenuBox.y).toBeGreaterThanOrEqual(exportBtnBox.y + exportBtnBox.height - 1);
+
+    // Keyboard Escape closes only the Export submenu and returns focus to Export
+    await page.keyboard.press('Escape');
+    await expect(exportButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('group', { name: 'Export options' })).toHaveCount(0);
+    await expect(exportButton).toBeFocused();
+    await expect(page.getByRole('button', { name: 'Disconnect Linear' })).toBeVisible();
+
+    // Pressing Escape again closes the account menu and returns focus to Account button
+    await page.keyboard.press('Escape');
+    await expect(exportButton).toHaveCount(0);
+    await expect(accountButton).toBeFocused();
+
+    // Mobile viewport (375px): expandable inline submenu stays completely inside viewport without horizontal overflow
+    await page.setViewportSize({ width: 375, height: 812 });
+    await accountButton.click();
+    const mobileExportButton = page.getByRole('button', { name: 'Export', exact: true });
+    await expect(mobileExportButton).toBeVisible();
+    await mobileExportButton.click();
+    await expect(mobileExportButton).toHaveAttribute('aria-expanded', 'true');
+
+    const mobileSubmenu = page.getByRole('group', { name: 'Export options' });
+    await expect(mobileSubmenu).toBeVisible();
+    await expect(mobileSubmenu.getByRole('button', { name: 'Export as PNG' })).toBeVisible();
+    await expect(mobileSubmenu.getByRole('button', { name: 'Export as PDF' })).toBeVisible();
+    await expect(mobileSubmenu.getByRole('button', { name: 'Print' })).toBeVisible();
+
+    const mobileExportBtnBox = (await mobileExportButton.boundingBox())!;
+    const mobileSubmenuBox = (await mobileSubmenu.boundingBox())!;
+    expect(mobileSubmenuBox.x).toBeGreaterThanOrEqual(0);
+    expect(mobileSubmenuBox.x + mobileSubmenuBox.width).toBeLessThanOrEqual(375);
+    expect(mobileSubmenuBox.y).toBeGreaterThanOrEqual(mobileExportBtnBox.y + mobileExportBtnBox.height - 1);
+
+    const docOverflow = await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    );
+    expect(docOverflow).toBe(true);
+
+    // Escape closes submenu first, then account menu on mobile too, returning focus to Account button
+    await page.keyboard.press('Escape');
+    await expect(mobileExportButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(mobileExportButton).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(mobileExportButton).toHaveCount(0);
+    await expect(accountButton).toBeFocused();
+
+    // Restore desktop viewport for remaining checks
+    await page.setViewportSize({ width: 1280, height: 800 });
 
     // Search filters task bars
     const search = page.getByPlaceholder('Search tasks…');
