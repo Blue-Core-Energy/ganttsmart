@@ -7,7 +7,9 @@ import {
   hashPasswordPBKDF2,
   MAX_AGGREGATE_ATTEMPTS,
   MAX_PASSWORD_ATTEMPTS,
+  parseStartDate,
   RATE_LIMIT_WINDOW_MS,
+  sanitizeCachedRoadmapData,
   STALE_TTL_MS,
   validateExpiresInDays,
   validatePassword,
@@ -40,20 +42,6 @@ async function getClientIpHash(req: Request): Promise<string> {
 
 // --- GraphQL with variables (INJ-VULN-01 fix) ---
 
-// Match the main app's start-date convention: `start: DD-MM-YY` written into issue descriptions
-// by updateIssueStartDate (src/api/linear.ts). Returns YYYY-MM-DD or null.
-function parseStartDate(description: string | null | undefined): string | null {
-  if (!description) return null;
-  const match = description.match(/start:\s*(\d{2})-(\d{2})-(\d{2})/i);
-  if (!match) return null;
-  const [, dd, mm, yy] = match;
-  const year = 2000 + parseInt(yy);
-  const month = parseInt(mm);
-  const day = parseInt(dd);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
 interface LinearIssueNode {
   id: string;
   identifier: string;
@@ -61,7 +49,6 @@ interface LinearIssueNode {
   description: string | null;
   dueDate: string | null;
   priority: number;
-  url: string | null;
   completedAt: string | null;
   canceledAt?: string | null;
   state: { name: string; type: string } | null;
@@ -132,7 +119,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       targetDate
       issues(first: 250, filter: { completedAt: { null: true }, canceledAt: { null: true } }) {
         nodes {
-          id identifier title description dueDate priority url completedAt canceledAt
+          id identifier title description dueDate priority completedAt canceledAt
           state { name type }
           assignee { name }
           parent { identifier }
@@ -140,7 +127,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       }
       doneIssues: issues(first: 100, filter: { completedAt: { null: false }, canceledAt: { null: true } }) {
         nodes {
-          id identifier title description dueDate priority url completedAt canceledAt
+          id identifier title description dueDate priority completedAt canceledAt
           state { name type }
           assignee { name }
           parent { identifier }
@@ -175,7 +162,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       id: n.identifier,
       uuid: n.id,
       title: n.title,
-      description: n.description || '',
+      description: '',
       due,
       startDate: parseStartDate(n.description),
       priorityVal: n.priority,
@@ -183,7 +170,7 @@ async function fetchLinearData(apiKey: string, projectId: string): Promise<Cache
       status: n.state?.name || '',
       statusType: n.state?.type || '',
       assignee: n.assignee?.name || 'Unassigned',
-      url: n.url || '',
+      url: '',
       teamId: '',
       blocks: [],
       blockedBy: [],
@@ -305,7 +292,7 @@ Deno.serve(async (req: Request) => {
       } catch (e) {
         return json({ error: 'Failed to fetch Linear data: ' + (e as Error).message }, 500);
       }
-      cachedData = withCustomOrder(cachedData, sanitizeCustomOrder(body.customOrder));
+      cachedData = sanitizeCachedRoadmapData(withCustomOrder(cachedData, sanitizeCustomOrder(body.customOrder)));
 
       const shareToken = crypto.randomUUID();
       const passwordHash = body.password ? await hashPasswordPBKDF2(body.password) : null;
@@ -456,7 +443,9 @@ Deno.serve(async (req: Request) => {
             const linearToken = await getValidLinearToken(supabase, share.owner_id);
             if (linearToken) {
               let fresh = await fetchLinearData(linearToken, share.project_id);
-              fresh = withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder));
+              fresh = sanitizeCachedRoadmapData(
+                withCustomOrder(fresh, sanitizeCustomOrder(share.cached_data?.customOrder)),
+              );
               const newCachedAt = new Date().toISOString();
               const { error: updateErr } = await supabase
                 .from('shared_roadmaps')
@@ -477,7 +466,12 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      return json({ projectName: share.project_name, cachedData, cachedAt, expiresAt: share.expires_at });
+      return json({
+        projectName: share.project_name,
+        cachedData: sanitizeCachedRoadmapData(cachedData),
+        cachedAt,
+        expiresAt: share.expires_at,
+      });
     }
 
     if (action === 'list') {
@@ -541,7 +535,7 @@ Deno.serve(async (req: Request) => {
           : sanitizeCustomOrder(share.cached_data?.customOrder);
 
       let cachedData = await fetchLinearData(linearToken, share.project_id);
-      cachedData = withCustomOrder(cachedData, customOrder);
+      cachedData = sanitizeCachedRoadmapData(withCustomOrder(cachedData, customOrder));
       const newCachedAt = new Date().toISOString();
       const { error: updateErr } = await supabase
         .from('shared_roadmaps')
