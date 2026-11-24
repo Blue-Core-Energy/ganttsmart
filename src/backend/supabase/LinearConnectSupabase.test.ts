@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => {
   const invoke = vi.fn();
@@ -22,14 +22,24 @@ vi.mock('@/components/toastStore', () => ({
 import { connectLinear } from './LinearConnectSupabase';
 
 describe('LinearConnectSupabase', () => {
+  const originalLocationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
+
   beforeEach(() => {
     vi.clearAllMocks();
     sessionStorage.clear();
-    // Delete window.location to allow mocking href assignment
-    // @ts-expect-error happy-dom location override
-    delete window.location;
-    // @ts-expect-error happy-dom location override
-    window.location = { href: 'http://localhost:5173/app', search: '' };
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: { href: 'http://localhost:5173/app', search: '' },
+    });
+  });
+
+  afterEach(() => {
+    if (originalLocationDescriptor) {
+      Object.defineProperty(window, 'location', originalLocationDescriptor);
+    } else {
+      delete (window as { location?: Location }).location;
+    }
   });
 
   it('starts server-bound OAuth flow with PKCE, stores state, and navigates to authorizeUrl', async () => {
