@@ -61,6 +61,17 @@ describe('apiFetch', () => {
     unsubscribe();
   });
 
+  it('rethrows Safari "Load failed" TypeError unchanged without notifying session-expiry listeners', async () => {
+    const listener = vi.fn();
+    const unsubscribe = onSessionExpired(listener);
+    const safariNetworkError = new TypeError('Load failed');
+    fetchMock.mockRejectedValue(safariNetworkError);
+
+    await expect(apiFetch('/api/me')).rejects.toBe(safariNetworkError);
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('notifies session-expiry listeners for an opaque redirect and a non-reconnect 401', async () => {
     const listener = vi.fn();
     const unsubscribe = onSessionExpired(listener);

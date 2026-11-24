@@ -152,6 +152,26 @@ describe('export utilities', () => {
     expect(bodyChildren.length).toBe(0);
   });
 
+  it('appends download link to document.body before click for Safari/WebKit compatibility', async () => {
+    const { target } = createMockExportTarget();
+    mockToPng.mockResolvedValue('data:image/png;base64,mockpngdata');
+
+    let clickedWhileAttached = false;
+    const origCreateElement = document.createElement;
+    document.createElement = ((tag: string) => {
+      const el = origCreateElement(tag);
+      el.click = vi.fn(() => {
+        clickedWhileAttached = bodyChildren.includes(el);
+      });
+      return el;
+    }) as typeof document.createElement;
+
+    await exportAsPng(target);
+
+    expect(clickedWhileAttached).toBe(true);
+    expect(bodyChildren.length).toBe(0);
+  });
+
   it('exportAsPng restores styles even when toPng fails', async () => {
     const { target, hiddenChildWithInlineDisplay, hiddenChildWithClassDisplay } = createMockExportTarget();
     mockToPng.mockRejectedValue(new Error('Canvas render failure'));
