@@ -1318,6 +1318,15 @@ test.describe('GanttSmart GCP app', () => {
         return;
       }
 
+      if (query.includes('viewer')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { viewer: { id: 'usr-1', name: 'Demo User' } } }),
+        });
+        return;
+      }
+
       await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
     });
 

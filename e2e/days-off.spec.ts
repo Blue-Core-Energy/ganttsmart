@@ -179,20 +179,25 @@ test.describe('GanttSmart GCP app', () => {
   test('validates the Days Off form before saving', async ({ page }) => {
     const errors = trackErrors(page);
     const mon = mondayOffset();
-    await mockLinearIssues(page, [
-      {
-        id: 'uuid-221',
-        identifier: 'ENG-221',
-        title: 'Any task',
-        assignee: 'Andrew Phillips',
-        startOffset: mon,
-        dueOffset: mon + 1,
-      },
-    ]);
+    await mockLinearIssues(
+      page,
+      [
+        {
+          id: 'uuid-221',
+          identifier: 'ENG-221',
+          title: 'Any task',
+          assignee: 'Andrew Phillips',
+          startOffset: mon,
+          dueOffset: mon + 1,
+        },
+      ],
+      { id: 'usr-1', name: '' },
+    );
     const entries = await mockDaysOffApi(page);
 
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-221"]')).toBeVisible();
+    await expect(page.getByTitle('Account')).toContainText('?');
     await openDaysOffDialog(page);
     const dialog = page.getByRole('dialog', { name: 'Days Off' });
     const add = dialog.getByRole('button', { name: 'Add', exact: true });
