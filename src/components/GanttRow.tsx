@@ -564,9 +564,9 @@ export default function GanttRow({
         ? 'var(--color-high)'
         : 'var(--color-text-secondary)';
 
-  const issueIdLink = (
+  const issueIdLink = isSafeUrl(task.url) ? (
     <a
-      href={isSafeUrl(task.url) ? task.url : '#'}
+      href={task.url}
       target="_blank"
       rel="noopener noreferrer"
       className="font-mono text-[10px] text-text-muted tracking-[0.03em] hover:text-accent hover:underline shrink-0"
@@ -574,6 +574,8 @@ export default function GanttRow({
     >
       {task.id}
     </a>
+  ) : (
+    <span className="font-mono text-[10px] text-text-muted tracking-[0.03em] shrink-0">{task.id}</span>
   );
 
   /** Chevron for parents, an elbow connector for leaf sub-issues, empty space otherwise */

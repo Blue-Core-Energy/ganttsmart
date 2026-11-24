@@ -163,3 +163,104 @@ export async function computeClientIpHash(rawIp: string): Promise<string> {
   const hashBuf = await crypto.subtle.digest('SHA-256', data);
   return toHex(new Uint8Array(hashBuf));
 }
+
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day;
+}
+
+/**
+ * Match start date from issue descriptions:
+ * Supports `start: YYYY-MM-DD` and legacy `start: DD-MM-YY`.
+ * Returns YYYY-MM-DD or null.
+ */
+export function parseStartDate(description: string | null | undefined): string | null {
+  if (!description) return null;
+  const isoMatch = description.match(/start:\s*(\d{4})-(\d{2})-(\d{2})(?!\d)/i);
+  if (isoMatch) {
+    const year = parseInt(isoMatch[1], 10);
+    const month = parseInt(isoMatch[2], 10);
+    const day = parseInt(isoMatch[3], 10);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const legacyMatch = description.match(/start:\s*(\d{2})-(\d{2})-(\d{2})(?!\d)/i);
+  if (legacyMatch) {
+    const [, dd, mm, yy] = legacyMatch;
+    const year = 2000 + parseInt(yy, 10);
+    const month = parseInt(mm, 10);
+    const day = parseInt(dd, 10);
+    if (!isValidCalendarDate(year, month, day)) return null;
+    return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return null;
+}
+
+/**
+ * Strips sensitive internal Linear issue details (raw description and internal URL)
+ * while preserving parsed scheduling metadata (startDate, due dates) and assignee names.
+ */
+export function sanitizeTask<T extends Record<string, unknown>>(task: T): T {
+  if (!task || typeof task !== 'object') return task;
+  const description = typeof task.description === 'string' ? task.description : null;
+  const startDate =
+    typeof task.startDate === 'string' && task.startDate.length > 0 ? task.startDate : parseStartDate(description);
+  return {
+    ...task,
+    startDate: startDate ?? null,
+    description: '',
+    url: '',
+  };
+}
+
+/**
+ * Strips sensitive internal details (description and url) from milestones.
+ */
+export function sanitizeMilestone<T extends Record<string, unknown>>(milestone: T): T {
+  if (!milestone || typeof milestone !== 'object') return milestone;
+  return {
+    ...milestone,
+    description: '',
+    url: '',
+  };
+}
+
+/**
+ * Sanitizes all tasks and milestones within a cached roadmap data structure, redacting raw issue descriptions
+ * and internal Linear URLs from tasks, doneTasks, unscheduledTasks, externalTasks,
+ * externalUnscheduledTasks, and milestones.
+ */
+export function sanitizeCachedRoadmapData<T extends Record<string, unknown>>(data: T): T {
+  if (!data || typeof data !== 'object') return data;
+  const result: Record<string, unknown> = { ...data };
+  if (Array.isArray(data.tasks)) {
+    result.tasks = data.tasks.map((t) => (t && typeof t === 'object' ? sanitizeTask(t as Record<string, unknown>) : t));
+  }
+  if (Array.isArray(data.doneTasks)) {
+    result.doneTasks = data.doneTasks.map((t) =>
+      t && typeof t === 'object' ? sanitizeTask(t as Record<string, unknown>) : t,
+    );
+  }
+  if (Array.isArray(data.unscheduledTasks)) {
+    result.unscheduledTasks = data.unscheduledTasks.map((t) =>
+      t && typeof t === 'object' ? sanitizeTask(t as Record<string, unknown>) : t,
+    );
+  }
+  if (Array.isArray(data.externalTasks)) {
+    result.externalTasks = data.externalTasks.map((t) =>
+      t && typeof t === 'object' ? sanitizeTask(t as Record<string, unknown>) : t,
+    );
+  }
+  if (Array.isArray(data.externalUnscheduledTasks)) {
+    result.externalUnscheduledTasks = data.externalUnscheduledTasks.map((t) =>
+      t && typeof t === 'object' ? sanitizeTask(t as Record<string, unknown>) : t,
+    );
+  }
+  if (Array.isArray(data.milestones)) {
+    result.milestones = data.milestones.map((m) =>
+      m && typeof m === 'object' ? sanitizeMilestone(m as Record<string, unknown>) : m,
+    );
+  }
+  return result as T;
+}
