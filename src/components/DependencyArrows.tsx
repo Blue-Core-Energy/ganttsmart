@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  round,
   routeDependencyArrows,
   type DependencyArrowEdge,
   type DependencyEdge,
@@ -158,9 +159,45 @@ export default memo(function DependencyArrows({
     return [...arrows].sort((a, b) => {
       const aSel = a.sourceId === selectedArrow.sourceId && a.targetId === selectedArrow.targetId;
       const bSel = b.sourceId === selectedArrow.sourceId && b.targetId === selectedArrow.targetId;
-      if (aSel) return 1;
-      if (bSel) return -1;
-      return 0;
+      return Number(aSel) - Number(bSel);
+    });
+  }, [arrows, selectedArrow]);
+
+  // Deduplicate junctions so stacked translucent circles don't compound alpha
+  const uniqueJunctions = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        x: number;
+        y: number;
+        participating: (RoutedDependencyArrow & Arrow)[];
+      }
+    >();
+
+    for (const arrow of arrows) {
+      for (const j of arrow.junctions ?? []) {
+        const key = `${round(j.x)}|${round(j.y)}`;
+        let entry = map.get(key);
+        if (!entry) {
+          entry = { x: j.x, y: j.y, participating: [] };
+          map.set(key, entry);
+        }
+        entry.participating.push(arrow);
+      }
+    }
+
+    const list = Array.from(map.values());
+    if (!selectedArrow) return list;
+
+    // Paint selected junction last so it sits on top of non-selected junctions
+    return list.sort((a, b) => {
+      const aSel = a.participating.some(
+        (ar) => ar.sourceId === selectedArrow.sourceId && ar.targetId === selectedArrow.targetId,
+      );
+      const bSel = b.participating.some(
+        (ar) => ar.sourceId === selectedArrow.sourceId && ar.targetId === selectedArrow.targetId,
+      );
+      return Number(aSel) - Number(bSel);
     });
   }, [arrows, selectedArrow]);
 
@@ -223,6 +260,55 @@ export default memo(function DependencyArrows({
             isSelected={isSelected}
             hasSelection={hasSelection}
             onSelectArrow={onSelectArrow}
+          />
+        );
+      })}
+      {uniqueJunctions.map((junction) => {
+        const isSelected = Boolean(
+          selectedArrow &&
+          junction.participating.some(
+            (a) => a.sourceId === selectedArrow.sourceId && a.targetId === selectedArrow.targetId,
+          ),
+        );
+
+        let color: string;
+        let opacity: number;
+        let r: number;
+
+        if (isSelected) {
+          const selArrow = junction.participating.find(
+            (a) => a.sourceId === selectedArrow!.sourceId && a.targetId === selectedArrow!.targetId,
+          )!;
+          color = selArrow.violated ? '#f97316' : selArrow.crossProject ? '#8b5cf6' : '#ef4444';
+          opacity = 1;
+          r = 3.5;
+        } else if (hasSelection) {
+          const hasViolated = junction.participating.some((a) => a.violated);
+          const hasCross = junction.participating.some((a) => a.crossProject);
+          color = hasViolated ? '#f97316' : hasCross ? '#8b5cf6' : '#ef4444';
+          opacity = 0.15;
+          r = 2.75;
+        } else {
+          const hasViolated = junction.participating.some((a) => a.violated);
+          const hasCross = junction.participating.some((a) => a.crossProject);
+          color = hasViolated ? '#f97316' : hasCross ? '#8b5cf6' : '#ef4444';
+          opacity = hasViolated ? 0.85 : 0.65;
+          r = 2.75;
+        }
+
+        const cx = round(junction.x);
+        const cy = round(junction.y);
+
+        return (
+          <circle
+            key={`${cx}|${cy}`}
+            data-arrow-junction
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill={color}
+            opacity={opacity}
+            className="pointer-events-none transition-[opacity,r] duration-150"
           />
         );
       })}

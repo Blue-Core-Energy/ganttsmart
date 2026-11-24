@@ -93,6 +93,15 @@ export interface RoutedDependencyArrow extends DependencyArrowEdge {
   midXOffset: number;
   /** How far the arrow's lane was moved from its default, away from the source bar */
   laneYOffset: number;
+  /** Schematic merge/branch junctions this arrow participates in */
+  junctions?: Point[];
+}
+
+export interface ArrowJunction {
+  x: number;
+  y: number;
+  /** Indices of the routes/arrows participating in this junction */
+  arrowIndices: number[];
 }
 
 export interface Point {
@@ -100,7 +109,7 @@ export interface Point {
   y: number;
 }
 
-const round = (n: number) => Math.round(n * 10) / 10;
+export const round = (n: number) => Math.round(n * 10) / 10;
 
 /** Drop repeated points and the middle points of collinear runs */
 function simplifyWaypoints(points: Point[]): Point[] {
@@ -338,13 +347,159 @@ export function buildArrowPath(endpoints: ArrowEndpoints, options?: ArrowPathOpt
   return buildRoundedPath(arrowWaypoints(endpoints, options), cornerRadius, options?.hops);
 }
 
+function shareIncidentDirection(dirsA: Set<string>, dirsB: Set<string>): boolean {
+  for (const d of dirsA) {
+    if (dirsB.has(d)) return true;
+  }
+  return false;
+}
+
+function getIncidentDirections(pts: Point[], x: number, y: number): Set<'left' | 'right' | 'up' | 'down'> {
+  const dirs = new Set<'left' | 'right' | 'up' | 'down'>();
+  for (let i = 1; i < pts.length; i++) {
+    const p1 = pts[i - 1];
+    const p2 = pts[i];
+    const isHorizontal = Math.abs(p1.y - p2.y) < 0.1 && Math.abs(p1.x - p2.x) >= 0.1;
+    const isVertical = Math.abs(p1.x - p2.x) < 0.1 && Math.abs(p1.y - p2.y) >= 0.1;
+
+    if (isHorizontal && Math.abs(p1.y - y) < 0.1) {
+      const minX = Math.min(p1.x, p2.x);
+      const maxX = Math.max(p1.x, p2.x);
+      if (minX < x - 0.1 && x <= maxX + 0.1) {
+        dirs.add('left');
+      }
+      if (minX - 0.1 <= x && x < maxX - 0.1) {
+        dirs.add('right');
+      }
+    } else if (isVertical && Math.abs(p1.x - x) < 0.1) {
+      const minY = Math.min(p1.y, p2.y);
+      const maxY = Math.max(p1.y, p2.y);
+      if (minY < y - 0.1 && y <= maxY + 0.1) {
+        dirs.add('up');
+      }
+      if (minY - 0.1 <= y && y < maxY - 0.1) {
+        dirs.add('down');
+      }
+    }
+  }
+  return dirs;
+}
+
+/**
+ * Compute merge/branch junction points (where 3+ orthogonal line segments meet at a shared
+ * trunk point (x, y) across participating arrows that share a source or destination and
+ * share an incident direction at (x, y)).
+ * Pure 2-segment elbows/corners of an arrow and unrelated crossings do not emit junctions.
+ */
+export function findJunctions(
+  routes: Point[][],
+  edges: Array<{ sourceId: string; targetId: string }>,
+): ArrowJunction[] {
+  const simplified = routes.map((pts) => (pts.length > 0 ? simplifyWaypoints(pts) : []));
+
+  const candidateKeys = new Set<string>();
+  const candidates: Point[] = [];
+
+  const addCandidate = (x: number, y: number) => {
+    const rx = round(x);
+    const ry = round(y);
+    const key = `${rx}|${ry}`;
+    if (!candidateKeys.has(key)) {
+      candidateKeys.add(key);
+      candidates.push({ x: rx, y: ry });
+    }
+  };
+
+  // Only waypoints are candidates since connected routes must share an incident direction
+  // (which requires a turn or endpoint at (x, y) for at least one route).
+  for (const pts of simplified) {
+    for (const p of pts) {
+      addCandidate(p.x, p.y);
+    }
+  }
+
+  const junctions: ArrowJunction[] = [];
+
+  for (const cand of candidates) {
+    const { x, y } = cand;
+    const activeRouteDirs = new Map<number, Set<'left' | 'right' | 'up' | 'down'>>();
+
+    for (let r = 0; r < simplified.length; r++) {
+      const dirs = getIncidentDirections(simplified[r], x, y);
+      if (dirs.size > 0) {
+        activeRouteDirs.set(r, dirs);
+      }
+    }
+
+    const activeRoutes = Array.from(activeRouteDirs.keys());
+    if (activeRoutes.length < 2) continue;
+
+    // Group active routes into connected components where edges share sourceId or targetId
+    // AND share at least one incident direction at (x, y).
+    const visited = new Set<number>();
+    for (const r of activeRoutes) {
+      if (visited.has(r)) continue;
+
+      const comp: number[] = [];
+      const queue = [r];
+      visited.add(r);
+
+      while (queue.length > 0) {
+        const curr = queue.shift()!;
+        comp.push(curr);
+        const dirsCurr = activeRouteDirs.get(curr)!;
+        const edgeCurr = edges[curr];
+
+        for (const other of activeRoutes) {
+          if (!visited.has(other)) {
+            const edgeOther = edges[other];
+            const dirsOther = activeRouteDirs.get(other)!;
+            const sharesEnd =
+              edgeCurr &&
+              edgeOther &&
+              (edgeCurr.sourceId === edgeOther.sourceId || edgeCurr.targetId === edgeOther.targetId);
+            if (sharesEnd && shareIncidentDirection(dirsCurr, dirsOther)) {
+              visited.add(other);
+              queue.push(other);
+            }
+          }
+        }
+      }
+
+      if (comp.length < 2) continue;
+
+      const compDirs = new Set<'left' | 'right' | 'up' | 'down'>();
+      for (const u of comp) {
+        const dirs = activeRouteDirs.get(u);
+        if (dirs) {
+          for (const d of dirs) compDirs.add(d);
+        }
+      }
+
+      if (compDirs.size >= 3) {
+        junctions.push({
+          x,
+          y,
+          arrowIndices: comp,
+        });
+      }
+    }
+  }
+
+  return junctions;
+}
+
 /**
  * Crossings where the vertical runs of each route pass over a horizontal run of a different
  * route. A horizontal run only counts when the vertical run is strictly inside it, so a branch
  * leaving a shared trunk, or arrows merging at one column, meet without a hop.
+ *
+ * When edge metadata is provided, vertical runs only suppress hops over horizontal runs
+ * when both arrows participate in the same physically connected junction component at (x, y).
+ *
  * Returns, per route, the points on its vertical runs to hop over (deduplicated by position).
  */
-export function findHops(routes: Point[][]): Point[][] {
+export function findHops(routes: Point[][], edges?: Array<{ sourceId: string; targetId: string }>): Point[][] {
   const simplified = routes.map((pts) => (pts.length > 0 ? simplifyWaypoints(pts) : []));
 
   const horizontals = simplified.map((pts) => {
@@ -357,6 +512,8 @@ export function findHops(routes: Point[][]): Point[][] {
     return runs;
   });
 
+  const junctions = edges ? findJunctions(routes, edges) : [];
+
   return simplified.map((pts, a) => {
     const found = new Map<string, Point>();
     for (let i = 1; i < pts.length; i++) {
@@ -368,6 +525,20 @@ export function findHops(routes: Point[][]): Point[][] {
         if (b === a) continue;
         for (const h of horizontals[b]) {
           if (h.xMin + CROSS_EPS < x && x < h.xMax - CROSS_EPS && yMin < h.y && h.y < yMax) {
+            if (edges) {
+              const rx = round(x);
+              const ry = round(h.y);
+              const isSameJunction = junctions.some(
+                (j) =>
+                  Math.abs(j.x - rx) < 0.1 &&
+                  Math.abs(j.y - ry) < 0.1 &&
+                  j.arrowIndices.includes(a) &&
+                  j.arrowIndices.includes(b),
+              );
+              if (isSameJunction) {
+                continue;
+              }
+            }
             found.set(`${round(x)}|${round(h.y)}`, { x, y: h.y });
           }
         }
@@ -452,7 +623,7 @@ const mayShareTrack = (a: { sourceId: string; targetId: string }, b: { sourceId:
 export function routeDependencyArrows<T extends DependencyArrowEdge>(
   arrows: T[],
   options?: { cornerRadius?: number; staggerStep?: number },
-): (T & { path: string; midXOffset: number; laneYOffset: number })[] {
+): (T & RoutedDependencyArrow)[] {
   const cornerRadius = options?.cornerRadius ?? ARROW_CORNER_RADIUS;
   const staggerStep = options?.staggerStep ?? ARROW_STAGGER_STEP;
   /** Tracks closer than this (px) read as one line */
@@ -729,14 +900,22 @@ export function routeDependencyArrows<T extends DependencyArrowEdge>(
   });
 
   // 4. With every route fixed, make vertical runs hop over the horizontal runs they cross
-  const hops = findHops(assigned.map((a) => arrowWaypoints(a.arrow, a.pathOptions)));
+  const waypoints = assigned.map((a) => arrowWaypoints(a.arrow, a.pathOptions));
+  const arrowEdges = assigned.map((a) => a.arrow);
+  const hops = findHops(waypoints, arrowEdges);
+  const junctions = findJunctions(waypoints, arrowEdges);
 
-  return assigned.map(({ arrow, midXOffset, laneYOffset, pathOptions }, i) => ({
-    ...arrow,
-    path: buildArrowPath(arrow, { ...pathOptions, hops: hops[i] }),
-    midXOffset,
-    laneYOffset,
-  }));
+  return assigned.map(({ arrow, midXOffset, laneYOffset, pathOptions }, i) => {
+    const arrowJunctions = junctions.filter((j) => j.arrowIndices.includes(i)).map((j) => ({ x: j.x, y: j.y }));
+
+    return {
+      ...arrow,
+      path: buildArrowPath(arrow, { ...pathOptions, hops: hops[i] }),
+      midXOffset,
+      laneYOffset,
+      junctions: arrowJunctions,
+    };
+  });
 }
 
 export interface DependencyEdge {

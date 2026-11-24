@@ -11,6 +11,7 @@ import {
   ARROW_STUB,
   buildArrowPath,
   findHops,
+  findJunctions,
   resolveDependencyEdges,
   routeDependencyArrows,
   type ArrowEndpoints,
@@ -953,5 +954,242 @@ describe('resolveDependencyEdges', () => {
     );
     expect(edges.find((e) => e.sourceId === 'E')?.crossProject).toBe(true);
     expect(edges.find((e) => e.sourceId === 'P')?.crossProject).toBe(false);
+  });
+});
+
+describe('schematic junction dots and hop suppression (IT-162)', () => {
+  it('does not produce a hop when an arrow merges into a shared trunk with a continuing horizontal run', () => {
+    // Arrow 0: Top->T drops vertically down column 388 from y = 50 to 200
+    // Arrow 1: S->T runs horizontally from 100 to 388 at y = 120, then turns down column 388 to 200
+    // Arrow 2: S->D runs horizontally from 100 through column 388 to 500 at y = 120
+    const routes = [
+      [
+        { x: 388, y: 50 },
+        { x: 388, y: 200 },
+      ],
+      [
+        { x: 100, y: 120 },
+        { x: 388, y: 120 },
+        { x: 388, y: 200 },
+      ],
+      [
+        { x: 100, y: 120 },
+        { x: 500, y: 120 },
+      ],
+    ];
+    const edges = [
+      { sourceId: 'Top', targetId: 'T' },
+      { sourceId: 'S', targetId: 'T' },
+      { sourceId: 'S', targetId: 'D' },
+    ];
+    const hops = findHops(routes, edges);
+    // Route 0 (Top->T) meets Route 2 (S->D) at (388, 120) where S->T joins the trunk.
+    // They share a connected junction component at (388, 120), so no hop is produced.
+    expect(hops[0]).toEqual([]);
+    expect(hops[1]).toEqual([]);
+    expect(hops[2]).toEqual([]);
+  });
+
+  it('does not produce a hop when arrows share a source and diverge from a shared trunk run', () => {
+    // S->T leaves (100, 50) and turns down at (112, 50) to (112, 200)
+    // S->Straight continues straight from (100, 50) past 112 to (300, 50)
+    const routes = [
+      [
+        { x: 100, y: 50 },
+        { x: 112, y: 50 },
+        { x: 112, y: 200 },
+      ],
+      [
+        { x: 100, y: 50 },
+        { x: 300, y: 50 },
+      ],
+    ];
+    const edges = [
+      { sourceId: 'S', targetId: 'T' },
+      { sourceId: 'S', targetId: 'Straight' },
+    ];
+    const hops = findHops(routes, edges);
+    expect(hops[0]).toEqual([]);
+    expect(hops[1]).toEqual([]);
+  });
+
+  it('suppresses hop and emits a junction dot on mixed fan-out + shared-target trunk', () => {
+    // Top -> T (fromX: 100, fromY: 50, toX: 400, toY: 200)
+    // S -> T   (fromX: 100, fromY: 120, toX: 400, toY: 200)
+    // S -> D   (fromX: 100, fromY: 120, toX: 600, toY: 120)
+    // Top->T and S->T share target trunk at x = 388.
+    // Top->T drops from y = 50 to 200 at x = 388.
+    // S->D runs horizontally at y = 120 from 100 to 600 (passing straight through x = 388).
+    // S->T leaves S at y = 120, turns at x = 388 down to y = 200.
+    const routed = routeDependencyArrows([
+      { sourceId: 'Top', targetId: 'T', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'S', targetId: 'T', fromX: 100, fromY: 120, toX: 400, toY: 200 },
+      { sourceId: 'S', targetId: 'D', fromX: 100, fromY: 120, toX: 600, toY: 120 },
+    ]);
+
+    // 1. Top -> T must NOT hop over S -> D at (388, 120)
+    expect(routed[0].path).not.toContain('A ');
+    expect(routed[1].path).not.toContain('A ');
+    expect(routed[2].path).not.toContain('A ');
+
+    // 2. A junction dot must be emitted at (388, 120)
+    const junctionPoint = { x: 388, y: 120 };
+    expect(routed[0].junctions).toContainEqual(junctionPoint);
+    expect(routed[1].junctions).toContainEqual(junctionPoint);
+    expect(routed[2].junctions).toContainEqual(junctionPoint);
+  });
+
+  it('does NOT emit junction dots on pure single-arrow elbows', () => {
+    const [alone] = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'B', fromX: 100, fromY: 50, toX: 300, toY: 150 },
+    ]);
+    expect(alone.junctions).toEqual([]);
+  });
+
+  it('emits hop arcs and NO junction dots for unrelated crossings', () => {
+    const routed = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'TA', fromX: 100, fromY: 50, toX: 300, toY: 200 },
+      { sourceId: 'B', targetId: 'TB', fromX: 50, fromY: 110, toX: 400, toY: 110 },
+    ]);
+    // Arrow A hops over B at (112, 110)
+    expect(routed[0].path).toContain('A ');
+    expect(routed[1].path).not.toContain('A ');
+
+    // Neither arrow has junction dots
+    expect(routed[0].junctions).toEqual([]);
+    expect(routed[1].junctions).toEqual([]);
+  });
+
+  it('emits junction dots where forward arrows converge into a shared target trunk, but not at the final elbow into target', () => {
+    const routed = routeDependencyArrows([
+      { sourceId: 'A', targetId: 'T', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'B', targetId: 'T', fromX: 200, fromY: 100, toX: 400, toY: 200 },
+    ]);
+    // Shared target trunk is at x = 388.
+    // B->T enters column 388 at y = 100, merging into A->T's vertical run (50..200).
+    // Junction at (388, 100).
+    // The final turn into T at (388, 200) is a 2-segment elbow shared by both, NOT a 3+ direction junction.
+    expect(routed[0].junctions).toEqual([{ x: 388, y: 100 }]);
+    expect(routed[1].junctions).toEqual([{ x: 388, y: 100 }]);
+  });
+
+  it('emits junction dots where forward arrows branch off a shared source trunk', () => {
+    const routed = routeDependencyArrows([
+      { sourceId: 'S', targetId: 'T1', fromX: 100, fromY: 50, toX: 300, toY: 100 },
+      { sourceId: 'S', targetId: 'T2', fromX: 100, fromY: 50, toX: 300, toY: 200 },
+    ]);
+    // Both leave (100, 50) and turn at x = 112 down.
+    // At y = 100, S->T1 turns right into T1, while S->T2 continues down to y = 200.
+    // T-junction at (112, 100).
+    // (112, 50) is only 2 directions (left and down), so no junction dot.
+    // (112, 200) is only 2 directions (up and right), so no junction dot.
+    expect(routed[0].junctions).toEqual([{ x: 112, y: 100 }]);
+    expect(routed[1].junctions).toEqual([{ x: 112, y: 100 }]);
+  });
+
+  it('emits junction dots for backwards shared-entry and shared-exit junctions', () => {
+    // Shared entry column into target T:
+    const intoTarget = routeDependencyArrows([
+      { sourceId: 'S1', targetId: 'T', fromX: 400, fromY: 50, toX: 100, toY: 250 },
+      { sourceId: 'S2', targetId: 'T', fromX: 400, fromY: 120, toX: 100, toY: 250 },
+    ]);
+    // Both share entry column x = 88.
+    // S1 lane is at 68 (50 + 18); S2 lane is at 138 (120 + 18).
+    // S1 drops down x = 88 from y = 68 to 250.
+    // S2 runs along lane y = 138 and joins column 88, then drops to 250.
+    // Merge junction at (88, 138).
+    expect(intoTarget[0].junctions).toEqual([{ x: 88, y: 138 }]);
+    expect(intoTarget[1].junctions).toEqual([{ x: 88, y: 138 }]);
+
+    // Shared lane branching into different entry columns from same source:
+    const fromSource = routeDependencyArrows([
+      { sourceId: 'S', targetId: 'T1', fromX: 400, fromY: 50, toX: 200, toY: 200 },
+      { sourceId: 'S', targetId: 'T2', fromX: 400, fromY: 50, toX: 100, toY: 250 },
+    ]);
+    // Both share exit column x = 412 and lane y = 68 (50 + 18).
+    // T1 entry is at x = 188; T2 entry is at x = 88.
+    // At x = 188 on lane y = 68, S->T1 turns down into T1, while S->T2 continues along lane to x = 88.
+    // Branch junction at (188, 68).
+    expect(fromSource[0].junctions).toEqual([{ x: 188, y: 68 }]);
+    expect(fromSource[1].junctions).toEqual([{ x: 188, y: 68 }]);
+  });
+
+  it('findJunctions returns junction details with arrow indices', () => {
+    const routes = [
+      [
+        { x: 100, y: 50 },
+        { x: 388, y: 50 },
+        { x: 388, y: 200 },
+        { x: 400, y: 200 },
+      ],
+      [
+        { x: 200, y: 100 },
+        { x: 388, y: 100 },
+        { x: 388, y: 200 },
+        { x: 400, y: 200 },
+      ],
+    ];
+    const edges = [
+      { sourceId: 'A', targetId: 'T' },
+      { sourceId: 'B', targetId: 'T' },
+    ];
+    const junctions = findJunctions(routes, edges);
+    expect(junctions).toEqual([
+      {
+        x: 388,
+        y: 100,
+        arrowIndices: [0, 1],
+      },
+    ]);
+  });
+
+  it('hops both converging arrows over an intermediate row crossing and emits no junction dot', () => {
+    // Top -> T (fromX: 100, fromY: 50, toX: 400, toY: 250)
+    // S -> T   (fromX: 100, fromY: 100, toX: 400, toY: 250)
+    // S -> D   (fromX: 100, fromY: 100, toX: 600, toY: 150)
+    // S->D branches at (112, 100), drops to y = 150, and runs horizontally to 600 across column 388.
+    // Top->T and S->T converge at (388, 100) and both drop down column 388 through y = 150.
+    const routed = routeDependencyArrows([
+      { sourceId: 'Top', targetId: 'T', fromX: 100, fromY: 50, toX: 400, toY: 250 },
+      { sourceId: 'S', targetId: 'T', fromX: 100, fromY: 100, toX: 400, toY: 250 },
+      { sourceId: 'S', targetId: 'D', fromX: 100, fromY: 100, toX: 600, toY: 150 },
+    ]);
+
+    // Both Top->T and S->T hop over S->D at y = 150 (shared trunk does not tear!)
+    expect(routed[0].path).toContain('A 4 4 0 0 1 388 154');
+    expect(routed[1].path).toContain('A 4 4 0 0 1 388 154');
+    // S->D is flat
+    expect(routed[2].path).not.toContain('A ');
+
+    // No junction dot at (388, 150)
+    expect(routed[0].junctions?.some((j) => j.x === 388 && j.y === 150)).toBe(false);
+    expect(routed[1].junctions?.some((j) => j.x === 388 && j.y === 150)).toBe(false);
+    expect(routed[2].junctions?.some((j) => j.x === 388 && j.y === 150)).toBe(false);
+
+    // Merge junction at (388, 100) and branch junction at (112, 100) still exist
+    expect(routed[0].junctions).toEqual([{ x: 388, y: 100 }]);
+    expect(routed[1].junctions).toEqual([
+      { x: 388, y: 100 },
+      { x: 112, y: 100 },
+    ]);
+    expect(routed[2].junctions).toEqual([{ x: 112, y: 100 }]);
+  });
+
+  it('hops over an unrelated crossing at a merge point and excludes it from the junction', () => {
+    // Top->T and S->T merge at (388, 120)
+    // U->V crosses horizontally at y = 120 from 50 to 600
+    const routed = routeDependencyArrows([
+      { sourceId: 'Top', targetId: 'T', fromX: 100, fromY: 50, toX: 400, toY: 200 },
+      { sourceId: 'S', targetId: 'T', fromX: 100, fromY: 120, toX: 400, toY: 200 },
+      { sourceId: 'U', targetId: 'V', fromX: 50, fromY: 120, toX: 600, toY: 120 },
+    ]);
+
+    // Top->T drops down column 388 across U->V's line at y = 120, so it must hop over U->V
+    expect(routed[0].path).toContain('A 4 4 0 0 1 388 124');
+
+    // U->V is not part of the junction at (388, 120)
+    expect(routed[0].junctions).toEqual([{ x: 388, y: 120 }]);
+    expect(routed[1].junctions).toEqual([{ x: 388, y: 120 }]);
+    expect(routed[2].junctions).toEqual([]);
   });
 });
