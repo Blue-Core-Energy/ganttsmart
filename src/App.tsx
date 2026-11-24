@@ -23,6 +23,7 @@ import MilestonePanel from '@/components/MilestonePanel';
 import DaysOffDialog from '@/components/DaysOffDialog';
 import { setMilestoneDateHandler } from '@/components/milestonePanelStore';
 import { backend } from '@/backend';
+import { fetchViewer } from '@/api/linear';
 import { useAuth } from '@/hooks/useAuth';
 import { useLinearData } from '@/hooks/useLinearData';
 import { useDaysOff } from '@/hooks/useDaysOff';
@@ -62,6 +63,30 @@ function GanttView({
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !localStorage.getItem('gantt_onboarding_done');
   });
+
+  const [userName, setUserName] = useState<string>('');
+
+  useEffect(() => {
+    setUserName('');
+    if (!linearToken) {
+      return;
+    }
+    let cancelled = false;
+    fetchViewer(linearToken)
+      .then((viewer) => {
+        if (!cancelled) {
+          setUserName(viewer?.name ?? '');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setUserName('');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [linearToken]);
 
   const {
     projects,
@@ -300,6 +325,7 @@ function GanttView({
         projectName={projectName}
         loading={loading}
         lastSynced={lastSynced}
+        userName={userName}
         onRefresh={refresh}
         onDisconnectLinear={onDisconnectLinear}
         onSignOut={onSignOut}

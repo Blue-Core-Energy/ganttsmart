@@ -38,6 +38,18 @@ test.describe('GanttSmart GCP app', () => {
     await page.route('**/api/linear/graphql', async (route) => {
       const payload = route.request().postDataJSON() as { query?: string } | null;
       const query = payload?.query ?? '';
+      if (query.includes('viewer')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              viewer: { id: 'usr-1', name: 'Andrew Phillips' },
+            },
+          }),
+        });
+        return;
+      }
       if (await defaultScheduleMock.handle(route, payload)) return;
 
       if (query.includes('projects(')) {
@@ -173,8 +185,19 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
-    // Account menu nests export options under a single Export item
+    // Account avatar matches the assignee avatar for the signed-in user
     const accountButton = page.getByTitle('Account');
+    const accountAvatar = accountButton.locator('div');
+    const tableAvatar = page.locator('[data-assignee-cell="ENG-101"] > div').first();
+
+    await expect(accountAvatar).toContainText('AP');
+    await expect(tableAvatar).toContainText('AP');
+
+    const accountBg = await accountAvatar.evaluate((el) => window.getComputedStyle(el).backgroundColor);
+    const tableBg = await tableAvatar.evaluate((el) => window.getComputedStyle(el).backgroundColor);
+    expect(accountBg).toBe(tableBg);
+
+    // Account menu nests export options under a single Export item
     await accountButton.click();
     const exportButton = page.getByRole('button', { name: 'Export', exact: true });
     await expect(exportButton).toBeVisible();

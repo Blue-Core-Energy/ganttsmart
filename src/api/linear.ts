@@ -164,6 +164,8 @@ export async function testAuth(apiKey: string): Promise<{ id: string; name: stri
   return viewer;
 }
 
+export const fetchViewer = testAuth;
+
 export async function fetchProjects(apiKey: string): Promise<Project[]> {
   const data = await gql(
     apiKey,

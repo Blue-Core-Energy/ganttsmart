@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, u
 import { backend } from '@/backend';
 import type { Theme } from '@/hooks/useTheme';
 import type { Project } from '@/types';
+import { Avatar } from '@/utils/avatar';
 import { exportAsPng, exportAsPdf } from '@/utils/export';
 import { isSafeUrl } from '@/utils/url';
 import CustomDropdown from './CustomDropdown';
@@ -25,6 +26,7 @@ interface Props {
   projectId: string;
   projects: Project[];
   onSelectProject: (id: string) => void;
+  userName?: string;
   linearToken?: string;
   linearProjectUrl?: string | null;
   isLinkedInLinear?: boolean;
@@ -222,6 +224,7 @@ export default memo(function Header({
   projectId,
   projects,
   onSelectProject,
+  userName,
   linearToken,
   linearProjectUrl,
   isLinkedInLinear,
@@ -439,19 +442,7 @@ export default memo(function Header({
             aria-label="Account"
             aria-expanded={showAccountMenu}
           >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-              <circle cx="12" cy="7" r="4" />
-            </svg>
+            <Avatar name={userName?.trim() || ''} size="sm" className="pointer-events-none" />
           </button>
           {showAccountMenu && (
             <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] max-w-[calc(100vw-1rem)] py-1">

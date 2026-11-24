@@ -12,7 +12,11 @@ export interface MockIssue {
 }
 
 /** Mocks Linear for one project; returns the due-date and start-date updates the app sends, by issue id. */
-export async function mockLinearIssues(page: Page, issues: MockIssue[]) {
+export async function mockLinearIssues(
+  page: Page,
+  issues: MockIssue[],
+  viewer: { id: string; name: string } | null = { id: 'usr-1', name: 'Demo User' },
+) {
   const dueUpdates: Array<{ id: string; dueDate: string }> = [];
   const startUpdates: Array<{ id: string; body: string }> = [];
   const descriptionOf = (i: MockIssue) => `${startTagOffsetDays(i.startOffset)}\n${i.title}`;
@@ -57,6 +61,10 @@ export async function mockLinearIssues(page: Page, issues: MockIssue[]) {
     };
 
     if (query.includes('projects(')) return reply({ projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } });
+    if (query.includes('viewer')) {
+      if (viewer) return reply({ viewer });
+      return reply({ viewer: null });
+    }
     if (query.includes('externalLinks')) {
       return reply({
         project: { url: 'https://linear.app/bluecoreenergy/project/demo', externalLinks: { nodes: [] } },

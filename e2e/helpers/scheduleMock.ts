@@ -11,10 +11,17 @@ export interface MockScheduleComment {
  * Mocks the GanttSmart schedule-comment GraphQL operations: the batched `ScheduleComments` read,
  * the per-issue `IssueSchedule` read, `commentCreate` and `commentUpdate`.
  */
-export function createScheduleMock(initial: { description?: string | null; dueDate?: string | null } = {}) {
+export function createScheduleMock(
+  initial: {
+    description?: string | null;
+    dueDate?: string | null;
+    viewer?: { id: string; name: string } | null;
+  } = {},
+) {
   const state = {
     description: initial.description ?? null,
     dueDate: initial.dueDate ?? null,
+    viewer: initial.viewer !== undefined ? initial.viewer : { id: 'usr-1', name: 'Demo User' },
     comments: [] as MockScheduleComment[],
     creates: [] as string[],
     updates: [] as string[],
@@ -29,6 +36,15 @@ export function createScheduleMock(initial: { description?: string | null; dueDa
   ): Promise<boolean> {
     const query = payload?.query ?? '';
     const variables = payload?.variables ?? {};
+
+    if (query.includes('viewer')) {
+      if (state.viewer) {
+        await respond(route, { viewer: state.viewer });
+      } else {
+        await respond(route, { viewer: null });
+      }
+      return true;
+    }
 
     if (query.includes('ScheduleComments')) {
       await respond(route, { issues: { nodes: [] } });

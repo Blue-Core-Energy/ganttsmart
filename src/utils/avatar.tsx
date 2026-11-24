@@ -68,7 +68,7 @@ export function Avatar({ name, size = 'md', className = '' }: AvatarProps) {
         backgroundColor: bgColor,
         lineHeight: 1,
       }}
-      title={name}
+      title={name.trim() || undefined}
     >
       {initials}
     </div>
