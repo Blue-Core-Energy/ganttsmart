@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => {
   const onAuthStateChange = vi.fn();
   const refreshSession = vi.fn();
   const signOut = vi.fn();
+  const signInWithOAuth = vi.fn();
   const invoke = vi.fn();
   const toastError = vi.fn();
 
@@ -26,7 +27,7 @@ const mocks = vi.hoisted(() => {
   }
   const from = vi.fn(() => builder);
 
-  return { getSession, onAuthStateChange, refreshSession, signOut, invoke, toastError, from, builder };
+  return { getSession, onAuthStateChange, refreshSession, signOut, signInWithOAuth, invoke, toastError, from, builder };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -36,6 +37,7 @@ vi.mock('@/lib/supabase', () => ({
       onAuthStateChange: mocks.onAuthStateChange,
       refreshSession: mocks.refreshSession,
       signOut: mocks.signOut,
+      signInWithOAuth: mocks.signInWithOAuth,
     },
     functions: {
       invoke: mocks.invoke,
@@ -100,6 +102,7 @@ describe('useSupabaseAuth', () => {
     mocks.onAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: vi.fn() } },
     });
+    mocks.signInWithOAuth.mockResolvedValue({ data: {}, error: null });
     mocks.builder.result = {
       data: { linear_access_token: 'lin_at_123', linear_token_expires_at: null },
       error: null,
@@ -107,6 +110,8 @@ describe('useSupabaseAuth', () => {
   });
 
   afterEach(async () => {
+    window.history.replaceState({}, '', '/');
+    window.sessionStorage.clear();
     for (const unmount of Array.from(cleanups)) {
       await unmount();
     }
@@ -175,6 +180,72 @@ describe('useSupabaseAuth', () => {
     expect(mocks.toastError).toHaveBeenCalledWith(expect.stringContaining('Network failure'));
     // Token in state is NOT cleared on failure
     expect(result.current.linearToken).toBe('lin_at_123');
+
+    await unmount();
+  });
+
+  it('signInWithKeycloak calls signInWithOAuth with keycloak provider and preserves ?project= deep link', async () => {
+    window.history.replaceState({}, '', '/?project=proj-secret');
+    window.sessionStorage.clear();
+
+    const { result, unmount } = await renderHook(() => useSupabaseAuth());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.signInWithKeycloak?.();
+    });
+
+    expect(mocks.signInWithOAuth).toHaveBeenCalledWith({
+      provider: 'keycloak',
+      options: {
+        scopes: 'openid',
+        redirectTo: `${window.location.origin}/app?project=proj-secret`,
+      },
+    });
+    expect(window.sessionStorage.getItem('linear_oauth_project')).toBe('proj-secret');
+
+    await unmount();
+  });
+
+  it('signInWithKeycloak calls signInWithOAuth without project param when not present in URL', async () => {
+    window.history.replaceState({}, '', '/');
+    window.sessionStorage.clear();
+
+    const { result, unmount } = await renderHook(() => useSupabaseAuth());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await result.current.signInWithKeycloak?.();
+    });
+
+    expect(mocks.signInWithOAuth).toHaveBeenCalledWith({
+      provider: 'keycloak',
+      options: {
+        scopes: 'openid',
+        redirectTo: `${window.location.origin}/app`,
+      },
+    });
+    expect(window.sessionStorage.getItem('linear_oauth_project')).toBeNull();
+
+    await unmount();
+  });
+
+  it('signInWithKeycloak throws when signInWithOAuth returns an error', async () => {
+    mocks.signInWithOAuth.mockResolvedValueOnce({
+      data: null,
+      error: new Error('Keycloak provider disabled'),
+    });
+
+    const { result, unmount } = await renderHook(() => useSupabaseAuth());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await expect(result.current.signInWithKeycloak?.()).rejects.toThrow('Keycloak provider disabled');
 
     await unmount();
   });

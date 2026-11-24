@@ -245,6 +245,16 @@ export function useSupabaseAuth(): AuthState {
     if (error) throw error;
   }, []);
 
+  const signInWithKeycloak = useCallback(async () => {
+    const project = readProjectParam(window.location.search);
+    if (project) savePendingOAuthProject(project);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: 'keycloak',
+      options: { scopes: 'openid', redirectTo: `${window.location.origin}${buildAppPathWithProject(project)}` },
+    });
+    if (error) throw error;
+  }, []);
+
   const signOut = useCallback(async () => {
     linearGenerationRef.current += 1;
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
@@ -284,6 +294,7 @@ export function useSupabaseAuth(): AuthState {
     signUp,
     signIn,
     signInWithGoogle,
+    signInWithKeycloak,
     signOut,
     refreshLinearToken,
     disconnectLinear,

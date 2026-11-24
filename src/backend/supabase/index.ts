@@ -5,9 +5,17 @@ import { useSupabaseAuth } from './useSupabaseAuth';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 
+const keycloakLogin = import.meta.env.VITE_AUTH_MODE === 'keycloak';
+
 export const backend: Backend = {
   kind: 'supabase',
-  capabilities: { sharing: true, passwordLogin: true, marketingPages: true, sharedDaysOff: false },
+  capabilities: {
+    sharing: true,
+    passwordLogin: !keycloakLogin,
+    marketingPages: true,
+    sharedDaysOff: false,
+    keycloakLogin,
+  },
   useAuth: useSupabaseAuth,
   linearRequest(token, body) {
     return fetch(LINEAR_API, {
