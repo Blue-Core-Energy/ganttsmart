@@ -9,7 +9,7 @@ test.describe('GanttSmart GCP app', () => {
     await blockFonts(page);
   });
 
-  test('redirects / to /app, shows Connect Linear with GCP sign-out note, and blocks share route', async ({ page }) => {
+  test('redirects / to /app, shows Connect Linear, and blocks share route', async ({ page }) => {
     const errors = trackErrors(page);
 
     await page.goto('/');
@@ -17,8 +17,8 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByRole('heading', { name: 'Connect to Linear' })).toBeVisible();
     await expect(page.getByText('dev@bluecore.energy')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Connect Linear Account' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
-    await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign out of GanttSmart', exact: true })).toBeVisible();
+    await expect(page.getByText('Signs out of GanttSmart only, not Google.')).toHaveCount(0);
 
     await page.goto('/share/some-token');
     await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
