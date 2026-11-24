@@ -10,7 +10,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-RUN VITE_BACKEND=gcp npm run build \
+RUN VITE_BACKEND=gcp npm run build:vite \
   && npm run build:server \
   && find dist -name '*.map' -delete
 
