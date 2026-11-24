@@ -18,8 +18,10 @@ import {
   NARROW_COLUMN_WIDTHS,
   MAX_FROZEN_WIDTH_RATIO,
   MOBILE_BREAKPOINT,
+  reconcileFiltersWithVisibleColumns,
   type ColumnKey,
 } from './scheduleColumns';
+import type { Filters } from '@/types';
 
 describe('column definitions', () => {
   it('gives every column a minimum no larger than its default', () => {
@@ -411,5 +413,79 @@ describe('computeStickyColumnOffsets', () => {
 
   it('respects MOBILE_BREAKPOINT constant at 768', () => {
     expect(MOBILE_BREAKPOINT).toBe(768);
+  });
+});
+
+describe('reconcileFiltersWithVisibleColumns', () => {
+  const baseFilters: Filters = {
+    search: 'manifold',
+    assignee: 'Alice',
+    status: 'In Progress',
+    dateFrom: '2026-05-01',
+    dateTo: '2026-05-15',
+    showCompleted: false,
+  };
+
+  it('keeps all filters when all filterable columns are visible', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'start', 'due'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(false);
+    expect(nextFilters).toEqual(baseFilters);
+  });
+
+  it('clears assignee filter when assignee column is hidden', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'status', 'due'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(true);
+    expect(nextFilters.assignee).toBe('');
+    expect(nextFilters.status).toBe('In Progress');
+    expect(nextFilters.dateFrom).toBe('2026-05-01');
+  });
+
+  it('clears status filter while preserving showCompleted when status column is hidden', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'assignee', 'due'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(true);
+    expect(nextFilters.status).toBe('');
+    expect(nextFilters.showCompleted).toBe(false);
+    expect(nextFilters.assignee).toBe('Alice');
+  });
+
+  it('preserves date range filter when start is hidden but due is visible', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'due'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(false);
+    expect(nextFilters.dateFrom).toBe('2026-05-01');
+    expect(nextFilters.dateTo).toBe('2026-05-15');
+  });
+
+  it('preserves date range filter when due is hidden but start is visible', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'assignee', 'status', 'start'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(false);
+    expect(nextFilters.dateFrom).toBe('2026-05-01');
+    expect(nextFilters.dateTo).toBe('2026-05-15');
+  });
+
+  it('clears date range filter when BOTH start and due columns are hidden', () => {
+    const visible: ColumnKey[] = ['id', 'task', 'assignee', 'status'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(true);
+    expect(nextFilters.dateFrom).toBe('');
+    expect(nextFilters.dateTo).toBe('');
+    expect(nextFilters.assignee).toBe('Alice');
+    expect(nextFilters.status).toBe('In Progress');
+  });
+
+  it('never clears search filter even if all optional columns are hidden', () => {
+    const visible: ColumnKey[] = ['id', 'task'];
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
+    expect(changed).toBe(true);
+    expect(nextFilters.search).toBe('manifold');
+    expect(nextFilters.assignee).toBe('');
+    expect(nextFilters.status).toBe('');
+    expect(nextFilters.dateFrom).toBe('');
+    expect(nextFilters.dateTo).toBe('');
+    expect(nextFilters.showCompleted).toBe(false);
   });
 });

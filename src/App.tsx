@@ -35,6 +35,7 @@ import {
   readProjectParam,
   syncProjectQueryParam,
 } from '@/utils/projectDeepLink';
+import { loadVisibleColumns, type ColumnKey } from '@/utils/scheduleColumns';
 import { hasActiveRowFilters } from '@/utils/tasks';
 
 function GanttView({
@@ -125,6 +126,7 @@ function GanttView({
 
   // Plan vs Actual overlay (dashed baseline ghost bars) — user preference, persisted
   const [showBaselines, setShowBaselines] = useState(() => localStorage.getItem('gantt_show_baselines') !== '0');
+  const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
   const handleShowBaselinesChange = useCallback((show: boolean) => {
     setShowBaselines(show);
     localStorage.setItem('gantt_show_baselines', show ? '1' : '0');
@@ -327,6 +329,7 @@ function GanttView({
         onShowExternalChange={setShowExternal}
         allowExternalEdits={allowExternalEdits}
         onAllowExternalEditsChange={setAllowExternalEdits}
+        statusColumnHidden={!selectedColumns.includes('status')}
       />
 
       <StatsRow tasks={filteredTasks} unscheduledTasks={unscheduledTasks} />
@@ -357,6 +360,12 @@ function GanttView({
           projectName={projectName}
           ignoreCollapsed={hasActiveRowFilters(filters)}
           daysOff={daysOff.entries}
+          filters={filters}
+          onFiltersChange={setFilters}
+          assignees={assignees}
+          statuses={statuses}
+          selectedColumns={selectedColumns}
+          onVisibleColumnsChange={setSelectedColumns}
         />
       </div>
 

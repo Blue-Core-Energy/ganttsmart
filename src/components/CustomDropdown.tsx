@@ -288,6 +288,7 @@ export default function CustomDropdown({
           <div
             id={listboxId}
             role="listbox"
+            data-custom-dropdown-listbox=""
             aria-label={ariaLabel || placeholder}
             className="overflow-y-auto py-1 flex-1"
           >

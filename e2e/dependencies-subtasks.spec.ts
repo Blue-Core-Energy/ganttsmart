@@ -692,8 +692,7 @@ test.describe('GanttSmart GCP app', () => {
     await expect(parentToggle).toBeEnabled();
 
     // Assignee filters count as filters too: Nate's sub-issues show up under the collapsed parent
-    await page.getByRole('button', { name: 'Filter', exact: true }).click();
-    await page.getByRole('button', { name: 'Any assignee' }).click();
+    await page.getByTestId('column-filter-assignee').click();
     await page.getByRole('option', { name: /Nate Jones/ }).click();
     await expect(page.locator('[data-task-bar="ENG-202"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-203"]')).toBeVisible();

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { InlineEditHandlers, Milestone, DayOff, Task, TimeScale } from '@/types';
+import type { InlineEditHandlers, Milestone, DayOff, Task, TimeScale, Filters } from '@/types';
 import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { Avatar } from '@/utils/avatar';
 import { priorityClass, priorityColors } from '@/utils/colors';
@@ -22,6 +22,7 @@ import {
   loadColumnWidths,
   loadVisibleColumns,
   normalizeVisibleColumns,
+  reconcileFiltersWithVisibleColumns,
   saveColumnWidths,
   saveVisibleColumns,
   totalColumnWidth,
@@ -36,6 +37,7 @@ import {
   MILESTONE_ROW_HEIGHT,
 } from '@/utils/milestones';
 import ColumnPicker from './ColumnPicker';
+import ColumnFilterPopover from './ColumnFilterPopover';
 import DependencyArrows from './DependencyArrows';
 import GanttRow from './GanttRow';
 import { openMilestonePanel } from './milestonePanelStore';
@@ -71,6 +73,18 @@ interface Props {
   ignoreCollapsed?: boolean;
   /** Shared days off: shaded on the timeline and skipped by workday math. Omit for none. */
   daysOff?: DayOff[];
+  /** Active task/schedule filters */
+  filters?: Filters;
+  /** Callback fired when filters change via column headers or clear actions */
+  onFiltersChange?: (filters: Filters) => void;
+  /** Available assignees for assignee column filter */
+  assignees?: string[];
+  /** Available workflow statuses for status column filter */
+  statuses?: string[];
+  /** Controlled visible column keys */
+  selectedColumns?: ColumnKey[];
+  /** Callback fired when visible column selection changes */
+  onVisibleColumnsChange?: (columns: ColumnKey[]) => void;
 }
 
 // Resize handle component
@@ -131,9 +145,37 @@ export default function GanttChart({
   projectName,
   ignoreCollapsed = false,
   daysOff,
+  filters,
+  onFiltersChange,
+  assignees,
+  statuses,
+  selectedColumns: propSelectedColumns,
+  onVisibleColumnsChange,
 }: Props) {
   const [unscheduledVisible, setUnscheduledVisible] = useState(true);
-  const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  const [internalSelectedColumns, setInternalSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
+  const selectedColumns = propSelectedColumns ?? internalSelectedColumns;
+  const [openFilterKey, setOpenFilterKey] = useState<ColumnKey | null>(null);
+  const filterTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const activeFilterAnchorRef = useRef<HTMLButtonElement | null>(null);
+  activeFilterAnchorRef.current = openFilterKey ? (filterTriggerRefs.current[openFilterKey] ?? null) : null;
+
+  const handleCloseFilterPopover = useCallback(
+    (restoreFocus?: boolean) => {
+      const trigger = openFilterKey ? filterTriggerRefs.current[openFilterKey] : null;
+      setOpenFilterKey(null);
+      if (restoreFocus && trigger && trigger.isConnected) {
+        trigger.focus();
+        requestAnimationFrame(() => {
+          if (trigger.isConnected && document.activeElement !== trigger) {
+            trigger.focus();
+          }
+        });
+      }
+    },
+    [openFilterKey],
+  );
+
   const [savedColWidths, setSavedColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
@@ -219,13 +261,40 @@ export default function GanttChart({
     setPickerOpen((open) => !open);
   }, []);
 
-  const changeVisibleColumns = useCallback((next: ColumnKey[]) => {
-    // Normalize up front so showing a column slots it into the canonical order
-    // immediately, rather than appending until the next reload
-    const normalized = normalizeVisibleColumns(next);
-    setSelectedColumns(normalized);
-    saveVisibleColumns(normalized);
-  }, []);
+  const changeVisibleColumns = useCallback(
+    (next: ColumnKey[]) => {
+      // Normalize up front so showing a column slots it into the canonical order
+      // immediately, rather than appending until the next reload
+      const normalized = normalizeVisibleColumns(next);
+      setInternalSelectedColumns(normalized);
+      onVisibleColumnsChange?.(normalized);
+      saveVisibleColumns(normalized);
+
+      if (filters && onFiltersChange) {
+        const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(filters, normalized);
+        if (changed) {
+          onFiltersChange(nextFilters);
+        }
+      }
+    },
+    [filters, onFiltersChange, onVisibleColumnsChange],
+  );
+
+  // Clear stranded active filters on desktop if columns arrive hidden
+  useEffect(() => {
+    if (isNarrowViewport || !filters || !onFiltersChange) return;
+    const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(filters, selectedColumns);
+    if (changed) {
+      onFiltersChange(nextFilters);
+    }
+  }, [isNarrowViewport, selectedColumns, filters, onFiltersChange]);
+
+  // Close open filter popover if viewport switches to narrow, tasks empty out, or column is hidden
+  useEffect(() => {
+    if (openFilterKey && (isNarrowViewport || !tasks.length || !visibleColumns.includes(openFilterKey))) {
+      setOpenFilterKey(null);
+    }
+  }, [openFilterKey, isNarrowViewport, tasks.length, visibleColumns]);
 
   // Milestone drag — live pixel offset for the diamond, committed on mouseup
   const [milestoneDrag, setMilestoneDrag] = useState<{ id: string; delta: number } | null>(null);
@@ -854,7 +923,26 @@ export default function GanttChart({
           </p>
           <div className="flex items-center justify-center gap-4 text-xs text-text-muted">
             <span>Try:</span>
-            <span className="px-2 py-1 bg-bg-hover rounded-md border border-border-primary">Clear filters</span>
+            {onFiltersChange ? (
+              <button
+                type="button"
+                onClick={() => {
+                  onFiltersChange({
+                    search: '',
+                    assignee: '',
+                    status: '',
+                    dateFrom: '',
+                    dateTo: '',
+                    showCompleted: true,
+                  });
+                }}
+                className="px-2 py-1 bg-bg-hover hover:bg-bg-hover/80 text-text-primary rounded-md border border-border-primary cursor-pointer transition-colors"
+              >
+                Clear filters
+              </button>
+            ) : (
+              <span className="px-2 py-1 bg-bg-hover rounded-md border border-border-primary">Clear filters</span>
+            )}
             <span className="px-2 py-1 bg-bg-hover rounded-md border border-border-primary">Switch project</span>
           </div>
         </div>
@@ -976,13 +1064,25 @@ export default function GanttChart({
                 const stickyLeft = stickyColumnInfo.offsets[key];
                 const isSticky = stickyLeft !== undefined;
                 const isLastFrozen = key === stickyColumnInfo.lastFrozenKey;
+                const isFilterable =
+                  (key === 'assignee' || key === 'status' || key === 'start' || key === 'due') &&
+                  Boolean(filters && onFiltersChange);
+                const isFilterActive = isFilterable
+                  ? key === 'assignee'
+                    ? Boolean(filters?.assignee)
+                    : key === 'status'
+                      ? Boolean(filters?.status || !filters?.showCompleted)
+                      : Boolean(filters?.dateFrom || filters?.dateTo)
+                  : false;
+                const isFilterOpen = openFilterKey === key;
 
                 return (
                   <th
                     key={key}
                     data-column-key={key}
                     data-frozen={isSticky ? 'true' : undefined}
-                    className={`${thBase} ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
+                    data-filter-active={isFilterActive ? 'true' : undefined}
+                    className={`${thBase} group/th overflow-hidden ${key === 'task' ? 'px-[18px]' : 'px-3'} ${
                       isSticky ? 'sticky top-0 z-[10]' : 'sticky top-0 z-[9]'
                     } ${isLastFrozen ? 'border-r-border-secondary shadow-[2px_0_4px_-1px_rgba(0,0,0,0.2)]' : ''}`}
                     style={{
@@ -994,7 +1094,7 @@ export default function GanttChart({
                     onContextMenu={togglePickerFromContextMenu}
                     title={i === 0 ? 'Right-click any column header to choose columns' : undefined}
                   >
-                    <span className="inline-flex items-center gap-1.5 max-w-full">
+                    <div className="flex items-center gap-1 min-w-0 w-full">
                       <span className="truncate">{getColumnDef(key).label}</span>
                       {/* Keyboard- and touch-reachable way to the same picker */}
                       {i === 0 && (
@@ -1006,7 +1106,50 @@ export default function GanttChart({
                           onChange={changeVisibleColumns}
                         />
                       )}
-                    </span>
+                      {isFilterable && (
+                        <button
+                          ref={(el) => {
+                            filterTriggerRefs.current[key] = el;
+                          }}
+                          type="button"
+                          data-testid={`column-filter-${key}`}
+                          data-export-hide
+                          aria-label={`Filter by ${key === 'start' || key === 'due' ? 'date range' : getColumnDef(key).label.toLowerCase()}`}
+                          aria-expanded={isFilterOpen}
+                          aria-haspopup="dialog"
+                          title={
+                            isFilterActive
+                              ? `${getColumnDef(key).label} filter active — click to edit`
+                              : `Filter by ${getColumnDef(key).label.toLowerCase()}`
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpenFilterKey((prev) => (prev === key ? null : key));
+                          }}
+                          className={`inline-flex items-center justify-center w-4 h-4 rounded transition-all cursor-pointer shrink-0 print:hidden focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${
+                            isFilterActive
+                              ? 'text-accent bg-accent/15 hover:bg-accent/25 opacity-100'
+                              : isFilterOpen
+                                ? 'text-accent bg-bg-hover opacity-100'
+                                : 'text-text-muted/70 hover:text-text-primary hover:bg-bg-hover opacity-40 group-hover/th:opacity-100 hover:opacity-100 focus-visible:opacity-100'
+                          }`}
+                        >
+                          <svg
+                            width="10"
+                            height="10"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="shrink-0"
+                          >
+                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                     {!isNarrowViewport && <ResizeHandle onResize={makeResizeHandler(key)} />}
                   </th>
                 );
@@ -1292,6 +1435,21 @@ export default function GanttChart({
           />
         </svg>
       </div>
+
+      {openFilterKey && filters && onFiltersChange && (
+        <ColumnFilterPopover
+          key={openFilterKey}
+          columnKey={openFilterKey}
+          anchorRef={activeFilterAnchorRef}
+          anchorKey={openFilterKey}
+          returnFocusRef={activeFilterAnchorRef}
+          onClose={handleCloseFilterPopover}
+          filters={filters}
+          onFiltersChange={onFiltersChange}
+          assignees={assignees ?? []}
+          statuses={statuses ?? []}
+        />
+      )}
     </div>
   );
 }

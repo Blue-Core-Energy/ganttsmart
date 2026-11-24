@@ -9,6 +9,7 @@ import Tooltip from '@/components/Tooltip';
 import { useSharedData } from '@/hooks/useSharedData';
 import { useTheme } from '@/hooks/useTheme';
 import { formatDate } from '@/utils/date';
+import { loadVisibleColumns, type ColumnKey } from '@/utils/scheduleColumns';
 import { hasActiveRowFilters } from '@/utils/tasks';
 
 function timeAgo(dateStr: string): string {
@@ -49,6 +50,7 @@ export default function SharedView() {
   } = useSharedData(shareToken || '');
 
   const [password, setPassword] = useState('');
+  const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
 
   // Keyboard zoom
   useEffect(() => {
@@ -177,7 +179,13 @@ export default function SharedView() {
         </div>
 
         {/* Filters */}
-        <FilterBar assignees={assignees} statuses={statuses} filters={filters} onFiltersChange={setFilters} />
+        <FilterBar
+          assignees={assignees}
+          statuses={statuses}
+          filters={filters}
+          onFiltersChange={setFilters}
+          statusColumnHidden={!selectedColumns.includes('status')}
+        />
 
         <StatsRow tasks={filteredTasks} unscheduledTasks={unscheduledTasks} />
         <Legend />
@@ -193,6 +201,14 @@ export default function SharedView() {
           timeScale={timeScale}
           projectName={projectName}
           ignoreCollapsed={hasActiveRowFilters(filters)}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
+          filters={filters}
+          onFiltersChange={setFilters}
+          assignees={assignees}
+          statuses={statuses}
+          selectedColumns={selectedColumns}
+          onVisibleColumnsChange={setSelectedColumns}
         />
         <MilestonePanel />
         <Tooltip />

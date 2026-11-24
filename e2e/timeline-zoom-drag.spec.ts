@@ -682,8 +682,16 @@ test.describe('GanttSmart GCP app', () => {
     const prev = page.getByRole('button', { name: /previous month/i });
     const next = page.getByRole('button', { name: /next month/i });
 
-    const openPicker = async () => {
-      await page.getByRole('button', { name: 'Filter', exact: true }).click();
+    const openDesktopPicker = async () => {
+      await page.getByTestId('column-filter-due').click();
+      await expect(popover).toBeVisible();
+    };
+
+    const openMobilePicker = async () => {
+      await page
+        .getByTestId('filter-bar')
+        .getByRole('button', { name: /Filter/ })
+        .click();
       await page.getByRole('button', { name: 'Date range' }).click();
       await expect(popover).toBeVisible();
     };
@@ -710,7 +718,7 @@ test.describe('GanttSmart GCP app', () => {
       });
 
     // Desktop: two months, arrows flanking the captions above the grid
-    await openPicker();
+    await openDesktopPicker();
     const desktop = await layout();
     expect(desktop.noHorizontalScroll).toBe(true);
     // The nav sits above the day grid rather than stacked inside it
@@ -732,17 +740,26 @@ test.describe('GanttSmart GCP app', () => {
 
     // Narrow viewport: one month, no horizontal scroll, inside the viewport
     await page.setViewportSize({ width: 375, height: 760 });
-    // The first Escape closes the date popover, the second the filter panel around it
+    // Escape closes the desktop popover
     await page.keyboard.press('Escape');
     await expect(popover).toHaveCount(0);
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
-    await openPicker();
+    await openMobilePicker();
     const mobile = await layout();
     expect(mobile.noHorizontalScroll).toBe(true);
     expect(mobile.navBottom).toBeLessThanOrEqual(mobile.gridTop);
     expect(mobile.popLeft).toBeGreaterThanOrEqual(0);
     expect(mobile.popRight).toBeLessThanOrEqual(375);
+
+    // Month arrows still navigate on mobile
+    const mobileCaption = popover
+      .locator('div')
+      .filter({ hasText: /^[A-Z][a-z]+ \d{4}$/ })
+      .first();
+    const firstMobileCaption = (await mobileCaption.textContent())!.trim();
+    await next.click();
+    await expect(mobileCaption).not.toHaveText(firstMobileCaption);
+    await prev.click();
+    await expect(mobileCaption).toHaveText(firstMobileCaption);
 
     expect(errors).toEqual([]);
   });
