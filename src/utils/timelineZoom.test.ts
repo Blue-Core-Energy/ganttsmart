@@ -144,6 +144,53 @@ describe('pointer-anchored zoom', () => {
     expect(anchoredScrollLeft({ anchorDayOffset: 0, pointerOffsetX: 900, fixedColsWidth, dayWidth: 28 })).toBe(0);
   });
 
+  it('clamps to maxScrollLeft when an upper bound is provided', () => {
+    const scroll = anchoredScrollLeft({
+      anchorDayOffset: 100,
+      pointerOffsetX: 100,
+      fixedColsWidth: 500,
+      dayWidth: 28,
+      maxScrollLeft: 1200,
+    });
+    // Unclamped would be 500 + 2800 - 100 = 3200; clamped is 1200
+    expect(scroll).toBe(1200);
+  });
+
+  it('keeps target scroll when target is <= maxScrollLeft', () => {
+    const scroll = anchoredScrollLeft({
+      anchorDayOffset: 10,
+      pointerOffsetX: 100,
+      fixedColsWidth: 500,
+      dayWidth: 28,
+      maxScrollLeft: 1200,
+    });
+    // Target is 500 + 280 - 100 = 680 <= 1200
+    expect(scroll).toBe(680);
+  });
+
+  it('clamps negative maxScrollLeft to 0', () => {
+    const scroll = anchoredScrollLeft({
+      anchorDayOffset: 10,
+      pointerOffsetX: 100,
+      fixedColsWidth: 500,
+      dayWidth: 28,
+      maxScrollLeft: -50,
+    });
+    expect(scroll).toBe(0);
+  });
+
+  it('ignores non-finite maxScrollLeft values (Infinity and NaN)', () => {
+    const base = {
+      anchorDayOffset: 10,
+      pointerOffsetX: 100,
+      fixedColsWidth: 500,
+      dayWidth: 28,
+    };
+    expect(anchoredScrollLeft({ ...base, maxScrollLeft: Number.POSITIVE_INFINITY })).toBe(680);
+    expect(anchoredScrollLeft({ ...base, maxScrollLeft: Number.NEGATIVE_INFINITY })).toBe(680);
+    expect(anchoredScrollLeft({ ...base, maxScrollLeft: Number.NaN })).toBe(680);
+  });
+
   it('survives the chart start moving, which happens when the granularity changes', () => {
     const chartStartMs = Date.UTC(2026, 10, 15);
     const anchorMs = dayOffsetToMs(chartStartMs, 17.5);
