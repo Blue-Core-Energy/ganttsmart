@@ -33,6 +33,7 @@ jobs:
       - run: VITE_BACKEND=gcp npm run build:vite
       - run: npm run build:server
       - run: npm test
+      - run: docker build -t ganttsmart-ci .
 
   prepare:
     name: prepare
