@@ -30,18 +30,29 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run build
-      - run: VITE_BACKEND=gcp npm run build
+      - run: VITE_BACKEND=gcp npm run build:vite
       - run: npm run build:server
       - run: npm test
 
-  browser:
-    name: browser (${{ matrix.browser }})
+  prepare:
+    name: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      playwright_version: ${{ steps.playwright-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: playwright-version
+        run: |
+          VERSION=$(node -e 'const fs = require("node:fs"); const pkg = JSON.parse(fs.readFileSync("package-lock.json", "utf8")); const v = pkg.packages?.["node_modules/@playwright/test"]?.version || pkg.dependencies?.["@playwright/test"]?.version; if (!v || !/^\d+\.\d+\.\d+/.test(v)) process.exit(1); console.log(v);')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  browser-chrome:
+    name: browser (chrome)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        browser: [chrome, firefox]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -51,19 +62,72 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci
-      - name: Install Playwright browser
+      - name: Install Playwright Chrome dependencies
         run: |
-          if [ "${{ matrix.browser }}" = "chrome" ] && [ -x /opt/google/chrome/chrome ]; then
+          if [ ! -x /opt/google/chrome/chrome ] || ldd /opt/google/chrome/chrome | grep "not found" >/dev/null; then
             npx playwright install-deps chrome
-          else
-            npx playwright install --with-deps "${{ matrix.browser }}"
+            if [ ! -x /opt/google/chrome/chrome ]; then
+              npx playwright install chrome
+            fi
           fi
-      - run: VITE_BACKEND=gcp npm run build
+      - run: VITE_BACKEND=gcp npm run build:vite
       - run: npm run build:server
-      - run: npx playwright test --project="${{ matrix.browser }}"
+      - run: npx playwright test --project=chrome
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: playwright-report-${{ matrix.browser }}
+          name: playwright-report-chrome
           path: playwright-report/
           retention-days: 7
+
+  browser-firefox-shard:
+    name: browser (firefox) shard ${{ matrix.shard }}/2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [prepare]
+    container:
+      image: mcr.microsoft.com/playwright:v${{ needs.prepare.outputs.playwright_version }}-noble
+      options: --init --ipc=host
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Ensure Playwright Firefox is installed
+        run: |
+          if ! ls -d /ms-playwright/firefox* >/dev/null 2>&1 && ! ls -d "$HOME/.cache/ms-playwright"/firefox* >/dev/null 2>&1; then
+            npx playwright install firefox
+          fi
+      - run: VITE_BACKEND=gcp npm run build:vite
+      - run: npm run build:server
+      - env:
+          HOME: /root
+        run: npx playwright test --project=firefox --shard=${{ matrix.shard }}/2
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-firefox-${{ matrix.shard }}
+          path: playwright-report/
+          retention-days: 7
+
+  browser-firefox:
+    name: browser (firefox)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    needs: [browser-firefox-shard]
+    if: always()
+    steps:
+      - name: Check shard results
+        run: |
+          if [ "${{ needs.browser-firefox-shard.result }}" != "success" ]; then
+            echo "browser (firefox) shards failed or were cancelled: ${{ needs.browser-firefox-shard.result }}"
+            exit 1
+          fi
