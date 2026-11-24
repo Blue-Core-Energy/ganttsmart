@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import GanttChart from './GanttChart';
-import type { Milestone, Task } from '@/types';
+import type { Milestone, Task, Filters } from '@/types';
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -200,5 +200,107 @@ describe('GanttChart unscheduled section and exports', () => {
 
     expect(html).toContain('No tasks to display');
     expect(html).not.toContain('<table');
+  });
+});
+
+describe('GanttChart column header filters', () => {
+  const baseFilters: Filters = {
+    search: '',
+    assignee: '',
+    status: '',
+    dateFrom: '',
+    dateTo: '',
+    showCompleted: true,
+  };
+
+  const defaultProps = {
+    tasks: [makeTask()],
+    unscheduledTasks: [],
+    milestones: [],
+    loading: false,
+    error: '',
+    dayWidth: 30,
+    timeScale: 'day' as const,
+    assignees: ['Alice', 'Bob'],
+    statuses: ['In Progress', 'Done'],
+  };
+
+  it('renders filter trigger buttons on filterable columns (assignee, status, due) when filters prop is provided', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...defaultProps,
+        filters: baseFilters,
+        onFiltersChange: vi.fn(),
+      }),
+    );
+    expect(html).toContain('data-testid="column-filter-assignee"');
+    expect(html).toContain('data-testid="column-filter-status"');
+    expect(html).toContain('data-testid="column-filter-due"');
+    // Non-filterable columns like task and id have no filter trigger button
+    expect(html).not.toContain('data-testid="column-filter-task"');
+    expect(html).not.toContain('data-testid="column-filter-id"');
+  });
+
+  it('marks column as active when that column has an active filter', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...defaultProps,
+        filters: { ...baseFilters, assignee: 'Alice' },
+        onFiltersChange: vi.fn(),
+      }),
+    );
+    const assigneeMatch = html.match(/<th[^>]*data-column-key="assignee"[^>]*>/);
+    expect(assigneeMatch).not.toBeNull();
+    expect(assigneeMatch![0]).toContain('data-filter-active="true"');
+
+    const statusMatch = html.match(/<th[^>]*data-column-key="status"[^>]*>/);
+    expect(statusMatch).not.toBeNull();
+    expect(statusMatch![0]).not.toContain('data-filter-active="true"');
+  });
+
+  it('marks BOTH start and due columns active when date range filter is set', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...defaultProps,
+        selectedColumns: ['task', 'start', 'due'],
+        filters: { ...baseFilters, dateFrom: '2026-05-01', dateTo: '2026-05-15' },
+        onFiltersChange: vi.fn(),
+      }),
+    );
+    const startMatch = html.match(/<th[^>]*data-column-key="start"[^>]*>/);
+    expect(startMatch).not.toBeNull();
+    expect(startMatch![0]).toContain('data-filter-active="true"');
+
+    const dueMatch = html.match(/<th[^>]*data-column-key="due"[^>]*>/);
+    expect(dueMatch).not.toBeNull();
+    expect(dueMatch![0]).toContain('data-filter-active="true"');
+  });
+
+  it('marks status column active when completed tasks are hidden', () => {
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...defaultProps,
+        filters: { ...baseFilters, showCompleted: false },
+        onFiltersChange: vi.fn(),
+      }),
+    );
+    const statusMatch = html.match(/<th[^>]*data-column-key="status"[^>]*>/);
+    expect(statusMatch).not.toBeNull();
+    expect(statusMatch![0]).toContain('data-filter-active="true"');
+  });
+
+  it('renders interactive Clear filters button in empty state when filters are active', () => {
+    const onFiltersChange = vi.fn();
+    const html = renderToStaticMarkup(
+      createElement(GanttChart, {
+        ...defaultProps,
+        tasks: [],
+        unscheduledTasks: [],
+        filters: { ...baseFilters, assignee: 'Alice' },
+        onFiltersChange,
+      }),
+    );
+    expect(html).toContain('Clear filters');
+    expect(html).toContain('<button type="button" class="px-2 py-1 bg-bg-hover');
   });
 });

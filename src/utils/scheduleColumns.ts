@@ -1,3 +1,5 @@
+import type { Filters } from '@/types';
+
 export type ColumnKey = 'task' | 'assignee' | 'status' | 'start' | 'due' | 'priority' | 'project' | 'progress' | 'id';
 
 export interface ColumnDef {
@@ -170,6 +172,45 @@ export function visibleColumnsForViewport(selected: ColumnKey[], options?: Viewp
 /** The widths to render, with the narrow-screen widths applied. Saved widths are never changed. */
 export function columnWidthsForViewport(widths: ColumnWidths, options?: ViewportOptions): ColumnWidths {
   return resolveIsNarrow(options) ? { ...widths, ...NARROW_COLUMN_WIDTHS } : widths;
+}
+
+/**
+ * Reconciles active filters when schedule columns are hidden or shown.
+ * When a column is hidden:
+ * - 'assignee' hidden -> clears filters.assignee
+ * - 'status' hidden -> clears filters.status and resets filters.showCompleted to true
+ * - BOTH 'start' and 'due' hidden -> clears filters.dateFrom and filters.dateTo
+ */
+export function reconcileFiltersWithVisibleColumns(
+  filters: Filters,
+  visibleColumns: ColumnKey[],
+): { nextFilters: Filters; changed: boolean } {
+  let changed = false;
+  const next = { ...filters };
+
+  if (!visibleColumns.includes('assignee') && next.assignee) {
+    next.assignee = '';
+    changed = true;
+  }
+  if (!visibleColumns.includes('status')) {
+    if (next.status) {
+      next.status = '';
+      changed = true;
+    }
+    if (!next.showCompleted) {
+      next.showCompleted = true;
+      changed = true;
+    }
+  }
+  if (!visibleColumns.includes('start') && !visibleColumns.includes('due')) {
+    if (next.dateFrom || next.dateTo) {
+      next.dateFrom = '';
+      next.dateTo = '';
+      changed = true;
+    }
+  }
+
+  return { nextFilters: next, changed };
 }
 
 /**

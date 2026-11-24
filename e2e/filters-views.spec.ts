@@ -254,13 +254,12 @@ test.describe('GanttSmart GCP app', () => {
     await search.fill('');
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
 
-    // Assignee and date range live in the single Filter dropdown
-    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
-    await filterButton.click();
-    await expect(page.getByRole('group', { name: 'Filters' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Date range' })).toBeVisible();
+    // Assignee filtering lives directly in the Assignee column header
+    const assigneeFilterBtn = page.getByTestId('column-filter-assignee');
+    await assigneeFilterBtn.click();
+    const assigneeDialog = page.getByRole('dialog', { name: 'Filter by assignee' });
+    await expect(assigneeDialog).toBeVisible();
 
-    await page.getByRole('button', { name: 'Any assignee' }).click();
     await page.getByRole('option', { name: /Nate Jones/ }).click();
     await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
     await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
@@ -270,16 +269,11 @@ test.describe('GanttSmart GCP app', () => {
         .filter({ hasText: /^1Active$/ })
         .first(),
     ).toBeVisible();
-    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
+    await expect(page.locator('th[data-column-key="assignee"]')).toHaveAttribute('data-filter-active', 'true');
 
-    // The open panel sits below the chip row, so "Clear all" stays clickable
-    const panel = page.getByRole('group', { name: 'Filters' });
+    // Active chips row displays the active filter and "Clear all" clears it
     const clearAll = page.getByRole('button', { name: 'Clear all' });
-    const panelBox = await panel.boundingBox();
-    const clearBox = await clearAll.boundingBox();
-    expect(panelBox).not.toBeNull();
-    expect(clearBox).not.toBeNull();
-    expect(clearBox!.y + clearBox!.height).toBeLessThanOrEqual(panelBox!.y);
+    await expect(clearAll).toBeVisible();
     await clearAll.click({ timeout: 5000 });
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
     await expect(
@@ -288,13 +282,14 @@ test.describe('GanttSmart GCP app', () => {
         .filter({ hasText: /^2Active$/ })
         .first(),
     ).toBeVisible();
-    await expect(filterButton).toHaveAttribute('title', 'Filter tasks by assignee, status, date range and completion');
+    await expect(page.locator('th[data-column-key="assignee"]')).not.toHaveAttribute('data-filter-active', 'true');
 
-    // Escape returns focus to the trigger and closes the panel
-    await expect(panel).toBeVisible();
+    // Reopen and verify Escape returns focus to the trigger and closes the popover
+    await assigneeFilterBtn.click();
+    await expect(page.getByRole('dialog', { name: 'Filter by assignee' })).toBeVisible();
     await page.keyboard.press('Escape');
-    await expect(panel).toHaveCount(0);
-    await expect(filterButton).toBeFocused();
+    await expect(page.getByRole('dialog', { name: 'Filter by assignee' })).toHaveCount(0);
+    await expect(assigneeFilterBtn).toBeFocused();
 
     // Header has no time-scale or zoom buttons; keyboard + / - still zooms
     await expect(page.getByRole('button', { name: 'week', exact: true })).toHaveCount(0);
@@ -635,18 +630,17 @@ test.describe('GanttSmart GCP app', () => {
         .first(),
     ).toBeVisible();
 
-    // Status filter, inside the Filter dropdown, excludes Duplicate / Rejected
-    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
-    await filterButton.click();
-    const statusTrigger = page.getByRole('button', { name: 'Any status', exact: true });
-    await statusTrigger.click();
+    // Status filter, inside the Status column header, excludes Duplicate / Rejected
+    const statusFilterTrigger = page.getByTestId('column-filter-status');
+    await statusFilterTrigger.click();
+    const statusDialog = page.getByRole('dialog', { name: 'Filter by status' });
+    await expect(statusDialog).toBeVisible();
     await expect(page.getByRole('option', { name: 'In Progress', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Todo', exact: true })).toBeVisible();
     await expect(page.getByRole('option', { name: 'Duplicate', exact: true })).toHaveCount(0);
     await expect(page.getByRole('option', { name: 'Rejected', exact: true })).toHaveCount(0);
-    await statusTrigger.click();
-    await filterButton.click();
-    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(statusDialog).toHaveCount(0);
 
     // DetailPanel excludes dependencies to ignored duplicate issues and excludes duplicate sub-issues
     await page.locator('[data-task-bar="ENG-101"]').click();
@@ -1279,10 +1273,10 @@ test.describe('GanttSmart GCP app', () => {
     await expect(page.getByText('(Completed)')).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // Completed toggle, inside the Filter dropdown, hides and restores completed tasks
-    const filterButton = page.getByRole('button', { name: 'Filter', exact: true });
-    await filterButton.click();
-    const completedToggle = page.getByRole('button', { name: 'Completed', exact: true });
+    // Completed toggle, inside the Status column filter, hides and restores completed tasks
+    const statusFilterBtn = page.getByTestId('column-filter-status');
+    await statusFilterBtn.click();
+    const completedToggle = page.getByRole('button', { name: /Completed tasks/ });
     await expect(completedToggle).toHaveAttribute('aria-pressed', 'true');
     await completedToggle.click();
     await expect(completedToggle).toHaveAttribute('aria-pressed', 'false');
@@ -1296,8 +1290,8 @@ test.describe('GanttSmart GCP app', () => {
     ).toBeVisible();
     await expect(page.getByText('Completed hidden')).toBeVisible();
 
-    // The Filter button surfaces the active filter count while the panel is open
-    await expect(filterButton).toHaveAttribute('title', 'Filter tasks — 1 active');
+    // The Status header surfaces the active filter indicator
+    await expect(page.locator('th[data-column-key="status"]')).toHaveAttribute('data-filter-active', 'true');
 
     await completedToggle.click();
     await expect(page.locator('[data-task-bar="ENG-100"]')).toBeVisible();
@@ -1309,9 +1303,9 @@ test.describe('GanttSmart GCP app', () => {
     ).toBeVisible();
     await expect(page.getByText('Completed hidden')).toHaveCount(0);
 
-    // Escape closes the panel and the bar no longer offers a grouping control
+    // Escape closes the popover and the bar no longer offers a grouping control
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('group', { name: 'Filters' })).toHaveCount(0);
+    await expect(page.getByRole('dialog', { name: 'Filter by status' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'No grouping' })).toHaveCount(0);
 
     // Arrows still render with no grouping control left to suppress them
@@ -2608,6 +2602,535 @@ test.describe('GanttSmart GCP app', () => {
     await expect(menu308).toBeVisible();
     await menu308.getByRole('option', { name: 'In Progress' }).click();
     await expect.poll(() => stateUpdates).toEqual(['uuid-306', 'uuid-303', 'uuid-305', 'uuid-308']);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('filters from column headers, displays active indicators on Start and Due, and clears filter when column is hidden', async ({
+    page,
+  }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                    {
+                      id: 'uuid-2',
+                      identifier: 'ENG-102',
+                      title: 'Pressure test rig',
+                      description: `${startTagOffsetDays(1)}\nTest details`,
+                      dueDate: isoOffsetDays(9),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-102',
+                      priority: 3,
+                      state: { name: 'Todo', type: 'unstarted' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Nate Jones' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [
+                  { id: 'st-1', name: 'Todo', type: 'unstarted', position: 0 },
+                  { id: 'st-2', name: 'In Progress', type: 'started', position: 1 },
+                  { id: 'st-3', name: 'Done', type: 'completed', position: 2 },
+                ],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+
+    // 1. Assignee filtering from header
+    const assigneeFilterBtn = page.getByTestId('column-filter-assignee');
+    await expect(assigneeFilterBtn).toBeVisible();
+    await assigneeFilterBtn.click();
+    await page.getByRole('option', { name: /Nate Jones/ }).click();
+
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toHaveCount(0);
+    await expect(page.locator('th[data-column-key="assignee"]')).toHaveAttribute('data-filter-active', 'true');
+
+    // 2. Hiding the Assignee column via ColumnPicker immediately clears its filter
+    await page.getByRole('button', { name: 'Choose columns' }).click();
+    const picker = page.getByRole('group', { name: 'Columns' });
+    await expect(picker).toBeVisible();
+    await picker.getByRole('checkbox', { name: 'Assignee' }).uncheck();
+    await page.keyboard.press('Escape');
+
+    // Both tasks are restored because hidden column filter was automatically cleared
+    await expect(page.locator('th[data-column-key="assignee"]')).toHaveCount(0);
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+    await expect(page.locator('[data-task-bar="ENG-102"]')).toBeVisible();
+
+    // 3. Date range filter from Due header and Start header:
+    // First, show Start date column so both Start and Due are visible
+    await page.getByRole('button', { name: 'Choose columns' }).click();
+    await picker.getByRole('checkbox', { name: 'Start date' }).check();
+    await picker.getByRole('checkbox', { name: 'Assignee' }).check();
+    await page.keyboard.press('Escape');
+
+    const dueFilterBtn = page.getByTestId('column-filter-due');
+    const startFilterBtn = page.getByTestId('column-filter-start');
+    await expect(dueFilterBtn).toBeVisible();
+    await expect(startFilterBtn).toBeVisible();
+
+    // Opening date range from Due header
+    await dueFilterBtn.click();
+    const dateDialog = page.getByRole('dialog', { name: 'Filter by date range' });
+    await expect(dateDialog).toBeVisible();
+    await dateDialog.getByRole('button', { name: 'Apply' }).click();
+    await expect(dateDialog).toHaveCount(0);
+
+    // 4. Status column hiding restores completed visibility and provides compact toggle if Status hidden
+    await page.getByTestId('column-filter-status').click();
+    const statusDialog = page.getByRole('dialog', { name: 'Filter by status' });
+    await expect(statusDialog).toBeVisible();
+    const completedToggle = statusDialog.getByRole('button', { name: /Completed tasks/ });
+    await completedToggle.click(); // Hide completed
+    await page.keyboard.press('Escape');
+    await expect(page.locator('th[data-column-key="status"]')).toHaveAttribute('data-filter-active', 'true');
+
+    // Now hide Status column via picker
+    await page.getByRole('button', { name: 'Choose columns' }).click();
+    await picker.getByRole('checkbox', { name: 'Status' }).uncheck();
+    await page.keyboard.press('Escape');
+
+    // Status column is hidden, showCompleted is reset to true (not stranded), and compact Completed button appears in FilterBar
+    await expect(page.locator('th[data-column-key="status"]')).toHaveCount(0);
+    const compactCompleted = page.getByTestId('filter-bar').getByRole('button', { name: 'Completed', exact: true });
+    await expect(compactCompleted).toBeVisible();
+    await expect(compactCompleted).toHaveAttribute('aria-pressed', 'true');
+
+    expect(errors).toEqual([]);
+  });
+
+  test('repositions header filter popovers during horizontal scroll', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(90),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [{ id: 'st-1', name: 'In Progress', type: 'started', position: 0 }],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/app');
+    await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
+
+    const dueFilterBtn = page.getByTestId('column-filter-due');
+    await dueFilterBtn.click();
+    const dialog = page.getByRole('dialog', { name: 'Filter by date range' });
+    await expect(dialog).toBeVisible();
+
+    const dialogBefore = (await dialog.boundingBox())!;
+    expect(dialogBefore).not.toBeNull();
+
+    // Scroll table horizontally
+    const scrollContainer = page.locator('#gantt-export-target');
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 150;
+    });
+
+    // Popover remains open (closeOnScroll={false}) and stays visible
+    await expect(dialog).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('renders compact mobile Filter menu on narrow viewports (< 768px)', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('gantt_onboarding_done', '1');
+      localStorage.setItem('gantt_theme', 'dark');
+      localStorage.setItem('linear_selected_project', 'proj-1');
+    });
+
+    await page.route('**/api/me', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ email: 'dev@bluecore.energy', linearConnected: true }),
+      });
+    });
+
+    await page.route('**/api/linear/graphql', async (route) => {
+      const payload = route.request().postDataJSON() as { query?: string } | null;
+      const query = payload?.query ?? '';
+      if (await defaultScheduleMock.handle(route, payload)) return;
+
+      if (query.includes('projects(')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { projects: { nodes: [{ id: 'proj-1', name: 'Demo Project' }] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('project(id:')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              project: {
+                name: 'Demo Project',
+                startDate: isoOffsetDays(-10),
+                targetDate: isoOffsetDays(20),
+                projectMilestones: { nodes: [] },
+                issues: {
+                  nodes: [
+                    {
+                      id: 'uuid-1',
+                      identifier: 'ENG-101',
+                      title: 'Design valve manifold',
+                      description: `${startTagOffsetDays(-2)}\nManifold details`,
+                      dueDate: isoOffsetDays(5),
+                      url: 'https://linear.app/bluecoreenergy/issue/ENG-101',
+                      priority: 2,
+                      state: { name: 'In Progress', type: 'started' },
+                      createdAt: '2026-01-01T00:00:00Z',
+                      completedAt: null,
+                      assignee: { name: 'Andrew Phillips' },
+                      team: { id: 'team-1' },
+                      projectMilestone: null,
+                    },
+                  ],
+                },
+                doneIssues: { nodes: [] },
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      if (query.includes('relations')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ data: { issues: { nodes: [] } } }),
+        });
+        return;
+      }
+
+      if (query.includes('workflowStates')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: {
+              workflowStates: {
+                nodes: [{ id: 'st-1', name: 'In Progress', type: 'started', position: 0 }],
+              },
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({ status: 400, body: JSON.stringify({ errors: [{ message: 'Unexpected query' }] }) });
+    });
+
+    // Set narrow mobile viewport
+    await page.setViewportSize({ width: 375, height: 667 });
+    await page.goto('/app');
+    await expect(page.locator('tr[data-task-id="ENG-101"]')).toBeVisible();
+
+    // On narrow screens, optional column headers are hidden (only id and task are shown)
+    await expect(page.locator('th[data-column-key="assignee"]')).toHaveCount(0);
+    await expect(page.locator('th[data-column-key="status"]')).toHaveCount(0);
+    await expect(page.locator('th[data-column-key="due"]')).toHaveCount(0);
+
+    // Compact Filter button is shown in FilterBar
+    const mobileFilterBtn = page.getByTestId('filter-bar').getByRole('button', { name: /^Filter/ });
+    await expect(mobileFilterBtn).toBeVisible();
+
+    await mobileFilterBtn.click();
+    const mobilePanel = page.getByRole('group', { name: 'Filters' });
+    await expect(mobilePanel).toBeVisible();
+
+    // Verify it stays within the 375px mobile viewport bounds
+    const box = (await mobilePanel.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(375);
+
+    // Contains Assignee, Status, Date range, and Completed controls
+    await expect(mobilePanel.getByText('Assignee')).toBeVisible();
+    await expect(mobilePanel.getByText('Status')).toBeVisible();
+    await expect(mobilePanel.getByText('Date range')).toBeVisible();
+    await expect(mobilePanel.getByRole('button', { name: 'Completed' })).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(mobilePanel).toHaveCount(0);
+
+    expect(errors).toEqual([]);
+  });
+
+  test('supports column header filtering in SharedView', async ({ page }) => {
+    const errors = trackErrors(page);
+
+    await page.route('**/functions/v1/share-roadmap', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            projectName: 'Shared Project',
+            cachedAt: '2026-01-01T00:00:00Z',
+            cachedData: {
+              projectName: 'Shared Project',
+              cachedAt: '2026-01-01T00:00:00Z',
+              tasks: [
+                {
+                  id: 'ENG-101',
+                  uuid: 'uuid-1',
+                  title: 'Design valve manifold',
+                  description: '',
+                  due: '2026-05-15',
+                  startDate: '2026-05-01',
+                  priorityVal: 2,
+                  priority: 'High',
+                  status: 'In Progress',
+                  statusType: 'started',
+                  assignee: 'Alice Smith',
+                  url: 'https://linear.app/test/issue/ENG-101',
+                  teamId: 'team-1',
+                  blocks: [],
+                  blockedBy: [],
+                  progress: 0,
+                  totalChildren: 0,
+                  completedChildren: 0,
+                },
+                {
+                  id: 'ENG-102',
+                  uuid: 'uuid-2',
+                  title: 'Pressure test rig',
+                  description: '',
+                  due: '2026-05-20',
+                  startDate: '2026-05-05',
+                  priorityVal: 3,
+                  priority: 'Medium',
+                  status: 'Todo',
+                  statusType: 'unstarted',
+                  assignee: 'Bob Jones',
+                  url: 'https://linear.app/test/issue/ENG-102',
+                  teamId: 'team-1',
+                  blocks: [],
+                  blockedBy: [],
+                  progress: 0,
+                  totalChildren: 0,
+                  completedChildren: 0,
+                },
+              ],
+              doneTasks: [],
+              unscheduledTasks: [],
+              milestones: [],
+            },
+          },
+        }),
+      });
+    });
+
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto('/share/test-share-token');
+    await expect(page.getByText('Shared Project Roadmap')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-101"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-102"]')).toBeVisible();
+
+    // Column header filters are present in SharedView
+    const assigneeFilterBtn = page.getByTestId('column-filter-assignee');
+    await expect(assigneeFilterBtn).toBeVisible();
+
+    await assigneeFilterBtn.click();
+    await page.getByRole('option', { name: /Bob Jones/ }).click();
+
+    // Filters interactive even in read-only SharedView
+    await expect(page.locator('tr[data-task-id="ENG-102"]')).toBeVisible();
+    await expect(page.locator('tr[data-task-id="ENG-101"]')).toHaveCount(0);
+    await expect(page.locator('th[data-column-key="assignee"]')).toHaveAttribute('data-filter-active', 'true');
+
+    // Filter chip shows in FilterBar
+    await expect(page.locator('[data-testid="filter-bar"]').getByText('Bob Jones')).toBeVisible();
 
     expect(errors).toEqual([]);
   });
