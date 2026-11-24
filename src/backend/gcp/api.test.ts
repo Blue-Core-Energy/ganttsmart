@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch, onSessionExpired, SessionExpiredError } from './api';
+import { apiFetch, deleteRequest, onSessionExpired, postJson, SessionExpiredError } from './api';
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -131,5 +131,111 @@ describe('apiFetch', () => {
     unsubscribe();
     await expect(apiFetch('/api/me')).rejects.toBeInstanceOf(SessionExpiredError);
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('deleteRequest', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends DELETE and drains the response body on 2xx', async () => {
+    const res = json(200, { ok: true });
+    const textSpy = vi.spyOn(res, 'text');
+    fetchMock.mockResolvedValue(res);
+
+    await expect(deleteRequest('/api/history/baselines/1')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith('/api/history/baselines/1', {
+      method: 'DELETE',
+      redirect: 'manual',
+      credentials: 'same-origin',
+    });
+    expect(textSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('tolerates response text drain rejection on 2xx without throwing', async () => {
+    const res = new Response(null, { status: 204 });
+    vi.spyOn(res, 'text').mockRejectedValue(new Error('stream closed'));
+    fetchMock.mockResolvedValue(res);
+
+    await expect(deleteRequest('/api/history/baselines/1')).resolves.toBeUndefined();
+  });
+
+  it('throws on non-2xx responses with error message from json body', async () => {
+    fetchMock.mockResolvedValue(json(500, { error: 'delete failed' }));
+
+    await expect(deleteRequest('/api/history/baselines/1')).rejects.toThrow('delete failed');
+  });
+
+  it('throws fallback status message on non-2xx responses without json body', async () => {
+    fetchMock.mockResolvedValue(new Response('Server Error', { status: 502 }));
+
+    await expect(deleteRequest('/api/history/baselines/1')).rejects.toThrow('Request failed (HTTP 502)');
+  });
+});
+
+describe('postJson', () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends POST with serialized json body and drains response on 2xx', async () => {
+    const res = json(200, { ok: true });
+    const textSpy = vi.spyOn(res, 'text');
+    fetchMock.mockResolvedValue(res);
+
+    await expect(postJson('/api/history/baselines', { name: 'v1' })).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith('/api/history/baselines', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'v1' }),
+      redirect: 'manual',
+      credentials: 'same-origin',
+    });
+    expect(textSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends POST without body when body is undefined and drains response on 2xx', async () => {
+    const res = json(200, { ok: true });
+    const textSpy = vi.spyOn(res, 'text');
+    fetchMock.mockResolvedValue(res);
+
+    await expect(postJson('/api/linear/sync')).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith('/api/linear/sync', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: undefined,
+      redirect: 'manual',
+      credentials: 'same-origin',
+    });
+    expect(textSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('tolerates response text drain rejection on 2xx without throwing', async () => {
+    const res = json(201, { id: '1' });
+    vi.spyOn(res, 'text').mockRejectedValue(new Error('stream aborted'));
+    fetchMock.mockResolvedValue(res);
+
+    await expect(postJson('/api/history/baselines', { name: 'v1' })).resolves.toBeUndefined();
+  });
+
+  it('throws on non-2xx responses with error message from json body', async () => {
+    fetchMock.mockResolvedValue(json(400, { error: 'invalid payload' }));
+
+    await expect(postJson('/api/history/baselines', { bad: true })).rejects.toThrow('invalid payload');
+  });
+
+  it('throws fallback status message on non-2xx responses without json body', async () => {
+    fetchMock.mockResolvedValue(new Response('Bad Gateway', { status: 502 }));
+
+    await expect(postJson('/api/history/baselines')).rejects.toThrow('Request failed (HTTP 502)');
   });
 });

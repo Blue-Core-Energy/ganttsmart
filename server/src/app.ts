@@ -33,6 +33,26 @@ const IMMUTABLE = 'public, max-age=31536000, immutable';
 /** Everything else (index.html, public/ files) must be revalidated so deploys take effect. */
 const NO_CACHE = 'no-cache';
 
+export const HSTS_HEADER = 'max-age=31536000; includeSubDomains';
+
+export const SECURITY_HEADERS = {
+  'Content-Security-Policy': [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' data: blob:",
+    "connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join('; '),
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+} as const;
+
 /**
  * Serves files under `root` with the given Cache-Control; falls through to the next handler when
  * no file matches. serveStatic refuses `..` segments, backslashes and any percent-encoding in the
@@ -61,6 +81,23 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.onError((err, c) => {
     log.error('Request failed', { error: describeError(err) });
     return c.json({ error: 'internal error' }, 500);
+  });
+
+  // Set standard security headers on every response.
+  app.use('*', async (c, next) => {
+    await next();
+    for (const [header, value] of Object.entries(SECURITY_HEADERS)) {
+      c.res.headers.set(header, value);
+    }
+    if (config.isProduction) {
+      c.res.headers.set('Strict-Transport-Security', HSTS_HEADER);
+    }
+  });
+
+  // Sensitive API responses must never be stored by intermediate caches or browsers.
+  app.use('/api/*', async (c, next) => {
+    await next();
+    c.res.headers.set('Cache-Control', 'no-store');
   });
 
   // 1. Every /api route requires an IAP identity. Any failure, expected or not, fails closed.
