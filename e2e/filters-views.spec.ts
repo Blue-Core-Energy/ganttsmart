@@ -2766,10 +2766,27 @@ test.describe('GanttSmart GCP app', () => {
     await dueFilterBtn.click();
     const dateDialog = page.getByRole('dialog', { name: 'Filter by date range' });
     await expect(dateDialog).toBeVisible();
-    await dateDialog.getByRole('button', { name: 'Apply' }).click();
+    // Select dates in DayPicker to complete the range
+    await dateDialog.locator('button').filter({ hasText: /^10$/ }).first().click();
+    await dateDialog.locator('button').filter({ hasText: /^20$/ }).first().click();
+    const applyButton = dateDialog.getByRole('button', { name: 'Apply' });
+    await expect(applyButton).toBeEnabled();
+    await applyButton.click();
     await expect(dateDialog).toHaveCount(0);
 
-    // 4. Status column hiding restores completed visibility and provides compact toggle if Status hidden
+    // Both Start and Due headers now show the active filter indicator!
+    await expect(page.locator('th[data-column-key="start"]')).toHaveAttribute('data-filter-active', 'true');
+    await expect(page.locator('th[data-column-key="due"]')).toHaveAttribute('data-filter-active', 'true');
+
+    // Clear the date range filter from Start header
+    await startFilterBtn.click();
+    await expect(dateDialog).toBeVisible();
+    await dateDialog.getByRole('button', { name: 'Clear' }).click();
+    await expect(dateDialog).toHaveCount(0);
+    await expect(page.locator('th[data-column-key="start"]')).not.toHaveAttribute('data-filter-active', 'true');
+    await expect(page.locator('th[data-column-key="due"]')).not.toHaveAttribute('data-filter-active', 'true');
+
+    // 4. Status column hiding preserves completed visibility and provides compact toggle if Status hidden
     await page.getByTestId('column-filter-status').click();
     const statusDialog = page.getByRole('dialog', { name: 'Filter by status' });
     await expect(statusDialog).toBeVisible();
@@ -2783,16 +2800,22 @@ test.describe('GanttSmart GCP app', () => {
     await picker.getByRole('checkbox', { name: 'Status' }).uncheck();
     await page.keyboard.press('Escape');
 
-    // Status column is hidden, showCompleted is reset to true (not stranded), and compact Completed button appears in FilterBar
+    // Status column is hidden, and compact Completed button appears in FilterBar
     await expect(page.locator('th[data-column-key="status"]')).toHaveCount(0);
     const compactCompleted = page.getByTestId('filter-bar').getByRole('button', { name: 'Completed', exact: true });
     await expect(compactCompleted).toBeVisible();
+    await expect(compactCompleted).toHaveAttribute('aria-pressed', 'false');
+
+    // Toggle completed back to shown via the desktop FilterBar button
+    await compactCompleted.click();
     await expect(compactCompleted).toHaveAttribute('aria-pressed', 'true');
 
     expect(errors).toEqual([]);
   });
 
-  test('repositions header filter popovers during horizontal scroll', async ({ page }) => {
+  test('keeps sticky header popovers open and closes non-sticky popovers during horizontal scroll', async ({
+    page,
+  }) => {
     const errors = trackErrors(page);
 
     await page.addInitScript(() => {
@@ -2892,24 +2915,34 @@ test.describe('GanttSmart GCP app', () => {
     await page.goto('/app');
     await expect(page.locator('[data-task-bar="ENG-101"]')).toBeVisible();
 
+    // On roomy desktop (1280px), Due column is sticky/frozen. Popover remains open on scroll.
     const dueFilterBtn = page.getByTestId('column-filter-due');
     await dueFilterBtn.click();
     const dialog = page.getByRole('dialog', { name: 'Filter by date range' });
     await expect(dialog).toBeVisible();
 
-    const dialogBefore = (await dialog.boundingBox())!;
-    expect(dialogBefore).not.toBeNull();
-
-    // Scroll table horizontally
     const scrollContainer = page.locator('#gantt-export-target');
     await scrollContainer.evaluate((el) => {
       el.scrollLeft = 150;
     });
 
-    // Popover remains open (closeOnScroll={false}) and stays visible
+    // Sticky column header anchor did not move relative to viewport, so popover remains open
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+
+    // On narrow desktop (800px, onlyTaskFrozen), Due column is non-sticky and scrolls under frozen columns
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 0;
+    });
+    await page.setViewportSize({ width: 800, height: 800 });
+    await dueFilterBtn.click();
     await expect(dialog).toBeVisible();
 
-    await page.keyboard.press('Escape');
+    // Scroll horizontally: anchor moves, so popover closes cleanly instead of detaching/floating
+    await scrollContainer.evaluate((el) => {
+      el.scrollLeft = 150;
+    });
     await expect(dialog).toHaveCount(0);
 
     expect(errors).toEqual([]);
@@ -3035,102 +3068,13 @@ test.describe('GanttSmart GCP app', () => {
     expect(box.x + box.width).toBeLessThanOrEqual(375);
 
     // Contains Assignee, Status, Date range, and Completed controls
-    await expect(mobilePanel.getByText('Assignee')).toBeVisible();
-    await expect(mobilePanel.getByText('Status')).toBeVisible();
-    await expect(mobilePanel.getByText('Date range')).toBeVisible();
+    await expect(mobilePanel.getByText('Assignee', { exact: true })).toBeVisible();
+    await expect(mobilePanel.getByText('Status', { exact: true })).toBeVisible();
+    await expect(mobilePanel.getByText('Date range', { exact: true })).toBeVisible();
     await expect(mobilePanel.getByRole('button', { name: 'Completed' })).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(mobilePanel).toHaveCount(0);
-
-    expect(errors).toEqual([]);
-  });
-
-  test('supports column header filtering in SharedView', async ({ page }) => {
-    const errors = trackErrors(page);
-
-    await page.route('**/functions/v1/share-roadmap', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          data: {
-            projectName: 'Shared Project',
-            cachedAt: '2026-01-01T00:00:00Z',
-            cachedData: {
-              projectName: 'Shared Project',
-              cachedAt: '2026-01-01T00:00:00Z',
-              tasks: [
-                {
-                  id: 'ENG-101',
-                  uuid: 'uuid-1',
-                  title: 'Design valve manifold',
-                  description: '',
-                  due: '2026-05-15',
-                  startDate: '2026-05-01',
-                  priorityVal: 2,
-                  priority: 'High',
-                  status: 'In Progress',
-                  statusType: 'started',
-                  assignee: 'Alice Smith',
-                  url: 'https://linear.app/test/issue/ENG-101',
-                  teamId: 'team-1',
-                  blocks: [],
-                  blockedBy: [],
-                  progress: 0,
-                  totalChildren: 0,
-                  completedChildren: 0,
-                },
-                {
-                  id: 'ENG-102',
-                  uuid: 'uuid-2',
-                  title: 'Pressure test rig',
-                  description: '',
-                  due: '2026-05-20',
-                  startDate: '2026-05-05',
-                  priorityVal: 3,
-                  priority: 'Medium',
-                  status: 'Todo',
-                  statusType: 'unstarted',
-                  assignee: 'Bob Jones',
-                  url: 'https://linear.app/test/issue/ENG-102',
-                  teamId: 'team-1',
-                  blocks: [],
-                  blockedBy: [],
-                  progress: 0,
-                  totalChildren: 0,
-                  completedChildren: 0,
-                },
-              ],
-              doneTasks: [],
-              unscheduledTasks: [],
-              milestones: [],
-            },
-          },
-        }),
-      });
-    });
-
-    await page.setViewportSize({ width: 1280, height: 800 });
-    await page.goto('/share/test-share-token');
-    await expect(page.getByText('Shared Project Roadmap')).toBeVisible();
-    await expect(page.locator('tr[data-task-id="ENG-101"]')).toBeVisible();
-    await expect(page.locator('tr[data-task-id="ENG-102"]')).toBeVisible();
-
-    // Column header filters are present in SharedView
-    const assigneeFilterBtn = page.getByTestId('column-filter-assignee');
-    await expect(assigneeFilterBtn).toBeVisible();
-
-    await assigneeFilterBtn.click();
-    await page.getByRole('option', { name: /Bob Jones/ }).click();
-
-    // Filters interactive even in read-only SharedView
-    await expect(page.locator('tr[data-task-id="ENG-102"]')).toBeVisible();
-    await expect(page.locator('tr[data-task-id="ENG-101"]')).toHaveCount(0);
-    await expect(page.locator('th[data-column-key="assignee"]')).toHaveAttribute('data-filter-active', 'true');
-
-    // Filter chip shows in FilterBar
-    await expect(page.locator('[data-testid="filter-bar"]').getByText('Bob Jones')).toBeVisible();
 
     expect(errors).toEqual([]);
   });

@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import AnchoredPopover from '@/components/AnchoredPopover';
 import type { Filters } from '@/types';
 import { Avatar } from '@/utils/avatar';
+import { MOBILE_BREAKPOINT } from '@/utils/scheduleColumns';
 import CustomDropdown from './CustomDropdown';
 import type { DropdownOption } from './CustomDropdown';
 import DateRangePicker from './DateRangePicker';
@@ -212,13 +213,13 @@ export default function FilterBar({
   isNarrow: isNarrowProp,
 }: Props) {
   const [internalIsNarrow, setInternalIsNarrow] = useState(() =>
-    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+    typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false,
   );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const mq = window.matchMedia('(max-width: 767px)');
-    const update = () => setInternalIsNarrow(mq.matches);
+    const mq = window.matchMedia(`(min-width: ${MOBILE_BREAKPOINT}px)`);
+    const update = () => setInternalIsNarrow(!mq.matches);
     update();
     mq.addEventListener('change', update);
     window.addEventListener('resize', update);
@@ -231,6 +232,12 @@ export default function FilterBar({
   const isNarrow = isNarrowProp ?? internalIsNarrow;
 
   const [filterOpen, setFilterOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isNarrow) {
+      setFilterOpen(false);
+    }
+  }, [isNarrow]);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const chipRowRef = useRef<HTMLDivElement>(null);

@@ -14,6 +14,7 @@ interface Props {
   onFiltersChange: (filters: Filters) => void;
   assignees: string[];
   statuses: string[];
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
 function formatYMD(d: Date): string {
@@ -112,6 +113,7 @@ export default function ColumnFilterPopover({
   onFiltersChange,
   assignees,
   statuses,
+  returnFocusRef,
 }: Props) {
   const isDateColumn = columnKey === 'start' || columnKey === 'due';
   const isAssigneeColumn = columnKey === 'assignee';
@@ -125,6 +127,7 @@ export default function ColumnFilterPopover({
     return (
       <DateRangeFilterPopover
         anchorRef={anchorRef}
+        returnFocusRef={returnFocusRef}
         onClose={onClose}
         dateFrom={filters.dateFrom}
         dateTo={filters.dateTo}
@@ -138,6 +141,7 @@ export default function ColumnFilterPopover({
     return (
       <AssigneeFilterPopover
         anchorRef={anchorRef}
+        returnFocusRef={returnFocusRef}
         onClose={onClose}
         assignees={assignees}
         selected={filters.assignee}
@@ -150,6 +154,7 @@ export default function ColumnFilterPopover({
   return (
     <StatusFilterPopover
       anchorRef={anchorRef}
+      returnFocusRef={returnFocusRef}
       onClose={onClose}
       statuses={statuses}
       selectedStatus={filters.status}
@@ -163,6 +168,7 @@ export default function ColumnFilterPopover({
 
 interface AssigneePopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   assignees: string[];
   selected: string;
@@ -170,7 +176,15 @@ interface AssigneePopoverProps {
   onClear: () => void;
 }
 
-function AssigneeFilterPopover({ anchorRef, onClose, assignees, selected, onSelect, onClear }: AssigneePopoverProps) {
+function AssigneeFilterPopover({
+  anchorRef,
+  returnFocusRef,
+  onClose,
+  assignees,
+  selected,
+  onSelect,
+  onClear,
+}: AssigneePopoverProps) {
   const [search, setSearch] = useState('');
   const dialogId = useId();
 
@@ -183,11 +197,14 @@ function AssigneeFilterPopover({ anchorRef, onClose, assignees, selected, onSele
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}
       gap={6}
-      closeOnScroll={false}
       viewportMargin={VIEWPORT_MARGIN}
+      onPlaced={(el) => {
+        el.querySelector<HTMLElement>('input, button[role="option"], button')?.focus();
+      }}
       id={dialogId}
       role="dialog"
       aria-label="Filter by assignee"
@@ -280,6 +297,7 @@ function AssigneeFilterPopover({ anchorRef, onClose, assignees, selected, onSele
 
 interface StatusPopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   statuses: string[];
   selectedStatus: string;
@@ -291,6 +309,7 @@ interface StatusPopoverProps {
 
 function StatusFilterPopover({
   anchorRef,
+  returnFocusRef,
   onClose,
   statuses,
   selectedStatus,
@@ -305,11 +324,14 @@ function StatusFilterPopover({
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}
       gap={6}
-      closeOnScroll={false}
       viewportMargin={VIEWPORT_MARGIN}
+      onPlaced={(el) => {
+        el.querySelector<HTMLElement>('button[role="option"], button')?.focus();
+      }}
       id={dialogId}
       role="dialog"
       aria-label="Filter by status"
@@ -411,6 +433,7 @@ function StatusFilterPopover({
 
 interface DatePopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   dateFrom: string;
   dateTo: string;
@@ -418,7 +441,15 @@ interface DatePopoverProps {
   onClear: () => void;
 }
 
-function DateRangeFilterPopover({ anchorRef, onClose, dateFrom, dateTo, onApply, onClear }: DatePopoverProps) {
+function DateRangeFilterPopover({
+  anchorRef,
+  returnFocusRef,
+  onClose,
+  dateFrom,
+  dateTo,
+  onApply,
+  onClear,
+}: DatePopoverProps) {
   const dialogId = useId();
   const [wideEnough, setWideEnough] = useState(
     () => typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches,
@@ -454,6 +485,7 @@ function DateRangeFilterPopover({ anchorRef, onClose, dateFrom, dateTo, onApply,
   };
 
   const hasRange = Boolean(dateFrom || dateTo);
+  const draftComplete = Boolean(draft?.from && draft?.to);
   const draftLabel = draft?.from
     ? draft.to
       ? `${formatDisplay(draft.from)} – ${formatDisplay(draft.to)}`
@@ -463,11 +495,14 @@ function DateRangeFilterPopover({ anchorRef, onClose, dateFrom, dateTo, onApply,
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}
       gap={6}
-      closeOnScroll={false}
       viewportMargin={VIEWPORT_MARGIN}
+      onPlaced={(el) => {
+        el.querySelector<HTMLElement>('button[tabindex="0"], button')?.focus();
+      }}
       id={dialogId}
       role="dialog"
       aria-label="Filter by date range"
@@ -530,7 +565,12 @@ function DateRangeFilterPopover({ anchorRef, onClose, dateFrom, dateTo, onApply,
           <button
             type="button"
             onClick={handleApply}
-            className="px-3 py-1 rounded bg-accent text-white text-xs font-medium cursor-pointer hover:bg-accent/90 transition-colors shadow-sm"
+            disabled={!draftComplete}
+            className={`px-3 py-1 rounded text-white text-xs font-medium transition-colors shadow-sm ${
+              draftComplete
+                ? 'bg-accent cursor-pointer hover:bg-accent/90'
+                : 'bg-accent/50 cursor-not-allowed opacity-60'
+            }`}
           >
             Apply
           </button>

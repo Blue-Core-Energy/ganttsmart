@@ -178,7 +178,7 @@ export function columnWidthsForViewport(widths: ColumnWidths, options?: Viewport
  * Reconciles active filters when schedule columns are hidden or shown.
  * When a column is hidden:
  * - 'assignee' hidden -> clears filters.assignee
- * - 'status' hidden -> clears filters.status and resets filters.showCompleted to true
+ * - 'status' hidden -> clears filters.status (showCompleted remains editable via FilterBar)
  * - BOTH 'start' and 'due' hidden -> clears filters.dateFrom and filters.dateTo
  */
 export function reconcileFiltersWithVisibleColumns(
@@ -195,10 +195,6 @@ export function reconcileFiltersWithVisibleColumns(
   if (!visibleColumns.includes('status')) {
     if (next.status) {
       next.status = '';
-      changed = true;
-    }
-    if (!next.showCompleted) {
-      next.showCompleted = true;
       changed = true;
     }
   }

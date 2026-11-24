@@ -199,4 +199,27 @@ describe('ColumnFilterPopover', () => {
     });
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('disables Apply button in Date Range popover until both from and to dates are selected', async () => {
+    await act(async () => {
+      root?.render(
+        <ColumnFilterPopover
+          columnKey="due"
+          anchorRef={{ current: anchorEl }}
+          onClose={vi.fn()}
+          filters={baseFilters}
+          onFiltersChange={vi.fn()}
+          assignees={[]}
+          statuses={[]}
+        />,
+      );
+    });
+
+    const popover = document.querySelector('[data-popover="date-range"]');
+    const applyBtn = Array.from(popover?.querySelectorAll('button') ?? []).find(
+      (b) => b.textContent?.trim() === 'Apply',
+    );
+    expect(applyBtn).toBeDefined();
+    expect(applyBtn?.hasAttribute('disabled')).toBe(true);
+  });
 });

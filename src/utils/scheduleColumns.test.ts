@@ -442,12 +442,12 @@ describe('reconcileFiltersWithVisibleColumns', () => {
     expect(nextFilters.dateFrom).toBe('2026-05-01');
   });
 
-  it('clears status filter and resets showCompleted to true when status column is hidden', () => {
+  it('clears status filter while preserving showCompleted when status column is hidden', () => {
     const visible: ColumnKey[] = ['id', 'task', 'assignee', 'due'];
     const { nextFilters, changed } = reconcileFiltersWithVisibleColumns(baseFilters, visible);
     expect(changed).toBe(true);
     expect(nextFilters.status).toBe('');
-    expect(nextFilters.showCompleted).toBe(true);
+    expect(nextFilters.showCompleted).toBe(false);
     expect(nextFilters.assignee).toBe('Alice');
   });
 
@@ -486,6 +486,6 @@ describe('reconcileFiltersWithVisibleColumns', () => {
     expect(nextFilters.status).toBe('');
     expect(nextFilters.dateFrom).toBe('');
     expect(nextFilters.dateTo).toBe('');
-    expect(nextFilters.showCompleted).toBe(true);
+    expect(nextFilters.showCompleted).toBe(false);
   });
 });

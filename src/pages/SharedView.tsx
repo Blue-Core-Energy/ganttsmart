@@ -201,6 +201,8 @@ export default function SharedView() {
           timeScale={timeScale}
           projectName={projectName}
           ignoreCollapsed={hasActiveRowFilters(filters)}
+          dateFrom={filters.dateFrom}
+          dateTo={filters.dateTo}
           filters={filters}
           onFiltersChange={setFilters}
           assignees={assignees}

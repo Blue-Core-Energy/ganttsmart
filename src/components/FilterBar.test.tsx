@@ -162,4 +162,105 @@ describe('FilterBar', () => {
       showCompleted: true,
     });
   });
+
+  it('keeps mobile Filter panel open when interacting with nested DateRangePicker', async () => {
+    const onFiltersChange = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <FilterBar
+          assignees={['Alice']}
+          statuses={['Done']}
+          filters={baseFilters}
+          onFiltersChange={onFiltersChange}
+          isNarrow={true}
+        />,
+      );
+    });
+
+    // Open mobile filter panel
+    const filterBtn = Array.from(container?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Filter'),
+    );
+    await act(async () => {
+      filterBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const mobilePanel = document.querySelector('[role="group"][aria-label="Filters"]');
+    expect(mobilePanel).not.toBeNull();
+
+    // Open nested DateRangePicker inside mobile filter panel
+    const dateRangeBtn = Array.from(mobilePanel?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Date range'),
+    );
+    expect(dateRangeBtn).toBeDefined();
+    await act(async () => {
+      dateRangeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const datePopover = document.querySelector('[data-popover="date-range"]');
+    expect(datePopover).not.toBeNull();
+
+    // Clicking inside the nested DateRangePicker popover should NOT close the outer mobile filter panel
+    await act(async () => {
+      datePopover?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    });
+
+    expect(document.querySelector('[role="group"][aria-label="Filters"]')).not.toBeNull();
+  });
+
+  it('closes nested dropdown on Escape without closing the mobile Filter panel', async () => {
+    const onFiltersChange = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <FilterBar
+          assignees={['Alice']}
+          statuses={['Done']}
+          filters={baseFilters}
+          onFiltersChange={onFiltersChange}
+          isNarrow={true}
+        />,
+      );
+    });
+
+    // Open mobile filter panel
+    const filterBtn = Array.from(container?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Filter'),
+    );
+    await act(async () => {
+      filterBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const mobilePanel = document.querySelector('[role="group"][aria-label="Filters"]');
+    expect(mobilePanel).not.toBeNull();
+
+    // Open Assignee dropdown inside mobile filter panel
+    const assigneeBtn = Array.from(mobilePanel?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Any assignee'),
+    );
+    expect(assigneeBtn).toBeDefined();
+    await act(async () => {
+      assigneeBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(document.querySelector('[role="listbox"]')).not.toBeNull();
+
+    // Press Escape — should close the dropdown (role="listbox") while keeping the mobile Filter panel open
+    await act(async () => {
+      const target = document.activeElement ?? document.body;
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.querySelector('[role="group"][aria-label="Filters"]')).not.toBeNull();
+
+    // A second Escape now closes the mobile Filter panel
+    await act(async () => {
+      const target = document.activeElement ?? document.body;
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(document.querySelector('[role="group"][aria-label="Filters"]')).toBeNull();
+  });
 });

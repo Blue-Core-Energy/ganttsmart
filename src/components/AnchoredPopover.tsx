@@ -75,7 +75,13 @@ function isFocusable(el: HTMLElement | null): boolean {
   return false;
 }
 
-const openPopoverStack: Array<() => void> = [];
+interface OpenPopoverEntry {
+  close: (restoreFocus: boolean) => void;
+  getElement: () => HTMLElement | null;
+  getAnchor: () => Element | null;
+}
+
+const openPopoverStack: OpenPopoverEntry[] = [];
 
 /**
  * Reusable portalled popover anchored to a trigger element.
@@ -244,14 +250,30 @@ const AnchoredPopover = forwardRef<HTMLDivElement, AnchoredPopoverProps>(functio
   useEffect(() => {
     if (!open) return;
 
-    const closeThis = () => close(true);
-    openPopoverStack.push(closeThis);
+    const entry: OpenPopoverEntry = {
+      close: (restoreFocus: boolean) => close(restoreFocus),
+      getElement: () => internalPopoverRef.current,
+      getAnchor: () => anchorRef.current,
+    };
+    openPopoverStack.push(entry);
 
     const onOutsidePress = (e: Event) => {
       const target = (e as MouseEvent | PointerEvent).target as Node | null;
       if (!target) return;
       if (internalPopoverRef.current?.contains(target) || anchorRef.current?.contains(target)) {
         return;
+      }
+      // If the target is inside any popover stacked above this one (or its anchor), ignore outside press
+      const myIndex = openPopoverStack.lastIndexOf(entry);
+      if (myIndex !== -1) {
+        for (let i = myIndex + 1; i < openPopoverStack.length; i++) {
+          const higher = openPopoverStack[i];
+          const el = higher.getElement();
+          const anchor = higher.getAnchor();
+          if ((el && el.contains(target)) || (anchor && anchor.contains(target))) {
+            return;
+          }
+        }
       }
       close(false);
     };
@@ -273,10 +295,12 @@ const AnchoredPopover = forwardRef<HTMLDivElement, AnchoredPopoverProps>(functio
     const onKeyDownGlobal = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (e.isComposing || e.defaultPrevented) return;
-      if (openPopoverStack[openPopoverStack.length - 1] !== closeThis) return;
+      if (openPopoverStack[openPopoverStack.length - 1] !== entry) return;
+      // If a nested [role="listbox"] (e.g. CustomDropdown open inside the popover) exists, let it handle Escape first
+      if (internalPopoverRef.current?.querySelector('[role="listbox"]')) return;
       e.preventDefault();
       e.stopPropagation();
-      closeThis();
+      entry.close(true);
     };
 
     document.addEventListener('pointerdown', onOutsidePress, true);
@@ -285,7 +309,7 @@ const AnchoredPopover = forwardRef<HTMLDivElement, AnchoredPopoverProps>(functio
     window.addEventListener('keydown', onKeyDownGlobal, true);
 
     return () => {
-      const idx = openPopoverStack.lastIndexOf(closeThis);
+      const idx = openPopoverStack.lastIndexOf(entry);
       if (idx !== -1) {
         openPopoverStack.splice(idx, 1);
       }
