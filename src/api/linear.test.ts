@@ -30,6 +30,8 @@ import {
   createProjectExternalLink,
   FeedbackTargetNotFoundError,
   clearAssignableUsersCache,
+  DebounceCancelled,
+  debouncedApiCall,
   fetchAssignableUsers,
   fetchIssues,
   fetchProjectExternalLinks,
@@ -2207,18 +2209,31 @@ describe('schedule mutations', () => {
     );
   }
 
+  async function runDebounced<T>(action: () => Promise<T>): Promise<T> {
+    const promise = action();
+    promise.catch(() => {});
+    await vi.advanceTimersByTimeAsync(300);
+    return await promise;
+  }
+
   beforeEach(() => {
+    vi.useFakeTimers();
     linearRequestMock.mockReset();
     calls = [];
     issue = { description: null, dueDate: null, updatedAt: '2026-11-01T00:00:00Z', comments: [] };
     installBackend();
   });
 
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
   it('creates a schedule comment with both dates, preserving the native dueDate when only start changes', async () => {
     issue.dueDate = '2026-12-10';
     issue.description = 'Plan\nstart: 01-12-26';
 
-    await updateIssueStartDate('tok', 'uuid-1', '2026-12-03');
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-03'));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'commentCreate']);
     expect(calls[1].variables).toEqual({
@@ -2231,12 +2246,12 @@ describe('schedule mutations', () => {
   });
 
   it('creates a start-only comment when no dates exist, and preserves a legacy description start on due updates', async () => {
-    await updateIssueStartDate('tok', 'uuid-1', '2026-12-03');
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-03'));
     expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-03');
 
     calls = [];
     issue = { description: 'start: 01-12-26', dueDate: null, updatedAt: '2026-11-01T00:00:00Z', comments: [] };
-    await updateIssueDueDate('tok', 'uuid-2', '2026-12-09');
+    await runDebounced(() => updateIssueDueDate('tok', 'uuid-2', '2026-12-09'));
     expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentCreate']);
     expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-01\nend: 2026-12-09');
   });
@@ -2254,7 +2269,7 @@ describe('schedule mutations', () => {
     ];
     issue.updatedAt = '2026-11-03T00:00:00Z';
 
-    await updateIssueStartDate('tok', 'uuid-1', '2026-12-02');
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-02'));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'commentUpdate']);
     expect(calls[1].variables).toEqual({
@@ -2275,7 +2290,7 @@ describe('schedule mutations', () => {
       },
     ];
 
-    await updateIssueDueDate('tok', 'uuid-1', '2026-12-15');
+    await runDebounced(() => updateIssueDueDate('tok', 'uuid-1', '2026-12-15'));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
     expect(calls[1].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
@@ -2295,7 +2310,7 @@ describe('schedule mutations', () => {
       },
     ];
 
-    await updateIssueStartDate('tok', 'uuid-1', '2026-12-02');
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-02'));
     expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-02\nend: 2026-12-20');
   });
 
@@ -2303,10 +2318,12 @@ describe('schedule mutations', () => {
     issue.dueDate = '2026-12-10';
     issue.description = 'start: 01-12-26';
 
-    await Promise.all([
-      updateIssueStartDate('tok', 'uuid-1', '2026-12-03'),
-      updateIssueDueDate('tok', 'uuid-1', '2026-12-12'),
-    ]);
+    await runDebounced(() =>
+      Promise.all([
+        updateIssueStartDate('tok', 'uuid-1', '2026-12-03'),
+        updateIssueDueDate('tok', 'uuid-1', '2026-12-12'),
+      ]),
+    );
 
     expect(calls.filter((c) => c.kind === 'commentCreate')).toHaveLength(1);
     expect(calls.filter((c) => c.kind === 'commentUpdate')).toHaveLength(1);
@@ -2322,8 +2339,10 @@ describe('schedule mutations', () => {
     linearRequestMock.mockImplementationOnce(async () => {
       throw new Error('Linear down');
     });
-    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-03')).rejects.toThrow('Linear down');
-    await updateIssueStartDate('tok', 'uuid-1', '2026-12-04');
+    await expect(runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-03'))).rejects.toThrow(
+      'Linear down',
+    );
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-04'));
     expect(issue.comments[0].body).toBe('**GanttSmart Schedule**\nstart: 2026-12-04');
   });
 
@@ -2332,7 +2351,9 @@ describe('schedule mutations', () => {
       if (body.query.includes('IssueSchedule')) return jsonResponse({ issue: { comments: { nodes: [] } } });
       return jsonResponse({ commentCreate: { success: false } });
     });
-    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-03')).rejects.toThrow(/schedule comment/);
+    await expect(runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-03'))).rejects.toThrow(
+      /schedule comment/,
+    );
   });
 
   it('clearing start date strips legacy description tag and updates comment in place when end remains', async () => {
@@ -2347,7 +2368,7 @@ describe('schedule mutations', () => {
       },
     ];
 
-    await updateIssueStartDate('tok', 'uuid-1', null);
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', null));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
     expect(calls[1].variables).toEqual({ id: 'uuid-1', description: 'Plan notes' });
@@ -2371,7 +2392,7 @@ describe('schedule mutations', () => {
       },
     ];
 
-    await updateIssueStartDate('tok', 'uuid-1', null);
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', null));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'commentDelete']);
     expect(calls[1].variables).toEqual({ id: 'sched-1' });
@@ -2380,7 +2401,7 @@ describe('schedule mutations', () => {
 
   it('rejects setting a start date after the issue due date', async () => {
     issue.dueDate = '2026-12-10';
-    await expect(updateIssueStartDate('tok', 'uuid-1', '2026-12-15')).rejects.toThrow(
+    await expect(runDebounced(() => updateIssueStartDate('tok', 'uuid-1', '2026-12-15'))).rejects.toThrow(
       'Start date cannot be after due date.',
     );
   });
@@ -2404,7 +2425,9 @@ describe('schedule mutations', () => {
       }
       throw new Error(`Unexpected query: ${body.query}`);
     });
-    await expect(updateIssueStartDate('tok', 'uuid-1', null)).rejects.toThrow(/schedule comment deletion/);
+    await expect(runDebounced(() => updateIssueStartDate('tok', 'uuid-1', null))).rejects.toThrow(
+      /schedule comment deletion/,
+    );
   });
 
   it('throws when Linear does not confirm description update', async () => {
@@ -2418,7 +2441,7 @@ describe('schedule mutations', () => {
       }
       throw new Error(`Unexpected query: ${body.query}`);
     });
-    await expect(updateIssueStartDate('tok', 'uuid-1', null)).rejects.toThrow(/description update/);
+    await expect(runDebounced(() => updateIssueStartDate('tok', 'uuid-1', null))).rejects.toThrow(/description update/);
   });
 
   it('clearing legacy-only start tag with no existing comment strips tag without creating a schedule comment', async () => {
@@ -2426,7 +2449,7 @@ describe('schedule mutations', () => {
     issue.description = 'Plan\nstart: 01-12-26';
     issue.comments = [];
 
-    await updateIssueStartDate('tok', 'uuid-1', null);
+    await runDebounced(() => updateIssueStartDate('tok', 'uuid-1', null));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate']);
     expect(calls[1].variables).toEqual({ id: 'uuid-1', description: 'Plan' });
@@ -2446,7 +2469,7 @@ describe('schedule mutations', () => {
       },
     ];
 
-    await updateIssueSchedule('tok', 'uuid-1', { startDate: '2026-12-05', dueDate: '2026-12-15' });
+    await runDebounced(() => updateIssueSchedule('tok', 'uuid-1', { startDate: '2026-12-05', dueDate: '2026-12-15' }));
 
     expect(calls.map((c) => c.kind)).toEqual(['read', 'issueUpdate', 'commentUpdate']);
     expect(calls[1].variables).toEqual({ id: 'uuid-1', dueDate: '2026-12-15' });
@@ -2454,5 +2477,26 @@ describe('schedule mutations', () => {
       commentId: 'sched-1',
       body: '**GanttSmart Schedule**\nstart: 2026-12-05\nend: 2026-12-15',
     });
+  });
+
+  it('debounces rapid calls on the same key and rejects superseded calls with DebounceCancelled', async () => {
+    const fn1 = vi.fn().mockResolvedValue('first');
+    const fn2 = vi.fn().mockResolvedValue('second');
+
+    const p1 = debouncedApiCall('test-debounce', fn1, 300);
+    const assertion1 = expect(p1).rejects.toBeInstanceOf(DebounceCancelled);
+
+    await vi.advanceTimersByTimeAsync(200);
+    const p2 = debouncedApiCall('test-debounce', fn2, 300);
+    await assertion1;
+    expect(fn1).not.toHaveBeenCalled();
+
+    // At t = 300ms (100ms after p2), the reset timer must not have fired yet
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fn2).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(200);
+    await expect(p2).resolves.toBe('second');
+    expect(fn2).toHaveBeenCalledTimes(1);
   });
 });
