@@ -296,8 +296,8 @@ const AnchoredPopover = forwardRef<HTMLDivElement, AnchoredPopoverProps>(functio
       if (e.key !== 'Escape') return;
       if (e.isComposing || e.defaultPrevented) return;
       if (openPopoverStack[openPopoverStack.length - 1] !== entry) return;
-      // If a nested [role="listbox"] (e.g. CustomDropdown open inside the popover) exists, let it handle Escape first
-      if (internalPopoverRef.current?.querySelector('[role="listbox"]')) return;
+      // If an open CustomDropdown exists inside the popover, let it handle Escape first
+      if (internalPopoverRef.current?.querySelector('[data-custom-dropdown-listbox]')) return;
       e.preventDefault();
       e.stopPropagation();
       entry.close(true);

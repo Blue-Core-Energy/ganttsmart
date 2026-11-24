@@ -15,6 +15,7 @@ interface Props {
   assignees: string[];
   statuses: string[];
   returnFocusRef?: React.RefObject<HTMLElement | null>;
+  anchorKey?: unknown;
 }
 
 function formatYMD(d: Date): string {
@@ -114,6 +115,7 @@ export default function ColumnFilterPopover({
   assignees,
   statuses,
   returnFocusRef,
+  anchorKey,
 }: Props) {
   const isDateColumn = columnKey === 'start' || columnKey === 'due';
   const isAssigneeColumn = columnKey === 'assignee';
@@ -127,6 +129,7 @@ export default function ColumnFilterPopover({
     return (
       <DateRangeFilterPopover
         anchorRef={anchorRef}
+        anchorKey={`${anchorKey ?? columnKey}:${filters.dateFrom}:${filters.dateTo}`}
         returnFocusRef={returnFocusRef}
         onClose={onClose}
         dateFrom={filters.dateFrom}
@@ -141,6 +144,7 @@ export default function ColumnFilterPopover({
     return (
       <AssigneeFilterPopover
         anchorRef={anchorRef}
+        anchorKey={`${anchorKey ?? columnKey}:${filters.assignee}`}
         returnFocusRef={returnFocusRef}
         onClose={onClose}
         assignees={assignees}
@@ -154,6 +158,7 @@ export default function ColumnFilterPopover({
   return (
     <StatusFilterPopover
       anchorRef={anchorRef}
+      anchorKey={`${anchorKey ?? columnKey}:${filters.status}:${filters.showCompleted}`}
       returnFocusRef={returnFocusRef}
       onClose={onClose}
       statuses={statuses}
@@ -168,6 +173,7 @@ export default function ColumnFilterPopover({
 
 interface AssigneePopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  anchorKey?: unknown;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   assignees: string[];
@@ -178,6 +184,7 @@ interface AssigneePopoverProps {
 
 function AssigneeFilterPopover({
   anchorRef,
+  anchorKey,
   returnFocusRef,
   onClose,
   assignees,
@@ -197,6 +204,7 @@ function AssigneeFilterPopover({
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      anchorKey={anchorKey}
       returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}
@@ -297,6 +305,7 @@ function AssigneeFilterPopover({
 
 interface StatusPopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  anchorKey?: unknown;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   statuses: string[];
@@ -309,6 +318,7 @@ interface StatusPopoverProps {
 
 function StatusFilterPopover({
   anchorRef,
+  anchorKey,
   returnFocusRef,
   onClose,
   statuses,
@@ -324,6 +334,7 @@ function StatusFilterPopover({
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      anchorKey={anchorKey}
       returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}
@@ -433,6 +444,7 @@ function StatusFilterPopover({
 
 interface DatePopoverProps {
   anchorRef: React.RefObject<Element | null>;
+  anchorKey?: unknown;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   dateFrom: string;
@@ -443,6 +455,7 @@ interface DatePopoverProps {
 
 function DateRangeFilterPopover({
   anchorRef,
+  anchorKey,
   returnFocusRef,
   onClose,
   dateFrom,
@@ -495,6 +508,7 @@ function DateRangeFilterPopover({
   return (
     <AnchoredPopover
       anchorRef={anchorRef}
+      anchorKey={anchorKey}
       returnFocusRef={returnFocusRef}
       open={true}
       onClose={onClose}

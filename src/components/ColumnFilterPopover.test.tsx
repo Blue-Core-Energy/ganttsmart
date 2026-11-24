@@ -222,4 +222,52 @@ describe('ColumnFilterPopover', () => {
     expect(applyBtn).toBeDefined();
     expect(applyBtn?.hasAttribute('disabled')).toBe(true);
   });
+
+  it('closes Assignee filter popover on Escape with restoreFocus true', async () => {
+    const onClose = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <ColumnFilterPopover
+          columnKey="assignee"
+          anchorRef={{ current: anchorEl }}
+          onClose={onClose}
+          filters={baseFilters}
+          onFiltersChange={vi.fn()}
+          assignees={['Alice Smith']}
+          statuses={[]}
+        />,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
+
+  it('closes Status filter popover on Escape with restoreFocus true', async () => {
+    const onClose = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <ColumnFilterPopover
+          columnKey="status"
+          anchorRef={{ current: anchorEl }}
+          onClose={onClose}
+          filters={baseFilters}
+          onFiltersChange={vi.fn()}
+          assignees={[]}
+          statuses={['In Progress']}
+        />,
+      );
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(onClose).toHaveBeenCalledWith(true);
+  });
 });

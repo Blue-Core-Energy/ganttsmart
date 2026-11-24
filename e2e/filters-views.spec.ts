@@ -3070,7 +3070,7 @@ test.describe('GanttSmart GCP app', () => {
     // Contains Assignee, Status, Date range, and Completed controls
     await expect(mobilePanel.getByText('Assignee', { exact: true })).toBeVisible();
     await expect(mobilePanel.getByText('Status', { exact: true })).toBeVisible();
-    await expect(mobilePanel.getByText('Date range', { exact: true })).toBeVisible();
+    await expect(mobilePanel.getByRole('button', { name: 'Date range', exact: true })).toBeVisible();
     await expect(mobilePanel.getByRole('button', { name: 'Completed' })).toBeVisible();
 
     await page.keyboard.press('Escape');

@@ -159,6 +159,23 @@ export default function GanttChart({
   const filterTriggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const activeFilterAnchorRef = useRef<HTMLButtonElement | null>(null);
   activeFilterAnchorRef.current = openFilterKey ? (filterTriggerRefs.current[openFilterKey] ?? null) : null;
+
+  const handleCloseFilterPopover = useCallback(
+    (restoreFocus?: boolean) => {
+      const trigger = openFilterKey ? filterTriggerRefs.current[openFilterKey] : null;
+      setOpenFilterKey(null);
+      if (restoreFocus && trigger && trigger.isConnected) {
+        trigger.focus();
+        requestAnimationFrame(() => {
+          if (trigger.isConnected && document.activeElement !== trigger) {
+            trigger.focus();
+          }
+        });
+      }
+    },
+    [openFilterKey],
+  );
+
   const [savedColWidths, setSavedColWidths] = useState<ColumnWidths>(loadColumnWidths);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [selectedArrow, setSelectedArrow] = useState<{ sourceId: string; targetId: string } | null>(null);
@@ -1424,8 +1441,9 @@ export default function GanttChart({
           key={openFilterKey}
           columnKey={openFilterKey}
           anchorRef={activeFilterAnchorRef}
+          anchorKey={openFilterKey}
           returnFocusRef={activeFilterAnchorRef}
-          onClose={() => setOpenFilterKey(null)}
+          onClose={handleCloseFilterPopover}
           filters={filters}
           onFiltersChange={onFiltersChange}
           assignees={assignees ?? []}
