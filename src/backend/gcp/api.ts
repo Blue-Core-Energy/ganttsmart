@@ -84,6 +84,7 @@ export async function postJsonForJson<T>(path: string, body: unknown): Promise<T
 export async function deleteRequest(path: string): Promise<void> {
   const res = await apiFetch(path, { method: 'DELETE' });
   if (!res.ok) throw await failure(res);
+  await res.text().catch(() => {});
 }
 
 /** POST a JSON body; throws on any non-2xx response. */
@@ -94,4 +95,5 @@ export async function postJson(path: string, body?: unknown): Promise<void> {
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) throw await failure(res);
+  await res.text().catch(() => {});
 }
