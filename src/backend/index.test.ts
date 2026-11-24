@@ -13,6 +13,7 @@ describe('@/backend', () => {
       passwordLogin: true,
       marketingPages: true,
       sharedDaysOff: false,
+      keycloakLogin: false,
     });
   });
 });

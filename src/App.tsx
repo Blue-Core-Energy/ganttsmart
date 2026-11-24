@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AuthPage from '@/components/AuthPage';
+import KeycloakAuthPage from '@/components/KeycloakAuthPage';
 import FilterBar from '@/components/FilterBar';
 import GanttChart from '@/components/GanttChart';
 import Header from '@/components/Header';
@@ -436,6 +437,7 @@ export default function App() {
     signUp,
     signIn,
     signInWithGoogle,
+    signInWithKeycloak,
     signOut,
     refreshLinearToken,
     disconnectLinear,
@@ -467,7 +469,9 @@ export default function App() {
   }
 
   if (!user) {
-    // Only backends with password login (Supabase) can sign in here; behind IAP a reload signs in again
+    if (backend.capabilities.keycloakLogin && signInWithKeycloak) {
+      return <KeycloakAuthPage onSignIn={signInWithKeycloak} />;
+    }
     if (backend.capabilities.passwordLogin && signIn && signUp && signInWithGoogle) {
       return <AuthPage onSignIn={signIn} onSignUp={signUp} onGoogleSignIn={signInWithGoogle} />;
     }

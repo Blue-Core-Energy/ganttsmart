@@ -15,6 +15,7 @@ const { authState, backendMock } = vi.hoisted(() => {
     signUp: vi.fn(),
     signIn: vi.fn(),
     signInWithGoogle: vi.fn(),
+    signInWithKeycloak: vi.fn(),
     signOut: vi.fn(),
     refreshLinearToken: vi.fn(),
     disconnectLinear: vi.fn(),
@@ -28,6 +29,7 @@ const { authState, backendMock } = vi.hoisted(() => {
       marketingPages: false,
       sharedDaysOff: true,
       signOut: true,
+      keycloakLogin: false,
     },
     useAuth: () => authState,
   };
@@ -45,6 +47,7 @@ vi.mock('@/hooks/useAuth', () => ({
 
 describe('App', () => {
   beforeEach(() => {
+    backendMock.capabilities.keycloakLogin = false;
     vi.stubGlobal('window', {
       matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }),
       location: { reload: vi.fn() },
@@ -59,6 +62,7 @@ describe('App', () => {
   });
 
   afterEach(() => {
+    backendMock.capabilities.keycloakLogin = false;
     vi.unstubAllGlobals();
   });
 
@@ -82,5 +86,18 @@ describe('App', () => {
 
     expect(html).toContain('Your session expired. Reload to sign in again.');
     expect(html).toContain('Reload');
+  });
+
+  it('renders KeycloakAuthPage when backend.capabilities.keycloakLogin is true and user is null', () => {
+    authState.loading = false;
+    authState.user = null;
+    backendMock.capabilities.keycloakLogin = true;
+
+    const html = renderToStaticMarkup(createElement(App));
+
+    expect(html).toContain('Continue with Keycloak');
+    expect(html).toContain('Sign in to your account.');
+    expect(html).not.toContain('Continue with Google');
+    expect(html).not.toContain('Create an account to get started');
   });
 });

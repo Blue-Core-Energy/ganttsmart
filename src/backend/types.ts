@@ -33,6 +33,8 @@ export interface AuthState {
   signUp?: (email: string, password: string) => Promise<void>;
   /** Present only when capabilities.passwordLogin. */
   signInWithGoogle?: () => Promise<void>;
+  /** Present only when capabilities.keycloakLogin. */
+  signInWithKeycloak?: () => Promise<void>;
 }
 
 /** All methods throw on failure. */
@@ -74,6 +76,8 @@ export interface Backend {
     sharedDaysOff: boolean;
     /** Whether the UI offers "Sign out". Absent means true. */
     signOut?: boolean;
+    /** Whether sign-in uses Keycloak-only SSO (VITE_AUTH_MODE=keycloak on Supabase). */
+    keycloakLogin?: boolean;
   };
   useAuth(): AuthState;
   linearRequest(token: string, body: { query: string; variables?: Record<string, unknown> }): Promise<Response>;
