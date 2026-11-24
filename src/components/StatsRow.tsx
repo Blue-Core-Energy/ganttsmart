@@ -204,7 +204,19 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
 
   return (
     <div className="shrink-0 flex items-center border-b border-border-primary bg-bg-primary print:hidden">
-      <div className="flex-1 min-w-0 flex items-stretch gap-0 pl-4 pr-2 py-2 overflow-x-auto">
+      <button
+        ref={toggleRef}
+        type="button"
+        data-summary-toggle
+        aria-label="Hide summary"
+        aria-expanded={true}
+        title="Hide summary"
+        onClick={() => toggle(true)}
+        className="shrink-0 ml-3 inline-flex items-center justify-center w-6 h-6 rounded text-text-muted hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors cursor-pointer"
+      >
+        <ChevronIcon up />
+      </button>
+      <div className="flex-1 min-w-0 flex items-stretch gap-0 pl-1 pr-4 py-2 overflow-x-auto">
         {cards.map((c, i) => {
           const Icon = c.Icon;
           return (
@@ -226,18 +238,6 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
           );
         })}
       </div>
-      <button
-        ref={toggleRef}
-        type="button"
-        data-summary-toggle
-        aria-label="Hide summary"
-        aria-expanded={true}
-        title="Hide summary"
-        onClick={() => toggle(true)}
-        className="shrink-0 self-start mt-1 mr-2 inline-flex items-center justify-center w-5 h-5 rounded text-text-muted hover:bg-bg-hover hover:text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors cursor-pointer"
-      >
-        <ChevronIcon up />
-      </button>
     </div>
   );
 }
