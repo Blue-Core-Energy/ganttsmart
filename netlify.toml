@@ -1,6 +1,12 @@
 [build]
-  command = "npm run build"
+  command = "npm run build && find dist -name '*.map' -delete"
   publish = "dist"
+
+# Serve static assets before SPA fallback; missing assets (e.g. stripped .map files) return 404
+[[redirects]]
+  from = "/assets/*"
+  to = "/404"
+  status = 404
 
 # Serve static assets before SPA fallback
 [[redirects]]

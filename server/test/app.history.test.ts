@@ -152,19 +152,40 @@ describe('history: baselines', () => {
     ['row not an object', { projectId: 'p', baselines: ['x'] }],
     ['issue_id empty', { projectId: 'p', baselines: [{ issue_id: '', planned_due: '2026-01-01' }] }],
     ['issue_id path-like', { projectId: 'p', baselines: [{ issue_id: '../x', planned_due: '2026-01-01' }] }],
-    ['issue_id too long', { projectId: 'p', baselines: [{ issue_id: 'a'.repeat(129), planned_due: 'd' }] }],
+    ['issue_id too long', { projectId: 'p', baselines: [{ issue_id: 'a'.repeat(129), planned_due: '2026-01-01' }] }],
+    [
+      'issue_id reserved Firestore name __name__',
+      { projectId: 'p', baselines: [{ issue_id: '__name__', planned_due: '2026-01-01' }] },
+    ],
+    [
+      'issue_id reserved pattern __foo__',
+      { projectId: 'p', baselines: [{ issue_id: '__foo__', planned_due: '2026-01-01' }] },
+    ],
+    ['projectId reserved Firestore name __name__', { projectId: '__name__', baselines: [] }],
     ['planned_due missing', { projectId: 'p', baselines: [{ issue_id: 'ENG-1' }] }],
     ['planned_due empty', { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_due: '' }] }],
     [
+      'planned_due not a valid YYYY-MM-DD date',
+      { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_due: 'invalid-date' }] },
+    ],
+    [
+      'planned_due an impossible calendar date',
+      { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_due: '2026-02-31' }] },
+    ],
+    [
       'planned_start a number',
-      { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_start: 1, planned_due: 'd' }] },
+      { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_start: 1, planned_due: '2026-01-01' }] },
+    ],
+    [
+      'planned_start an impossible calendar date',
+      { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_start: '2026-13-40', planned_due: '2026-01-01' }] },
     ],
     ['planned_due too long', { projectId: 'p', baselines: [{ issue_id: 'ENG-1', planned_due: 'd'.repeat(1001) }] }],
     [
       'too many rows',
       {
         projectId: 'p',
-        baselines: Array.from({ length: 2001 }, (_, i) => ({ issue_id: `E-${i}`, planned_due: 'd' })),
+        baselines: Array.from({ length: 2001 }, (_, i) => ({ issue_id: `E-${i}`, planned_due: '2026-01-01' })),
       },
     ],
   ])('POST returns 400 for %s', async (_name, body) => {
@@ -176,7 +197,7 @@ describe('history: baselines', () => {
 
   it('accepts exactly 2000 rows', async () => {
     const { app } = setup();
-    const baselines = Array.from({ length: 2000 }, (_, i) => ({ issue_id: `E-${i}`, planned_due: 'd' }));
+    const baselines = Array.from({ length: 2000 }, (_, i) => ({ issue_id: `E-${i}`, planned_due: '2026-01-01' }));
     const res = await app.request('/api/history/baselines', postJson({ projectId: 'p', baselines }));
     expect(res.status).toBe(200);
   });

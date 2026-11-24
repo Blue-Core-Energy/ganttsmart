@@ -127,7 +127,12 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
 
   routes.get('/callback', async (c) => {
     const expected = getCookie(c, STATE_COOKIE);
-    // The state is single use: clear it whatever happens next.
+    const state = c.req.query('state');
+    if (!expected || !state || !safeEqual(state, expected)) {
+      return c.redirect('/app?linear_error=invalid_state', 302);
+    }
+
+    // State matches: the state is single use, so clear OAuth cookies now.
     deleteCookie(c, STATE_COOKIE, { path: STATE_COOKIE_PATH, httpOnly: true, secure: isProduction, sameSite: 'Lax' });
     const rawProject = getCookie(c, PROJECT_COOKIE);
     if (rawProject !== undefined) {
@@ -150,9 +155,6 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
 
     const error = c.req.query('error');
     if (error !== undefined) return fail(oauthErrorCode(error));
-
-    const state = c.req.query('state');
-    if (!expected || !state || !safeEqual(state, expected)) return fail('invalid_state');
 
     const code = c.req.query('code');
     if (!code) return fail('exchange_failed');
@@ -209,14 +211,21 @@ export function linearRoutes(deps: LinearRouteDeps): Hono<AppEnv> {
       });
 
     try {
-      const initialToken = await tokens.getAccessToken(sub);
-      let res = await callLinear(initialToken);
+      const initial = await tokens.getTokenSnapshot(sub);
+      let res = await callLinear(initial.accessToken);
       if (res.status === 401) {
         await res.body?.cancel().catch(() => {});
-        res = await callLinear(await tokens.getAccessToken(sub, { forceRefresh: true, rejectedToken: initialToken }));
+        const refreshed = await tokens.getTokenSnapshot(sub, {
+          forceRefresh: true,
+          rejectedToken: initial.accessToken,
+        });
+        res = await callLinear(refreshed.accessToken);
         if (res.status === 401) {
           await res.body?.cancel().catch(() => {});
-          await store.clearTokens(sub);
+          await store.clearTokens(sub, {
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken,
+          });
           return c.json(RECONNECT, 401);
         }
       }

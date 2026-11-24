@@ -18,8 +18,11 @@ const MAX_BODY_BYTES = 1024 * 1024;
 /**
  * Ids become Firestore document ids or path segments, so allow only what Linear uses
  * (UUIDs and identifiers like ENG-123): no slashes, dots or other separators.
+ * Firestore reserves document IDs matching __.*__ (such as __name__).
  */
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const FIRESTORE_RESERVED_ID = /^__.*__$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** Thrown by the validators below; turned into a 400 by the route. */
 class InvalidInput extends Error {}
@@ -34,8 +37,26 @@ function object(value: unknown, what: string): Fields {
 }
 
 function id(value: unknown, name: string): string {
-  if (typeof value !== 'string' || !ID_PATTERN.test(value)) throw new InvalidInput(`${name} is invalid`);
+  if (typeof value !== 'string' || !ID_PATTERN.test(value) || FIRESTORE_RESERVED_ID.test(value)) {
+    throw new InvalidInput(`${name} is invalid`);
+  }
   return value;
+}
+
+function isoDate(value: unknown, name: string): string {
+  if (typeof value !== 'string' || !ISO_DATE.test(value)) {
+    throw new InvalidInput(`${name} must be a YYYY-MM-DD date`);
+  }
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+    throw new InvalidInput(`${name} is not a real date`);
+  }
+  return value;
+}
+
+function nullableIsoDate(value: unknown, name: string): string | null {
+  if (value === undefined || value === null) return null;
+  return isoDate(value, name);
 }
 
 function requiredString(value: unknown, name: string): string {
@@ -63,8 +84,8 @@ function parseBaselines(body: unknown): { projectId: string; rows: BaselineRow[]
     const r = object(raw, 'baseline');
     return {
       issue_id: id(r.issue_id, 'issue_id'),
-      planned_start: nullableString(r.planned_start, 'planned_start'),
-      planned_due: requiredString(r.planned_due, 'planned_due'),
+      planned_start: nullableIsoDate(r.planned_start, 'planned_start'),
+      planned_due: isoDate(r.planned_due, 'planned_due'),
     };
   });
   // The first row for an issue wins, as it would across requests; Firestore would otherwise race.

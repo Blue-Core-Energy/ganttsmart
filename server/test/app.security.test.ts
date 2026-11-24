@@ -46,6 +46,7 @@ beforeAll(() => {
   mkdirSync(join(staticDir, 'assets'), { recursive: true });
   writeFileSync(join(staticDir, 'index.html'), '<!doctype html><html><body>SPA</body></html>');
   writeFileSync(join(staticDir, 'assets', 'bundle.12345.js'), 'console.log("bundled");');
+  writeFileSync(join(staticDir, 'assets', 'bundle.12345.js.map'), '{"version":3}');
   writeFileSync(join(staticDir, 'favicon.svg'), '<svg></svg>');
 });
 afterAll(() => {
@@ -308,5 +309,11 @@ describe('Cache-Control headers', () => {
     const res = await app.request('/app');
     expect(res.status).toBe(200);
     expect(res.headers.get('Cache-Control')).toBe('no-cache');
+  });
+
+  it('returns 404 for .map files even if present on disk', async () => {
+    const { app } = setup();
+    const res = await app.request('/assets/bundle.12345.js.map');
+    expect(res.status).toBe(404);
   });
 });

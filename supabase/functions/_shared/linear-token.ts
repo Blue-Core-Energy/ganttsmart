@@ -1,7 +1,7 @@
 // Linear OAuth token storage and refresh, shared by Edge Functions.
 // Access tokens expire after 24h; each refresh returns a new refresh token
 // (rotation), with a 30-minute grace period for reusing the previous one.
-import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2';
+import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2.118.0';
 
 const g = globalThis as {
   Deno?: { env?: { get(k: string): string | undefined } };

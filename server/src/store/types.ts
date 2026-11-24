@@ -56,6 +56,11 @@ export interface DayOff {
 
 export type DayOffInput = Omit<DayOff, 'id'>;
 
+export interface ClearTokensExpected {
+  refreshToken?: string | null;
+  accessToken?: string;
+}
+
 /**
  * Persistence for Linear tokens and planning history (per user; `sub` is the user's stable identity)
  * and the days off calendar (shared by everyone).
@@ -64,11 +69,13 @@ export interface Store {
   getTokens(sub: string): Promise<LinearTokens | null>;
   saveTokens(sub: string, email: string, tokens: LinearTokens): Promise<void>;
   /**
-   * Clears stored tokens. If `expectedRefreshToken` is provided, clears only if the stored refresh
-   * token matches it, returning true if cleared and false otherwise. If omitted, clears unconditionally
-   * and returns true.
+   * Clears stored tokens. If `expected` is provided:
+   * - as a string or null: clears only if the stored refresh token matches it.
+   * - as an object: clears only if the specified refreshToken and/or accessToken match the stored tokens.
+   * If omitted (undefined), clears unconditionally and returns true.
+   * Returns true if cleared, false if the stored tokens did not match.
    */
-  clearTokens(sub: string, expectedRefreshToken?: string): Promise<boolean>;
+  clearTokens(sub: string, expected?: string | null | ClearTokensExpected): Promise<boolean>;
   /**
    * Atomically replaces the stored tokens with `next` if the stored refresh token equals
    * `expectedRefreshToken`, and returns `next`. Otherwise another request already renewed them, so

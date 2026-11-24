@@ -1,5 +1,6 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import 'jsr:@supabase/functions-js@2.118.0/edge-runtime.d.ts';
+import { createClient } from 'jsr:@supabase/supabase-js@2.118.0';
+import { handleCorsPreflight, jsonResponse } from '../_shared/cors.ts';
 import {
   clearLinearTokens,
   LinearReauthRequired,
@@ -10,18 +11,6 @@ import {
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-  });
-}
-
 // Body: { action?: "refresh" | "disconnect" }
 //   refresh (default): exchanges the caller's stored Linear refresh token for a new
 //     access token. Returns { accessToken, expiresAt } or { reconnect: true }.
@@ -29,9 +18,10 @@ function json(body: unknown, status = 200) {
 //   disconnect: revokes both the access token and refresh token at Linear (best
 //     effort), deletes both, and returns { success: true }.
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
+  const preflight = handleCorsPreflight(req);
+  if (preflight) return preflight;
+
+  const json = (body: unknown, status = 200) => jsonResponse(body, status, req, { 'Cache-Control': 'no-store' });
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -85,6 +75,7 @@ Deno.serve(async (req: Request) => {
     if (err instanceof LinearReauthRequired) {
       return json({ error: 'Linear connection expired. Please reconnect.', reconnect: true });
     }
-    return json({ error: (err as Error).message }, 500);
+    console.error('Unhandled token refresh error:', err);
+    return json({ error: 'Failed to refresh token' }, 500);
   }
 });

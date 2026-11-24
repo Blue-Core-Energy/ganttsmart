@@ -1,5 +1,6 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import 'jsr:@supabase/functions-js@2.118.0/edge-runtime.d.ts';
+import { createClient } from 'jsr:@supabase/supabase-js@2.118.0';
+import { handleCorsPreflight, jsonResponse } from '../_shared/cors.ts';
 import { revokeLinearToken, saveLinearTokens } from '../_shared/linear-token.ts';
 import { generateCodeChallenge, generateCodeVerifier, isAllowedRedirectUri } from '../_shared/oauth-utils.ts';
 
@@ -9,22 +10,11 @@ const LINEAR_REDIRECT_URI = Deno.env.get('LINEAR_REDIRECT_URI') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
-
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
+  const preflight = handleCorsPreflight(req);
+  if (preflight) return preflight;
+
+  const json = (data: unknown, status = 200) => jsonResponse(data, status, req);
 
   try {
     const authHeader = req.headers.get('Authorization');
@@ -82,7 +72,8 @@ Deno.serve(async (req: Request) => {
       });
 
       if (insertError) {
-        return json({ error: `Failed to store OAuth state: ${insertError.message}` }, 500);
+        console.error('Failed to store OAuth state:', insertError);
+        return json({ error: 'Failed to initialize OAuth' }, 500);
       }
 
       const params = new URLSearchParams({
@@ -121,7 +112,8 @@ Deno.serve(async (req: Request) => {
       });
 
       if (rpcErr) {
-        return json({ error: `Database error consuming OAuth state: ${rpcErr.message}` }, 500);
+        console.error('Database error consuming OAuth state:', rpcErr);
+        return json({ error: 'Failed to verify OAuth state' }, 500);
       }
 
       const storedState = Array.isArray(rpcData) && rpcData.length > 0 ? rpcData[0] : null;
@@ -156,7 +148,8 @@ Deno.serve(async (req: Request) => {
 
       if (!tokenRes.ok) {
         const errBody = await tokenRes.text();
-        return json({ error: `Linear token exchange failed: ${errBody}` }, 400);
+        console.error('Linear token exchange failed:', tokenRes.status, errBody);
+        return json({ error: 'Linear token exchange failed' }, 400);
       }
 
       const tokenData = await tokenRes.json();
@@ -182,7 +175,8 @@ Deno.serve(async (req: Request) => {
           revokeLinearToken(tokenData.access_token),
           tokenData.refresh_token ? revokeLinearToken(tokenData.refresh_token) : Promise.resolve(),
         ]);
-        return json({ error: (dbError as Error).message }, 500);
+        console.error('Failed to save Linear tokens:', dbError);
+        return json({ error: 'Failed to save tokens' }, 500);
       }
 
       // Best-effort revoke prior tokens at Linear, skipping any token equal to the new tokens
@@ -197,6 +191,7 @@ Deno.serve(async (req: Request) => {
 
     return json({ error: 'Unknown action' }, 400);
   } catch (err) {
-    return json({ error: (err as Error).message }, 500);
+    console.error('Unhandled OAuth callback error:', err);
+    return json({ error: 'Internal server error' }, 500);
   }
 });

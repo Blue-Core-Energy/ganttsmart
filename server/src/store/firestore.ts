@@ -90,17 +90,25 @@ export function createFirestoreStore(db: Firestore): Store {
       );
     },
 
-    async clearTokens(sub, expectedRefreshToken) {
+    async clearTokens(sub, expected) {
       const ref = userRef(sub);
-      if (expectedRefreshToken === undefined) {
+      if (expected === undefined) {
         await ref.set({ linear: null, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
         return true;
       }
       return db.runTransaction(async (tx) => {
         const snap = await tx.get(ref);
         const stored = toTokens((snap.data() as UserDoc | undefined)?.linear);
-        if (stored === null || stored.refreshToken !== expectedRefreshToken) {
-          return false;
+        if (stored === null) return false;
+        if (typeof expected === 'string' || expected === null) {
+          if (stored.refreshToken !== expected) return false;
+        } else {
+          if (expected.refreshToken !== undefined && stored.refreshToken !== expected.refreshToken) {
+            return false;
+          }
+          if (expected.accessToken !== undefined && stored.accessToken !== expected.accessToken) {
+            return false;
+          }
         }
         tx.update(ref, { linear: null, updatedAt: FieldValue.serverTimestamp() });
         return true;

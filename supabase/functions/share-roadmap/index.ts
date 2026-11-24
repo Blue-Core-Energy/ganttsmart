@@ -1,5 +1,6 @@
-import 'jsr:@supabase/functions-js/edge-runtime.d.ts';
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import 'jsr:@supabase/functions-js@2.118.0/edge-runtime.d.ts';
+import { createClient } from 'jsr:@supabase/supabase-js@2.118.0';
+import { handleCorsPreflight, jsonResponse } from '../_shared/cors.ts';
 import { getValidLinearToken } from '../_shared/linear-token.ts';
 import {
   computeClientIpHash,
@@ -20,18 +21,6 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 const LINEAR_API = 'https://api.linear.app/graphql';
 const PRIORITY_MAP: Record<number, string> = { 0: 'None', 1: 'Urgent', 2: 'High', 3: 'Medium', 4: 'Low' };
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
-
-function json(data: unknown, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-  });
-}
 
 // --- Rate limiting (AUTH-VULN-03 & IT-153 fix) ---
 
@@ -254,8 +243,10 @@ async function getUser(req: Request) {
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const preflight = handleCorsPreflight(req);
+  if (preflight) return preflight;
 
+  const json = (data: unknown, status = 200) => jsonResponse(data, status, req);
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
   try {
@@ -290,7 +281,8 @@ Deno.serve(async (req: Request) => {
       try {
         cachedData = await fetchLinearData(linearToken, projectId);
       } catch (e) {
-        return json({ error: 'Failed to fetch Linear data: ' + (e as Error).message }, 500);
+        console.error('Failed to fetch Linear data:', e);
+        return json({ error: 'Failed to fetch roadmap data' }, 500);
       }
       cachedData = sanitizeCachedRoadmapData(withCustomOrder(cachedData, sanitizeCustomOrder(body.customOrder)));
 
@@ -312,7 +304,10 @@ Deno.serve(async (req: Request) => {
         .select('id, share_token, project_name, expires_at, cached_at, password_hash')
         .single();
 
-      if (err) return json({ error: 'DB insert failed: ' + err.message }, 500);
+      if (err) {
+        console.error('DB insert failed in share-roadmap create:', err);
+        return json({ error: 'Failed to create share link' }, 500);
+      }
 
       return json({
         id: share.id,
@@ -338,7 +333,8 @@ Deno.serve(async (req: Request) => {
         if (shareErr.code === 'PGRST116') {
           return json({ error: 'Share not found' }, 404);
         }
-        return json({ error: 'Database error: ' + shareErr.message }, 500);
+        console.error('Database error in share-roadmap get:', shareErr);
+        return json({ error: 'Failed to load share' }, 500);
       }
       if (!share) return json({ error: 'Share not found' }, 404);
       if (new Date(share.expires_at) < new Date())
@@ -489,7 +485,10 @@ Deno.serve(async (req: Request) => {
       }
 
       const { data, error: err } = await q;
-      if (err) return json({ error: err.message }, 500);
+      if (err) {
+        console.error('Database error in share-roadmap list:', err);
+        return json({ error: 'Failed to list shares' }, 500);
+      }
 
       return json({
         shares: ((data || []) as SharedRoadmapListRow[]).map((s) => ({
@@ -522,7 +521,8 @@ Deno.serve(async (req: Request) => {
         if (fetchErr.code === 'PGRST116') {
           return json({ error: 'Share not found' }, 404);
         }
-        return json({ error: 'Database error: ' + fetchErr.message }, 500);
+        console.error('Database error in share-roadmap refresh fetch:', fetchErr);
+        return json({ error: 'Failed to refresh share' }, 500);
       }
       if (!share) return json({ error: 'Share not found' }, 404);
 
@@ -534,7 +534,13 @@ Deno.serve(async (req: Request) => {
           ? sanitizeCustomOrder(body.customOrder)
           : sanitizeCustomOrder(share.cached_data?.customOrder);
 
-      let cachedData = await fetchLinearData(linearToken, share.project_id);
+      let cachedData;
+      try {
+        cachedData = await fetchLinearData(linearToken, share.project_id);
+      } catch (e) {
+        console.error('Failed to fetch Linear data in refresh:', e);
+        return json({ error: 'Failed to fetch roadmap data' }, 500);
+      }
       cachedData = sanitizeCachedRoadmapData(withCustomOrder(cachedData, customOrder));
       const newCachedAt = new Date().toISOString();
       const { error: updateErr } = await supabase
@@ -542,7 +548,10 @@ Deno.serve(async (req: Request) => {
         .update({ cached_data: cachedData, cached_at: newCachedAt, refreshing_until: null })
         .eq('id', shareId)
         .eq('owner_id', user.id);
-      if (updateErr) return json({ error: 'Database error: ' + updateErr.message }, 500);
+      if (updateErr) {
+        console.error('Database error in share-roadmap refresh update:', updateErr);
+        return json({ error: 'Failed to refresh share' }, 500);
+      }
 
       return json({ success: true, cachedAt: newCachedAt });
     }
@@ -559,12 +568,16 @@ Deno.serve(async (req: Request) => {
         .eq('id', shareId)
         .eq('owner_id', user.id);
 
-      if (deleteErr) return json({ error: 'Database error: ' + deleteErr.message }, 500);
+      if (deleteErr) {
+        console.error('Database error in share-roadmap delete:', deleteErr);
+        return json({ error: 'Failed to delete share' }, 500);
+      }
       return json({ success: true });
     }
 
     return json({ error: 'Unknown action' }, 400);
   } catch (e) {
-    return json({ error: (e as Error).message }, 500);
+    console.error('Unhandled share-roadmap error:', e);
+    return json({ error: 'Internal server error' }, 500);
   }
 });
