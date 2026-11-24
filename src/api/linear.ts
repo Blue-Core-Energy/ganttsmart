@@ -1001,6 +1001,16 @@ function writeIssueSchedule(
         }`,
         { id: issueId, dueDate: patch.dueDate },
       );
+    } else if (patch.dueDate === null) {
+      await gql(
+        apiKey,
+        `mutation($id: String!) {
+          issueUpdate(id: $id, input: { dueDate: null }) {
+            success
+          }
+        }`,
+        { id: issueId },
+      );
     }
 
     // When clearing start date, strip any legacy start: ... tag from description so it cannot resurrect
@@ -1075,7 +1085,7 @@ function writeIssueSchedule(
   });
 }
 
-export async function updateIssueDueDate(apiKey: string, issueId: string, dueDate: string): Promise<void> {
+export async function updateIssueDueDate(apiKey: string, issueId: string, dueDate: string | null): Promise<void> {
   await debouncedApiCall(`due-${issueId}`, () => writeIssueSchedule(apiKey, issueId, { dueDate }));
 }
 

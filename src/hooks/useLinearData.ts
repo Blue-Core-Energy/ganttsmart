@@ -43,7 +43,42 @@ export function loadCustomOrder(projectId: string): string[] {
   }
 }
 
+interface UndoCommand {
+  id: string;
+  targetKey: string;
+  label: string;
+  revertLocal: () => void;
+  revertPersist?: (() => Promise<void>) | null;
+  rollbackRevert?: () => void;
+}
+
+interface MutateTaskFieldParams {
+  taskUuid: string;
+  apply: (task: Task) => Task;
+  /** Reads the fields touched by `apply`, so they can be restored without touching other edits */
+  fields: (task: Task) => Partial<Task>;
+  validate?: (task: Task) => string | null;
+  persist: () => Promise<void>;
+  undoPersist?: ((task: Task) => Promise<void>) | null;
+  successMessage: string;
+  undoLabel: string;
+  failureMessage: string;
+  promoteUnscheduled?: boolean;
+  onRetry?: () => Promise<boolean>;
+}
+
+let undoIdCounter = 0;
+function nextUndoId(): string {
+  undoIdCounter = (undoIdCounter + 1) % 1_000_000;
+  return `undo-${Date.now()}-${undoIdCounter}`;
+}
+
 export function useLinearData(linearToken: string, onAuthError?: () => void, requestedProjectId?: string | null) {
+  const linearTokenRef = useRef(linearToken);
+  linearTokenRef.current = linearToken;
+  const onAuthErrorRef = useRef(onAuthError);
+  onAuthErrorRef.current = onAuthError;
+  const undoQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [projectName, setProjectName] = useState('');
@@ -90,16 +125,8 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
   const pendingMutations = useRef(0); // guards polling from overwriting optimistic state
   const activeProjectIdRef = useRef('');
 
-  // Undo stack: stores previous task snapshots
-  const undoStackRef = useRef<
-    Array<{
-      tasks: Task[];
-      unscheduledTasks: Task[];
-      externalTasks: Task[];
-      externalUnscheduledTasks: Task[];
-      label: string;
-    }>
-  >([]);
+  // Undo stack: stores undo commands
+  const undoStackRef = useRef<UndoCommand[]>([]);
 
   const assignees = useMemo(() => [...new Set(tasks.map((t) => t.assignee))].sort(), [tasks]);
   const statuses = useMemo(
@@ -175,37 +202,76 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     [orderedAllTasks, visibleUuids, selectedProjectId],
   );
 
-  // Push to undo stack and show toast with Undo action
-  const pushUndo = useCallback(
-    (
-      prevTasks: Task[],
-      label: string,
-      prevExt = externalTasks,
-      prevExtUnscheduled = externalUnscheduledTasks,
-      prevUnscheduled = unscheduledTasks,
-    ) => {
-      undoStackRef.current.push({
-        tasks: prevTasks,
-        unscheduledTasks: prevUnscheduled,
-        externalTasks: prevExt,
-        externalUnscheduledTasks: prevExtUnscheduled,
-        label,
-      });
-      // Keep max 20 undo entries
-      if (undoStackRef.current.length > 20) undoStackRef.current.shift();
-    },
-    [externalTasks, externalUnscheduledTasks, unscheduledTasks],
-  );
-
-  const undo = useCallback(() => {
-    const entry = undoStackRef.current.pop();
-    if (!entry) return;
-    setTasks(entry.tasks);
-    setUnscheduledTasks(entry.unscheduledTasks);
-    setExternalTasks(entry.externalTasks);
-    setExternalUnscheduledTasks(entry.externalUnscheduledTasks);
-    toastSuccess(`Undone: ${entry.label}`);
+  const pushUndoCommand = useCallback((command: UndoCommand) => {
+    undoStackRef.current.push(command);
+    // Keep max 20 undo entries
+    if (undoStackRef.current.length > 20) undoStackRef.current.shift();
   }, []);
+
+  const executeUndo = useCallback(async (targetId?: string): Promise<boolean> => {
+    let command: UndoCommand | undefined;
+    if (targetId) {
+      const idx = undoStackRef.current.findIndex((c) => c.id === targetId);
+      if (idx === -1) return false;
+      const cmd = undoStackRef.current[idx];
+      // Check if this command is superseded by a newer command for the same targetKey
+      const isSuperseded = undoStackRef.current.some((c, i) => i > idx && c.targetKey === cmd.targetKey);
+      // Remove it from the stack so clicking the toast button can't be retried
+      undoStackRef.current.splice(idx, 1);
+      if (isSuperseded) {
+        // Superseded by a newer edit on the same entity — do not revert over newer state
+        return false;
+      }
+      command = cmd;
+    } else {
+      command = undoStackRef.current.pop();
+    }
+    if (!command) return false;
+
+    const originProjectId = activeProjectIdRef.current;
+    command.revertLocal();
+
+    if (command.revertPersist) {
+      pendingMutations.current++;
+      const runPersist = async (): Promise<boolean> => {
+        try {
+          await command.revertPersist!();
+          if (activeProjectIdRef.current !== originProjectId) return false;
+          if (!targetId) {
+            toastSuccess(`Undone: ${command.label}`);
+          }
+          return true;
+        } catch (e) {
+          if (e instanceof DebounceCancelled) return false;
+          if (activeProjectIdRef.current === originProjectId) {
+            command.rollbackRevert?.();
+          }
+          const msg = (e as Error).message || '';
+          if (msg.includes('authentication expired')) {
+            toastError('Linear session expired. Reconnecting...');
+            onAuthErrorRef.current?.();
+          } else {
+            toastError(`Failed to undo ${command.label}: ${msg}`);
+          }
+          return false;
+        } finally {
+          pendingMutations.current--;
+        }
+      };
+
+      undoQueueRef.current = undoQueueRef.current.then(runPersist, runPersist);
+      return await (undoQueueRef.current as Promise<boolean>);
+    } else {
+      if (!targetId) {
+        toastSuccess(`Undone: ${command.label}`);
+      }
+      return true;
+    }
+  }, []);
+
+  const undo = useCallback((): Promise<boolean> => {
+    return executeUndo();
+  }, [executeUndo]);
 
   const loadProjects = useCallback(async () => {
     if (!linearToken) return;
@@ -227,29 +293,28 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
   // Silent refresh for polling (no loading spinner, no error clearing)
   // Skips if there are pending mutations to avoid overwriting optimistic state
-  const silentRefresh = useCallback(
-    async (projectId: string) => {
-      if (!linearToken || !projectId) return;
-      if (pendingMutations.current > 0) return; // don't clobber optimistic state
-      try {
-        const result = await fetchIssues(linearToken, projectId);
-        if (activeProjectIdRef.current && activeProjectIdRef.current !== projectId) return;
-        setTasks(result.tasks);
-        setUnscheduledTasks(result.unscheduledTasks);
-        setExternalTasks(result.externalTasks);
-        setExternalUnscheduledTasks(result.externalUnscheduledTasks);
-        setProjectName(result.projectName);
-        setMilestones(result.milestones);
-        setLastSynced(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-      } catch (e) {
-        // Auto-disconnect on auth expiry, otherwise silent
-        if ((e as Error).message?.includes('authentication expired')) {
-          onAuthError?.();
-        }
+  const silentRefresh = useCallback(async (projectId: string) => {
+    const token = linearTokenRef.current;
+    if (!token || !projectId) return;
+    if (pendingMutations.current > 0) return; // don't clobber optimistic state
+    try {
+      const result = await fetchIssues(token, projectId);
+      if (pendingMutations.current > 0) return; // check again after fetch to avoid overwriting in-flight optimistic state
+      if (activeProjectIdRef.current && activeProjectIdRef.current !== projectId) return;
+      setTasks(result.tasks);
+      setUnscheduledTasks(result.unscheduledTasks);
+      setExternalTasks(result.externalTasks);
+      setExternalUnscheduledTasks(result.externalUnscheduledTasks);
+      setProjectName(result.projectName);
+      setMilestones(result.milestones);
+      setLastSynced(new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+    } catch (e) {
+      // Auto-disconnect on auth expiry, otherwise silent
+      if ((e as Error).message?.includes('authentication expired')) {
+        onAuthErrorRef.current?.();
       }
-    },
-    [linearToken, onAuthError],
-  );
+    }
+  }, []);
 
   const loadIssues = useCallback(
     async (projectId: string) => {
@@ -376,189 +441,233 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
 
   const timeScale = useMemo(() => deriveTimeScale(dayWidth), [dayWidth]);
 
-  // Optimistic reschedule (due date) with rollback + undo.
-  // Also handles "promoting" an unscheduled task: if the uuid lives in unscheduledTasks,
-  // we move it into tasks with the new explicit due date.
-  const reschedule = useCallback(
-    async (taskUuid: string, newDueDate: string): Promise<boolean> => {
-      if (!linearToken) return false;
+  // Shared optimistic field-level mutation pipeline
+  const mutateTaskField = useCallback(
+    async ({
+      taskUuid,
+      apply,
+      fields,
+      validate,
+      persist,
+      undoPersist,
+      successMessage,
+      undoLabel,
+      failureMessage,
+      promoteUnscheduled,
+      onRetry,
+    }: MutateTaskFieldParams): Promise<boolean> => {
+      if (!linearTokenRef.current) return false;
 
-      const prevTasks = tasks;
-      const prevUnscheduled = unscheduledTasks;
-      const prevExternal = externalTasks;
       const fromUnscheduled = unscheduledTasks.find((t) => t.uuid === taskUuid);
-      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
+      const fromExternalUnscheduled = externalUnscheduledTasks.find((t) => t.uuid === taskUuid);
+      const fromExternalScheduled = externalTasks.find((t) => t.uuid === taskUuid);
+      const fromExternal = fromExternalScheduled || fromExternalUnscheduled;
       const task = tasks.find((t) => t.uuid === taskUuid) || fromUnscheduled || fromExternal;
+
+      if (!task) return false;
 
       if (fromExternal && !allowExternalEdits) {
         toast('Unlock "Edit external" to modify cross-project issues', 'info');
         return false;
       }
 
-      if (task?.startDate && newDueDate < task.startDate) {
-        toastError('Due date cannot be before start date');
-        return false;
+      if (validate) {
+        const valError = validate(task);
+        if (valError) {
+          toastError(valError);
+          return false;
+        }
       }
 
-      if (fromUnscheduled) {
-        // Promote: remove from unscheduled, add to scheduled with explicit due date
-        setUnscheduledTasks((prev) => prev.filter((t) => t.uuid !== taskUuid));
-        setTasks((prev) => [...prev, { ...fromUnscheduled, due: newDueDate, isDueImplicit: undefined }]);
-      } else if (fromExternal) {
-        setExternalTasks((prev) =>
-          prev.map((t) => (t.uuid === taskUuid ? { ...t, due: newDueDate, isDueImplicit: undefined } : t)),
-        );
-      } else {
-        setTasks((prev) =>
-          prev.map((t) => (t.uuid === taskUuid ? { ...t, due: newDueDate, isDueImplicit: undefined } : t)),
-        );
-      }
+      const isPromoteLocal = Boolean(fromUnscheduled && promoteUnscheduled);
+      const isPromoteExternal = Boolean(fromExternalUnscheduled && promoteUnscheduled);
+      const snapshot = fields(task);
+      const appliedTask = isPromoteExternal ? { ...apply(task), isUnscheduledExternal: undefined } : apply(task);
+      const appliedFields = fields(appliedTask);
 
+      const applyToCollection = () => {
+        if (isPromoteLocal) {
+          setUnscheduledTasks((prev) => prev.filter((t) => t.uuid !== taskUuid));
+          setTasks((prev) =>
+            prev.some((t) => t.uuid === taskUuid)
+              ? prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t))
+              : [...prev, appliedTask],
+          );
+        } else if (isPromoteExternal) {
+          setExternalUnscheduledTasks((prev) => prev.filter((t) => t.uuid !== taskUuid));
+          setExternalTasks((prev) =>
+            prev.some((t) => t.uuid === taskUuid)
+              ? prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t))
+              : [...prev, appliedTask],
+          );
+        } else if (fromExternalScheduled) {
+          setExternalTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t)));
+        } else if (fromExternalUnscheduled) {
+          setExternalUnscheduledTasks((prev) =>
+            prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t)),
+          );
+        } else if (fromUnscheduled) {
+          setUnscheduledTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t)));
+        } else {
+          setTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...appliedFields } : t)));
+        }
+      };
+
+      const revertCollection = () => {
+        if (isPromoteLocal) {
+          setTasks((prev) => prev.filter((t) => t.uuid !== taskUuid));
+          setUnscheduledTasks((prev) =>
+            prev.some((t) => t.uuid === taskUuid)
+              ? prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t))
+              : [...prev, { ...task, ...snapshot }],
+          );
+        } else if (isPromoteExternal) {
+          setExternalTasks((prev) => prev.filter((t) => t.uuid !== taskUuid));
+          setExternalUnscheduledTasks((prev) =>
+            prev.some((t) => t.uuid === taskUuid)
+              ? prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t))
+              : [...prev, { ...task, ...snapshot, isUnscheduledExternal: true }],
+          );
+        } else if (fromExternalScheduled) {
+          setExternalTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t)));
+        } else if (fromExternalUnscheduled) {
+          setExternalUnscheduledTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t)));
+        } else if (fromUnscheduled) {
+          setUnscheduledTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t)));
+        } else {
+          setTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t)));
+        }
+      };
+
+      applyToCollection();
+
+      const originProjectId = activeProjectIdRef.current;
       pendingMutations.current++;
       try {
-        await updateIssueDueDate(linearToken, taskUuid, newDueDate);
-        pushUndo(prevTasks, `${task?.id || ''} due date`, prevExternal, undefined, prevUnscheduled);
-        toast(`Due date updated`, 'success', {
+        await persist();
+        if (activeProjectIdRef.current !== originProjectId) return false;
+        const undoId = nextUndoId();
+        pushUndoCommand({
+          id: undoId,
+          targetKey: `task:${taskUuid}`,
+          label: `${task.id} ${undoLabel}`,
+          revertLocal: revertCollection,
+          revertPersist: undoPersist ? () => undoPersist(task) : null,
+          rollbackRevert: applyToCollection,
+        });
+        toast(successMessage, 'success', {
           label: 'Undo',
           onClick: () => {
-            setTasks(prevTasks);
-            setUnscheduledTasks(prevUnscheduled);
-            setExternalTasks(prevExternal);
-            if (task && task.due && !task.isDueImplicit) {
-              updateIssueDueDate(linearToken, taskUuid, task.due).catch(() => {});
-            }
+            void executeUndo(undoId);
           },
         });
         return true;
       } catch (e) {
         if (e instanceof DebounceCancelled) return false; // superseded by a newer drag — don't rollback
-        setTasks(prevTasks);
-        setUnscheduledTasks(prevUnscheduled);
-        setExternalTasks(prevExternal);
-        toastError(`Failed to update due date: ${(e as Error).message}`, () => reschedule(taskUuid, newDueDate));
+        if (activeProjectIdRef.current === originProjectId) {
+          revertCollection();
+        }
+        const msg = (e as Error).message || '';
+        if (msg.includes('authentication expired')) {
+          toastError('Linear session expired. Reconnecting...');
+          onAuthErrorRef.current?.();
+        } else {
+          toastError(`${failureMessage}: ${msg}`, onRetry);
+        }
         return false;
       } finally {
         pendingMutations.current--;
       }
     },
-    [linearToken, tasks, unscheduledTasks, externalTasks, allowExternalEdits, pushUndo],
+    [
+      tasks,
+      unscheduledTasks,
+      externalTasks,
+      externalUnscheduledTasks,
+      allowExternalEdits,
+      pushUndoCommand,
+      executeUndo,
+    ],
+  );
+
+  // Optimistic reschedule (due date) with rollback + undo.
+  // Also handles "promoting" an unscheduled task: if the uuid lives in unscheduledTasks,
+  // we move it into tasks with the new explicit due date.
+  const reschedule = useCallback(
+    async (taskUuid: string, newDueDate: string): Promise<boolean> => {
+      return mutateTaskField({
+        taskUuid,
+        promoteUnscheduled: true,
+        validate: (t) => (t.startDate && newDueDate < t.startDate ? 'Due date cannot be before start date' : null),
+        apply: (t) => ({ ...t, due: newDueDate, isDueImplicit: undefined }),
+        fields: (t) => ({ due: t.due, isDueImplicit: t.isDueImplicit }),
+        persist: () => updateIssueDueDate(linearTokenRef.current, taskUuid, newDueDate),
+        undoPersist: (task) => {
+          const token = linearTokenRef.current;
+          if (!token) return Promise.resolve();
+          const prevDue = task.due && !task.isDueImplicit ? task.due : null;
+          return updateIssueDueDate(token, taskUuid, prevDue);
+        },
+        successMessage: 'Due date updated',
+        undoLabel: 'due date',
+        failureMessage: 'Failed to update due date',
+        onRetry: () => reschedule(taskUuid, newDueDate),
+      });
+    },
+    [mutateTaskField],
   );
 
   // Optimistic reschedule (start date) with rollback + undo
   const rescheduleStart = useCallback(
     async (taskUuid: string, newStartDate: string | null): Promise<boolean> => {
-      if (!linearToken) return false;
-
-      const prevTasks = tasks;
-      const prevExternal = externalTasks;
-      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
-      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
-
-      if (fromExternal && !allowExternalEdits) {
-        toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return false;
-      }
-
-      if (newStartDate && task?.due && newStartDate > task.due) {
-        toastError('Start date cannot be after due date');
-        return false;
-      }
-
-      if (fromExternal) {
-        setExternalTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, startDate: newStartDate } : t)));
-      } else {
-        setTasks((prev) => prev.map((t) => (t.uuid === taskUuid ? { ...t, startDate: newStartDate } : t)));
-      }
-
-      pendingMutations.current++;
-      try {
-        await updateIssueStartDate(linearToken, taskUuid, newStartDate);
-        pushUndo(prevTasks, `${task?.id || ''} start date`, prevExternal);
-        const toastMsg = newStartDate ? 'Start date updated' : 'Start date cleared';
-        toast(toastMsg, 'success', {
-          label: 'Undo',
-          onClick: () => {
-            setTasks(prevTasks);
-            setExternalTasks(prevExternal);
-            if (task) updateIssueStartDate(linearToken, taskUuid, task.startDate).catch(() => {});
-          },
-        });
-        return true;
-      } catch (e) {
-        if (e instanceof DebounceCancelled) return false; // superseded by a newer drag
-        setTasks(prevTasks);
-        setExternalTasks(prevExternal);
-        toastError(`Failed to update start date: ${(e as Error).message}`, () =>
-          rescheduleStart(taskUuid, newStartDate),
-        );
-        return false;
-      } finally {
-        pendingMutations.current--;
-      }
+      return mutateTaskField({
+        taskUuid,
+        promoteUnscheduled: false,
+        validate: (t) => (newStartDate && t.due && newStartDate > t.due ? 'Start date cannot be after due date' : null),
+        apply: (t) => ({ ...t, startDate: newStartDate }),
+        fields: (t) => ({ startDate: t.startDate }),
+        persist: () => updateIssueStartDate(linearTokenRef.current, taskUuid, newStartDate),
+        undoPersist: (task) => {
+          const token = linearTokenRef.current;
+          if (!token) return Promise.resolve();
+          return updateIssueStartDate(token, taskUuid, task.startDate);
+        },
+        successMessage: newStartDate ? 'Start date updated' : 'Start date cleared',
+        undoLabel: 'start date',
+        failureMessage: 'Failed to update start date',
+        onRetry: () => rescheduleStart(taskUuid, newStartDate),
+      });
     },
-    [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+    [mutateTaskField],
   );
 
   // Optimistic reschedule for both start and due dates (whole-bar move) with rollback + undo
   const rescheduleRange = useCallback(
     async (taskUuid: string, newDueDate: string, newStartDate: string | null): Promise<boolean> => {
-      if (!linearToken) return false;
-
-      const prevTasks = tasks;
-      const prevExternal = externalTasks;
-      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
-      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
-
-      if (fromExternal && !allowExternalEdits) {
-        toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return false;
-      }
-
-      if (newStartDate && newStartDate > newDueDate) {
-        toastError('Start date cannot be after due date');
-        return false;
-      }
-
-      const applyDates = (t: Task) =>
-        t.uuid === taskUuid ? { ...t, due: newDueDate, startDate: newStartDate, isDueImplicit: undefined } : t;
-
-      if (fromExternal) {
-        setExternalTasks((prev) => prev.map(applyDates));
-      } else {
-        setTasks((prev) => prev.map(applyDates));
-      }
-
-      pendingMutations.current++;
-      try {
-        await updateIssueSchedule(linearToken, taskUuid, { dueDate: newDueDate, startDate: newStartDate });
-        pushUndo(prevTasks, `${task?.id || ''} schedule`, prevExternal);
-        toast(`Schedule updated`, 'success', {
-          label: 'Undo',
-          onClick: () => {
-            setTasks(prevTasks);
-            setExternalTasks(prevExternal);
-            if (task) {
-              updateIssueSchedule(linearToken, taskUuid, {
-                dueDate: task.isDueImplicit ? undefined : task.due,
-                startDate: task.startDate,
-              }).catch(() => {});
-            }
-          },
-        });
-        return true;
-      } catch (e) {
-        if (e instanceof DebounceCancelled) return false;
-        setTasks(prevTasks);
-        setExternalTasks(prevExternal);
-        toastError(`Failed to update schedule: ${(e as Error).message}`, () =>
-          rescheduleRange(taskUuid, newDueDate, newStartDate),
-        );
-        return false;
-      } finally {
-        pendingMutations.current--;
-      }
+      return mutateTaskField({
+        taskUuid,
+        promoteUnscheduled: true,
+        validate: () => (newStartDate && newStartDate > newDueDate ? 'Start date cannot be after due date' : null),
+        apply: (t) => ({ ...t, due: newDueDate, startDate: newStartDate, isDueImplicit: undefined }),
+        fields: (t) => ({ due: t.due, startDate: t.startDate, isDueImplicit: t.isDueImplicit }),
+        persist: () =>
+          updateIssueSchedule(linearTokenRef.current, taskUuid, { dueDate: newDueDate, startDate: newStartDate }),
+        undoPersist: (task) => {
+          const token = linearTokenRef.current;
+          if (!token) return Promise.resolve();
+          const prevDue = task.isDueImplicit ? null : task.due || null;
+          return updateIssueSchedule(token, taskUuid, {
+            dueDate: prevDue,
+            startDate: task.startDate,
+          });
+        },
+        successMessage: 'Schedule updated',
+        undoLabel: 'schedule',
+        failureMessage: 'Failed to update schedule',
+        onRetry: () => rescheduleRange(taskUuid, newDueDate, newStartDate),
+      });
     },
-    [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+    [mutateTaskField],
   );
 
   /**
@@ -568,11 +677,11 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
    */
   const snapTasksToDaysOff = useCallback(
     async (entries: DayOff[], added: DayOff): Promise<ScheduleSnap[]> => {
-      if (!linearToken) return [];
+      const token = linearTokenRef.current;
+      if (!token) return [];
       const plan = planDayOffSnap(tasks, entries, added);
       if (plan.length === 0) return [];
 
-      const prevTasks = tasks;
       const planByUuid = new Map(plan.map((p) => [p.task.uuid, p]));
       const applySnap = (t: Task, p: ScheduleSnap): Task => ({
         ...t,
@@ -581,17 +690,19 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
       });
       setTasks((prev) => prev.map((t) => (planByUuid.has(t.uuid) ? applySnap(t, planByUuid.get(t.uuid)!) : t)));
 
+      const originProjectId = activeProjectIdRef.current;
       pendingMutations.current++;
       try {
         const results = await Promise.all(
           plan.map((p) =>
             saveScheduleSnap(
               p,
-              (due) => updateIssueDueDate(linearToken, p.task.uuid, due),
-              (start) => updateIssueStartDate(linearToken, p.task.uuid, start),
+              (due) => updateIssueDueDate(linearTokenRef.current, p.task.uuid, due),
+              (start) => updateIssueStartDate(linearTokenRef.current, p.task.uuid, start),
             ),
           ),
         );
+        if (activeProjectIdRef.current !== originProjectId) return [];
         const saved = results.filter((r) => r.applied.due || r.applied.startDate).map((r) => r.applied);
         const failed = results.filter((r) => r.failed);
 
@@ -618,32 +729,63 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         }
         if (saved.length === 0) return [];
 
-        pushUndo(prevTasks, `${saved.length} ${saved.length === 1 ? 'task' : 'tasks'} moved off ${added.label}`);
+        const undoId = nextUndoId();
         const savedByUuid = new Map(saved.map((p) => [p.task.uuid, p]));
+        pushUndoCommand({
+          id: undoId,
+          targetKey: `snap:${added.label}`,
+          label: `${saved.length} ${saved.length === 1 ? 'task' : 'tasks'} moved off ${added.label}`,
+          revertLocal: () => {
+            setTasks((prev) =>
+              prev.map((t) => {
+                const p = savedByUuid.get(t.uuid);
+                if (!p) return t;
+                const original = p.task;
+                return {
+                  ...t,
+                  ...(p.startDate ? { startDate: original.startDate } : {}),
+                  ...(p.due ? { due: original.due, isDueImplicit: original.isDueImplicit } : {}),
+                };
+              }),
+            );
+          },
+          revertPersist: async () => {
+            const activeToken = linearTokenRef.current;
+            if (!activeToken) return;
+            for (const p of saved) {
+              if (p.due && p.startDate) {
+                await updateIssueSchedule(activeToken, p.task.uuid, {
+                  dueDate: p.task.due,
+                  startDate: p.task.startDate,
+                });
+              } else if (p.startDate) {
+                await updateIssueStartDate(activeToken, p.task.uuid, p.task.startDate);
+              } else if (p.due) {
+                await updateIssueDueDate(activeToken, p.task.uuid, p.task.due);
+              }
+            }
+          },
+          rollbackRevert: () => {
+            setTasks((prev) =>
+              prev.map((t) => {
+                const p = savedByUuid.get(t.uuid);
+                if (!p) return t;
+                return {
+                  ...t,
+                  ...(p.startDate ? { startDate: p.startDate } : {}),
+                  ...(p.due ? { due: p.due, isDueImplicit: undefined } : {}),
+                };
+              }),
+            );
+          },
+        });
         toast(
           `${added.label} added: moved ${saved.length} ${saved.length === 1 ? 'task' : 'tasks'} to the next workday`,
           'success',
           {
             label: 'Undo',
             onClick: () => {
-              setTasks((prev) =>
-                prev.map((t) => {
-                  const p = savedByUuid.get(t.uuid);
-                  if (!p) return t;
-                  const original = p.task;
-                  return {
-                    ...t,
-                    ...(p.startDate ? { startDate: original.startDate } : {}),
-                    ...(p.due ? { due: original.due, isDueImplicit: original.isDueImplicit } : {}),
-                  };
-                }),
-              );
-              for (const p of saved) {
-                if (p.due) updateIssueDueDate(linearToken, p.task.uuid, p.task.due).catch(() => {});
-                if (p.startDate && p.task.startDate) {
-                  updateIssueStartDate(linearToken, p.task.uuid, p.task.startDate).catch(() => {});
-                }
-              }
+              void executeUndo(undoId);
             },
           },
         );
@@ -652,58 +794,71 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         pendingMutations.current--;
       }
     },
-    [linearToken, tasks, pushUndo],
+    [tasks, pushUndoCommand, executeUndo],
   );
 
   // Optimistic milestone move (drag on the chart) with rollback + undo
   const updateMilestoneDate = useCallback(
     async (milestoneId: string, newTargetDate: string) => {
-      if (!linearToken) return;
+      const token = linearTokenRef.current;
+      if (!token) return;
 
-      const prevMilestones = milestones;
       const milestone = milestones.find((m) => m.id === milestoneId);
       if (!milestone) return;
 
+      const prevTargetDate = milestone.targetDate;
+
       setMilestones((prev) => prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: newTargetDate } : m)));
 
+      const originProjectId = activeProjectIdRef.current;
       pendingMutations.current++;
       try {
-        await updateMilestoneTargetDate(linearToken, milestoneId, newTargetDate);
+        await updateMilestoneTargetDate(token, milestoneId, newTargetDate);
+        if (activeProjectIdRef.current !== originProjectId) return;
+        const undoId = nextUndoId();
+        pushUndoCommand({
+          id: undoId,
+          targetKey: `milestone:${milestoneId}`,
+          label: `${milestone.name} moved`,
+          revertLocal: () => {
+            setMilestones((prev) => prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: prevTargetDate } : m)));
+          },
+          revertPersist: prevTargetDate
+            ? () => updateMilestoneTargetDate(linearTokenRef.current, milestoneId, prevTargetDate)
+            : null,
+          rollbackRevert: () => {
+            setMilestones((prev) => prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: newTargetDate } : m)));
+          },
+        });
         toast(`${milestone.name} moved`, 'success', {
           label: 'Undo',
           onClick: () => {
-            setMilestones(prevMilestones);
-            if (milestone.targetDate) {
-              updateMilestoneTargetDate(linearToken, milestoneId, milestone.targetDate).catch(() => {});
-            }
+            void executeUndo(undoId);
           },
         });
       } catch (e) {
         if (e instanceof DebounceCancelled) return; // superseded by a newer drag
-        setMilestones(prevMilestones);
-        toastError(`Failed to move milestone: ${(e as Error).message}`, () =>
-          updateMilestoneDate(milestoneId, newTargetDate),
-        );
+        if (activeProjectIdRef.current === originProjectId) {
+          setMilestones((prev) => prev.map((m) => (m.id === milestoneId ? { ...m, targetDate: prevTargetDate } : m)));
+        }
+        const msg = (e as Error).message || '';
+        if (msg.includes('authentication expired')) {
+          toastError('Linear session expired. Reconnecting...');
+          onAuthErrorRef.current?.();
+        } else {
+          toastError(`Failed to move milestone: ${msg}`, () => updateMilestoneDate(milestoneId, newTargetDate));
+        }
       } finally {
         pendingMutations.current--;
       }
     },
-    [linearToken, milestones],
+    [milestones, pushUndoCommand, executeUndo],
   );
 
   // Shared optimistic edit for a single issue (local or unlocked external): apply, persist,
   // then record undo + toast; on failure restore the original field values and offer a retry.
   const editTaskField = useCallback(
-    async ({
-      taskUuid,
-      apply,
-      fields,
-      persist,
-      undoPersist,
-      successMessage,
-      undoLabel,
-      failureMessage,
-    }: {
+    (params: {
       taskUuid: string;
       apply: (task: Task) => Task;
       /** Reads the fields touched by `apply`, so they can be restored without touching other edits */
@@ -714,58 +869,12 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
       undoLabel: string;
       failureMessage: string;
     }): Promise<boolean> => {
-      if (!linearToken) return false;
-      const fromExternal = externalTasks.find((t) => t.uuid === taskUuid);
-      const task = tasks.find((t) => t.uuid === taskUuid) || fromExternal;
-      if (!task) return false;
-
-      if (fromExternal && !allowExternalEdits) {
-        toast('Unlock "Edit external" to modify cross-project issues', 'info');
-        return false;
-      }
-
-      const prevTasks = tasks;
-      const prevExternal = externalTasks;
-      const snapshot = fields(task);
-      const updateList = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? apply(t) : t));
-      const restore = (prev: Task[]) => prev.map((t) => (t.uuid === taskUuid ? { ...t, ...snapshot } : t));
-      if (fromExternal) setExternalTasks(updateList);
-      else setTasks(updateList);
-
-      pendingMutations.current++;
-      try {
-        await persist();
-        pushUndo(prevTasks, `${task.id} ${undoLabel}`, prevExternal);
-        toast(successMessage, 'success', {
-          label: 'Undo',
-          onClick: () => {
-            if (fromExternal) setExternalTasks(restore);
-            else setTasks(restore);
-            undoPersist?.().catch(() => {});
-          },
-        });
-        return true;
-      } catch (e) {
-        if (fromExternal) setExternalTasks(restore);
-        else setTasks(restore);
-        toastError(`${failureMessage}: ${(e as Error).message}`, () => {
-          void editTaskField({
-            taskUuid,
-            apply,
-            fields,
-            persist,
-            undoPersist,
-            successMessage,
-            undoLabel,
-            failureMessage,
-          });
-        });
-        return false;
-      } finally {
-        pendingMutations.current--;
-      }
+      return mutateTaskField({
+        ...params,
+        onRetry: () => editTaskField(params),
+      });
     },
-    [linearToken, tasks, externalTasks, allowExternalEdits, pushUndo],
+    [mutateTaskField],
   );
 
   // Workflow states for a team: cached, otherwise fetched on demand
@@ -773,17 +882,18 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
     async (teamId: string): Promise<WorkflowState[]> => {
       const cached = teamId ? workflowStatesByTeam[teamId] : undefined;
       if (cached && cached.length > 0) return cached;
-      if (!teamId || !linearToken) return workflowStates;
-      const fetched = await fetchWorkflowStates(linearToken, teamId);
+      const token = linearTokenRef.current;
+      if (!teamId || !token) return workflowStates;
+      const fetched = await fetchWorkflowStates(token, teamId);
       setWorkflowStatesByTeam((prev) => ({ ...prev, [teamId]: fetched }));
       return fetched;
     },
-    [linearToken, workflowStatesByTeam, workflowStates],
+    [workflowStatesByTeam, workflowStates],
   );
 
   const loadAssignableUsers = useCallback(
-    (teamId: string): Promise<AssignableUser[]> => fetchAssignableUsers(linearToken, teamId),
-    [linearToken],
+    (teamId: string): Promise<AssignableUser[]> => fetchAssignableUsers(linearTokenRef.current, teamId),
+    [],
   );
 
   // Optimistic status change to an explicitly chosen workflow state. Resolves true when persisted.
@@ -799,14 +909,14 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         taskUuid,
         apply: (t) => applyWorkflowStateToTask(t, nextState, completedAtIso),
         fields: (t) => ({ status: t.status, statusType: t.statusType, completedAt: t.completedAt }),
-        persist: () => updateIssueState(linearToken, taskUuid, nextState.id),
-        undoPersist: prevState ? () => updateIssueState(linearToken, taskUuid, prevState.id) : null,
+        persist: () => updateIssueState(linearTokenRef.current, taskUuid, nextState.id),
+        undoPersist: prevState ? () => updateIssueState(linearTokenRef.current, taskUuid, prevState.id) : null,
         successMessage: `Status → ${nextState.name}`,
         undoLabel: 'status',
         failureMessage: 'Failed to update status',
       });
     },
-    [tasks, externalTasks, workflowStatesByTeam, workflowStates, editTaskField, linearToken],
+    [tasks, externalTasks, workflowStatesByTeam, workflowStates, editTaskField],
   );
 
   // Optimistic (re)assignment; `user === null` unassigns
@@ -821,14 +931,14 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         taskUuid,
         apply: (t) => ({ ...t, assignee: user?.name ?? 'Unassigned', assigneeId: nextId }),
         fields: (t) => ({ assignee: t.assignee, assigneeId: t.assigneeId }),
-        persist: () => updateIssueAssignee(linearToken, taskUuid, nextId),
-        undoPersist: () => updateIssueAssignee(linearToken, taskUuid, prevId),
+        persist: () => updateIssueAssignee(linearTokenRef.current, taskUuid, nextId),
+        undoPersist: () => updateIssueAssignee(linearTokenRef.current, taskUuid, prevId),
         successMessage: user ? `Assigned to ${user.name}` : 'Unassigned',
         undoLabel: 'assignee',
         failureMessage: 'Failed to update assignee',
       });
     },
-    [tasks, externalTasks, editTaskField, linearToken],
+    [tasks, externalTasks, editTaskField],
   );
 
   // Optimistic rename; empty or unchanged titles are ignored
@@ -842,20 +952,20 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         taskUuid,
         apply: (t) => ({ ...t, title: nextTitle }),
         fields: (t) => ({ title: t.title }),
-        persist: () => updateIssueTitle(linearToken, taskUuid, nextTitle),
-        undoPersist: () => updateIssueTitle(linearToken, taskUuid, prevTitle),
+        persist: () => updateIssueTitle(linearTokenRef.current, taskUuid, nextTitle),
+        undoPersist: () => updateIssueTitle(linearTokenRef.current, taskUuid, prevTitle),
         successMessage: `Renamed ${task.id}`,
         undoLabel: 'title',
         failureMessage: 'Failed to rename issue',
       });
     },
-    [tasks, externalTasks, editTaskField, linearToken],
+    [tasks, externalTasks, editTaskField],
   );
 
   // Create a "blocks" relation between two tasks (local or cross-project)
   const createRelation = useCallback(
     async (sourceTaskId: string, targetTaskId: string) => {
-      if (!linearToken) return;
+      if (!linearTokenRef.current) return;
 
       const sourceTask = allKnownTasks.find((t) => t.id === sourceTaskId);
       const targetTask = allKnownTasks.find((t) => t.id === targetTaskId);
@@ -873,48 +983,12 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
         return;
       }
 
-      const prevTasks = tasks;
-      const prevExternal = externalTasks;
       const applyAdd = (prev: Task[]) =>
         prev.map((t) => {
-          if (t.id === sourceTaskId) return { ...t, blocks: [...t.blocks, targetTaskId] };
-          if (t.id === targetTaskId) return { ...t, blockedBy: [...t.blockedBy, sourceTaskId] };
+          if (t.id === sourceTaskId) return { ...t, blocks: [...new Set([...t.blocks, targetTaskId])] };
+          if (t.id === targetTaskId) return { ...t, blockedBy: [...new Set([...t.blockedBy, sourceTaskId])] };
           return t;
         });
-
-      setTasks(applyAdd);
-      setExternalTasks(applyAdd);
-
-      pendingMutations.current++;
-      try {
-        await createIssueRelation(linearToken, sourceTask.uuid, targetTask.uuid);
-        pushUndo(prevTasks, `${sourceTaskId} blocks ${targetTaskId}`, prevExternal);
-        toastSuccess(`${sourceTaskId} now blocks ${targetTaskId}`);
-      } catch (e) {
-        setTasks(prevTasks);
-        setExternalTasks(prevExternal);
-        toastError(`Failed to create relation: ${(e as Error).message}`);
-      } finally {
-        pendingMutations.current--;
-      }
-    },
-    [linearToken, allKnownTasks, tasks, externalTasks, pushUndo],
-  );
-
-  // Remove a "blocks" relation between two tasks (supports cross-project dependencies)
-  // sourceTaskId = blocker identifier, targetTaskId = blocked identifier
-  const removeRelation = useCallback(
-    async (sourceTaskId: string, targetTaskId: string) => {
-      if (!linearToken) return;
-
-      const sourceTask = allKnownTasks.find((t) => t.id === sourceTaskId);
-      const targetTask = allKnownTasks.find((t) => t.id === targetTaskId);
-      if (!sourceTask || !targetTask) return;
-
-      const prevTasks = tasks;
-      const prevUnscheduled = unscheduledTasks;
-      const prevExternal = externalTasks;
-      const prevExternalUnscheduled = externalUnscheduledTasks;
 
       const applyRemove = (prev: Task[]) =>
         prev.map((t) => {
@@ -923,37 +997,167 @@ export function useLinearData(linearToken: string, onAuthError?: () => void, req
           return t;
         });
 
-      const nextTasks = applyRemove(tasks);
-      const nextUnscheduled = applyRemove(unscheduledTasks);
-      const allNextLocals = [...nextTasks, ...nextUnscheduled];
+      setTasks(applyAdd);
+      setUnscheduledTasks(applyAdd);
+      setExternalTasks(applyAdd);
+      setExternalUnscheduledTasks(applyAdd);
 
-      setTasks(nextTasks);
-      setUnscheduledTasks(nextUnscheduled);
-      setExternalTasks(pruneUnlinkedExternalTasks(applyRemove(externalTasks), allNextLocals));
-      setExternalUnscheduledTasks(pruneUnlinkedExternalTasks(applyRemove(externalUnscheduledTasks), allNextLocals));
-
+      const originProjectId = activeProjectIdRef.current;
       pendingMutations.current++;
       try {
-        await removeIssueRelation(linearToken, sourceTask.uuid, targetTask.uuid);
-        pushUndo(
-          prevTasks,
-          `${sourceTaskId} no longer blocks ${targetTaskId}`,
-          prevExternal,
-          prevExternalUnscheduled,
-          prevUnscheduled,
-        );
-        toastSuccess(`Removed: ${sourceTaskId} → ${targetTaskId}`);
+        await createIssueRelation(linearTokenRef.current, sourceTask.uuid, targetTask.uuid);
+        if (activeProjectIdRef.current !== originProjectId) return;
+        const undoId = nextUndoId();
+        pushUndoCommand({
+          id: undoId,
+          targetKey: `relation:${sourceTaskId}:${targetTaskId}`,
+          label: `${sourceTaskId} blocks ${targetTaskId}`,
+          revertLocal: () => {
+            setTasks(applyRemove);
+            setUnscheduledTasks(applyRemove);
+            setExternalTasks(applyRemove);
+            setExternalUnscheduledTasks(applyRemove);
+          },
+          revertPersist: () => removeIssueRelation(linearTokenRef.current, sourceTask.uuid, targetTask.uuid),
+          rollbackRevert: () => {
+            setTasks(applyAdd);
+            setUnscheduledTasks(applyAdd);
+            setExternalTasks(applyAdd);
+            setExternalUnscheduledTasks(applyAdd);
+          },
+        });
+        toast(`${sourceTaskId} now blocks ${targetTaskId}`, 'success', {
+          label: 'Undo',
+          onClick: () => {
+            void executeUndo(undoId);
+          },
+        });
       } catch (e) {
-        setTasks(prevTasks);
-        setUnscheduledTasks(prevUnscheduled);
-        setExternalTasks(prevExternal);
-        setExternalUnscheduledTasks(prevExternalUnscheduled);
-        toastError(`Failed to remove relation: ${(e as Error).message}`);
+        if (activeProjectIdRef.current === originProjectId) {
+          setTasks(applyRemove);
+          setUnscheduledTasks(applyRemove);
+          setExternalTasks(applyRemove);
+          setExternalUnscheduledTasks(applyRemove);
+        }
+        const msg = (e as Error).message || '';
+        if (msg.includes('authentication expired')) {
+          toastError('Linear session expired. Reconnecting...');
+          onAuthErrorRef.current?.();
+        } else {
+          toastError(`Failed to create relation: ${msg}`);
+        }
       } finally {
         pendingMutations.current--;
       }
     },
-    [linearToken, allKnownTasks, tasks, unscheduledTasks, externalTasks, externalUnscheduledTasks, pushUndo],
+    [allKnownTasks, pushUndoCommand, executeUndo],
+  );
+
+  // Remove a "blocks" relation between two tasks (supports cross-project dependencies)
+  // sourceTaskId = blocker identifier, targetTaskId = blocked identifier
+  const removeRelation = useCallback(
+    async (sourceTaskId: string, targetTaskId: string) => {
+      if (!linearTokenRef.current) return;
+
+      const sourceTask = allKnownTasks.find((t) => t.id === sourceTaskId);
+      const targetTask = allKnownTasks.find((t) => t.id === targetTaskId);
+      if (!sourceTask || !targetTask) return;
+
+      const sourceWasExternal = sourceTask.isExternal;
+      const targetWasExternal = targetTask.isExternal;
+
+      const applyRemove = (prev: Task[]) =>
+        prev.map((t) => {
+          if (t.id === sourceTaskId) return { ...t, blocks: t.blocks.filter((id) => id !== targetTaskId) };
+          if (t.id === targetTaskId) return { ...t, blockedBy: t.blockedBy.filter((id) => id !== sourceTaskId) };
+          return t;
+        });
+
+      const applyAdd = (prev: Task[]) =>
+        prev.map((t) => {
+          if (t.id === sourceTaskId) return { ...t, blocks: [...new Set([...t.blocks, targetTaskId])] };
+          if (t.id === targetTaskId) return { ...t, blockedBy: [...new Set([...t.blockedBy, sourceTaskId])] };
+          return t;
+        });
+
+      const applyRemoveLocal = () => {
+        setTasks(applyRemove);
+        setUnscheduledTasks(applyRemove);
+        const updatedLocals = [
+          ...tasks.map((t) => (t.id === sourceTaskId || t.id === targetTaskId ? applyRemove([t])[0] : t)),
+          ...unscheduledTasks.map((t) => (t.id === sourceTaskId || t.id === targetTaskId ? applyRemove([t])[0] : t)),
+        ];
+        setExternalTasks((prev) => pruneUnlinkedExternalTasks(applyRemove(prev), updatedLocals));
+        setExternalUnscheduledTasks((prev) => pruneUnlinkedExternalTasks(applyRemove(prev), updatedLocals));
+      };
+
+      const applyAddLocal = () => {
+        setTasks(applyAdd);
+        setUnscheduledTasks(applyAdd);
+        setExternalTasks((prev) => {
+          const updated = applyAdd(prev);
+          const currentUuids = new Set(updated.map((t) => t.uuid));
+          const toAdd: Task[] = [];
+          if (sourceWasExternal && !sourceTask.isUnscheduledExternal && !currentUuids.has(sourceTask.uuid)) {
+            toAdd.push(sourceTask);
+          }
+          if (targetWasExternal && !targetTask.isUnscheduledExternal && !currentUuids.has(targetTask.uuid)) {
+            toAdd.push(targetTask);
+          }
+          return toAdd.length > 0 ? applyAdd([...updated, ...toAdd]) : updated;
+        });
+        setExternalUnscheduledTasks((prev) => {
+          const updated = applyAdd(prev);
+          const currentUuids = new Set(updated.map((t) => t.uuid));
+          const toAdd: Task[] = [];
+          if (sourceWasExternal && sourceTask.isUnscheduledExternal && !currentUuids.has(sourceTask.uuid)) {
+            toAdd.push(sourceTask);
+          }
+          if (targetWasExternal && targetTask.isUnscheduledExternal && !currentUuids.has(targetTask.uuid)) {
+            toAdd.push(targetTask);
+          }
+          return toAdd.length > 0 ? applyAdd([...updated, ...toAdd]) : updated;
+        });
+      };
+
+      applyRemoveLocal();
+
+      const originProjectId = activeProjectIdRef.current;
+      pendingMutations.current++;
+      try {
+        await removeIssueRelation(linearTokenRef.current, sourceTask.uuid, targetTask.uuid);
+        if (activeProjectIdRef.current !== originProjectId) return;
+        const undoId = nextUndoId();
+        pushUndoCommand({
+          id: undoId,
+          targetKey: `relation:${sourceTaskId}:${targetTaskId}`,
+          label: `${sourceTaskId} no longer blocks ${targetTaskId}`,
+          revertLocal: applyAddLocal,
+          revertPersist: () => createIssueRelation(linearTokenRef.current, sourceTask.uuid, targetTask.uuid),
+          rollbackRevert: applyRemoveLocal,
+        });
+        toast(`Removed: ${sourceTaskId} → ${targetTaskId}`, 'success', {
+          label: 'Undo',
+          onClick: () => {
+            void executeUndo(undoId);
+          },
+        });
+      } catch (e) {
+        if (activeProjectIdRef.current === originProjectId) {
+          applyAddLocal();
+        }
+        const msg = (e as Error).message || '';
+        if (msg.includes('authentication expired')) {
+          toastError('Linear session expired. Reconnecting...');
+          onAuthErrorRef.current?.();
+        } else {
+          toastError(`Failed to remove relation: ${msg}`);
+        }
+      } finally {
+        pendingMutations.current--;
+      }
+    },
+    [allKnownTasks, tasks, unscheduledTasks, pushUndoCommand, executeUndo],
   );
 
   // Initial load when token is available
