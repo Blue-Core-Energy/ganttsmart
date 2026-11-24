@@ -1247,6 +1247,7 @@ export default function GanttChart({
                 isExternalReadOnly={Boolean(task.isExternal && !allowExternalEdits)}
                 onSelectProject={onSelectProject}
                 isHighlighted={highlightedTaskIds?.has(task.id)}
+                isNarrow={isNarrowViewport}
                 daysOff={daysOff}
               />
             ))}

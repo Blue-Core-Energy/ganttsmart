@@ -56,6 +56,7 @@ export default function CellMenu({
   const previousFocusRef = useRef<HTMLElement | null>(
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
+  const anchorRectRef = useRef<{ top: number; left: number } | null>(null);
   const listboxId = useId();
 
   const filtered = useMemo(
@@ -80,6 +81,7 @@ export default function CellMenu({
       const anchor = anchorRef.current;
       if (!anchor) return;
       const rect = anchor.getBoundingClientRect();
+      anchorRectRef.current = { top: rect.top, left: rect.left };
       const menuEl = menuRef.current;
       const menuWidth = menuEl?.offsetWidth || MENU_WIDTH;
       const clientWidth = document.documentElement.clientWidth || window.innerWidth;
@@ -124,8 +126,12 @@ export default function CellMenu({
     };
     const onScroll = (e: Event) => {
       if (menuRef.current?.contains(e.target as Node)) return;
-      close(false);
+      // Close once the anchor has moved away from where the menu was anchored (sticky columns stay put)
+      const t = anchorRef.current?.getBoundingClientRect();
+      const a = anchorRectRef.current;
+      if (!t || !a || Math.abs(t.top - a.top) > 1 || Math.abs(t.left - a.left) > 1) close(false);
     };
+    const onResize = () => close(false);
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       e.preventDefault();
@@ -134,12 +140,12 @@ export default function CellMenu({
     };
     document.addEventListener('pointerdown', onPointerDown, true);
     window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onScroll);
+    window.addEventListener('resize', onResize);
     window.addEventListener('keydown', onKeyDown, true);
     return () => {
       document.removeEventListener('pointerdown', onPointerDown, true);
       window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onScroll);
+      window.removeEventListener('resize', onResize);
       window.removeEventListener('keydown', onKeyDown, true);
     };
   }, [anchorRef, close]);

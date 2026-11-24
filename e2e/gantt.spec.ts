@@ -5509,6 +5509,8 @@ test.describe('GanttSmart GCP app', () => {
                 issue(304, 'Depth four with a long enough title to truncate', 13, -2, 303),
                 issue(305, 'Depth five with a long enough title to truncate', 12, -2, 304),
                 issue(306, 'Depth five with a warning and a long title to truncate', 11, -2, 304),
+                issue(307, 'Depth six with a long enough title to truncate', 10, -2, 305),
+                issue(308, 'Depth seven with a warning and a long title to truncate', 9, -2, 307),
                 issue(310, 'Blocker due late', 25, -4, null),
               ],
             },
@@ -5531,17 +5533,21 @@ test.describe('GanttSmart GCP app', () => {
               relationsOf(302, [], [303]),
               // LOC-303 and the external CTRL-42 both start before LOC-310 is due, so both carry a warning
               relationsOf(303, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [304]),
-              // LOC-304 also warns (depth four with a warning); LOC-305 is the deepest row, with only the dot
+              // LOC-304 also warns (depth four with a warning); LOC-305 leads into deeper hierarchy
               relationsOf(304, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], [305, 306]),
-              relationsOf(305, [], []),
-              // LOC-306 is a depth-five sibling that also warns, the tightest row a rename can happen on
+              relationsOf(305, [], [307]),
+              // LOC-306 is a depth-five sibling that also warns
               relationsOf(306, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], []),
+              relationsOf(307, [], [308]),
+              // LOC-308 is depth seven and warns, testing deep indentation fit and status menu reachability
+              relationsOf(308, [{ type: 'blocked_by', relatedIssue: { identifier: 'LOC-310' } }], []),
               relationsOf(
                 310,
                 [
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-303' } },
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-304' } },
                   { type: 'blocks', relatedIssue: { identifier: 'LOC-306' } },
+                  { type: 'blocks', relatedIssue: { identifier: 'LOC-308' } },
                   { type: 'blocks', relatedIssue: externalIssue },
                   { type: 'blocks', relatedIssue: shortExternalIssue },
                 ],
@@ -5577,18 +5583,20 @@ test.describe('GanttSmart GCP app', () => {
 
     await expect(page.locator('tr[data-task-id="LOC-304"]')).toHaveAttribute('data-task-depth', '4');
     await expect(page.locator('tr[data-task-id="LOC-305"]')).toHaveAttribute('data-task-depth', '5');
+    await expect(page.locator('tr[data-task-id="LOC-307"]')).toHaveAttribute('data-task-depth', '6');
+    await expect(page.locator('tr[data-task-id="LOC-308"]')).toHaveAttribute('data-task-depth', '7');
 
     // The widest lines the Issue cell can hold at 200px: deep indents (3 and 4 with a warning, 5 with just the
-    // dot, which is the only status control on a phone) and an external row (always top level) with its project
-    // badge and a warning
-    // `minTitle` is how much of the title must survive. Depth five with a warning is the tightest row: its
-    // 42px line holds the 10px warning, the 8px dot and two 6px gaps, which leaves about 12px, so the title is
-    // down to an ellipsis there by geometry rather than by layout choice
+    // dot, which is the only status control on a phone, and depth 7 with a warning) and an external row (always top level)
+    // with its project badge and a warning
+    // `minTitle` is how much of the title must survive.
     for (const { id, warns, minTitle } of [
       { id: 'LOC-303', warns: true, minTitle: 16 },
       { id: 'LOC-304', warns: true, minTitle: 16 },
       { id: 'LOC-305', warns: false, minTitle: 16 },
       { id: 'LOC-306', warns: true, minTitle: 10 },
+      { id: 'LOC-307', warns: false, minTitle: 16 },
+      { id: 'LOC-308', warns: true, minTitle: 10 },
       { id: 'CTRL-42', warns: true, minTitle: 16 },
       { id: 'CTRL-43', warns: true, minTitle: 16 },
     ]) {
@@ -5647,49 +5655,118 @@ test.describe('GanttSmart GCP app', () => {
       .boundingBox())!;
     expect(badgeBox.width).toBeGreaterThan(20);
 
-    // Renaming hides the project badge and warning (both informational) so the input gets their room, keeps the
-    // dot, and the warning returns afterwards. Depth five is the tightest row: its 42px line holds the 8px dot and
-    // a 6px gap, so about 28px is the most any input can get there, which is enough for a couple of characters.
-    // The floors are what the layout delivers (63, 45 and 27px) less a pixel or two of slack
+    // Renaming hides the project badge, warning, and status dot so the input gets all available room,
+    // and they return afterwards.
     const warning = (id: string) =>
       page.locator(`tr[data-task-id="${id}"] td[data-column-key="task"] span[title^="Starts before"]`);
     const renameWidths: Record<string, number> = {};
     for (const { id, minInput } of [
-      { id: 'LOC-303', minInput: 60 },
-      { id: 'LOC-304', minInput: 42 },
-      { id: 'LOC-305', minInput: 24 },
-      { id: 'LOC-306', minInput: 24 },
+      { id: 'LOC-303', minInput: 90 },
+      { id: 'LOC-304', minInput: 80 },
+      { id: 'LOC-305', minInput: 70 },
+      { id: 'LOC-306', minInput: 70 },
+      { id: 'LOC-308', minInput: 60 },
     ]) {
       const hasWarning = id !== 'LOC-305';
+      const cell = page.locator(`tr[data-task-id="${id}"] td[data-column-key="task"]`);
+      const cellBox = (await cell.boundingBox())!;
       await expect(warning(id)).toHaveCount(hasWarning ? 1 : 0);
+      await expect(page.locator(`[data-status-bubble="${id}"]`)).toBeVisible();
+
+      // For LOC-308, open status menu first to verify starting a title edit closes any open menu
+      if (id === 'LOC-308') {
+        await page.locator(`[data-status-bubble="${id}"]`).click();
+        await expect(page.locator(`[data-inline-menu="Status for ${id}"]`)).toBeVisible();
+      }
+
       await page.locator(`[data-task-title="${id}"]`).dblclick();
       const input = page.locator('input[data-inline-edit="title"]');
       await expect(input).toBeFocused();
+
+      if (id === 'LOC-308') {
+        await expect(page.locator(`[data-inline-menu="Status for ${id}"]`)).toHaveCount(0);
+      }
+
       await expect(warning(id)).toHaveCount(0);
+      // Status dot is hidden during title rename so inline rename gets the remaining room (~60+px even at depth 7)
+      await expect(page.locator(`[data-status-bubble="${id}"]`)).toHaveCount(0);
       const inputBox = (await input.boundingBox())!;
-      const dotBox = (await page.locator(`[data-status-bubble="${id}"]`).boundingBox())!;
       expect(inputBox.width).toBeGreaterThanOrEqual(minInput);
-      expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(dotBox.x);
+      expect(inputBox.x + inputBox.width).toBeLessThanOrEqual(cellBox.x + cellBox.width);
       renameWidths[id] = inputBox.width;
-      await page.keyboard.press('Escape');
-      await expect(input).toHaveCount(0);
+
+      if (id === 'LOC-306') {
+        // Exercise Enter save
+        await input.fill('Depth five with warning renamed');
+        await page.keyboard.press('Enter');
+        await expect(input).toHaveCount(0);
+        await expect(page.locator(`[data-task-title="${id}"]`)).toHaveText('Depth five with warning renamed');
+      } else {
+        await page.keyboard.press('Escape');
+        await expect(input).toHaveCount(0);
+      }
+
       await expect(warning(id)).toHaveCount(hasWarning ? 1 : 0);
+      await expect(page.locator(`[data-status-bubble="${id}"]`)).toBeVisible();
     }
     // The warning costs a rename nothing: depth five with one gets the same width as depth five without
     expect(Math.abs(renameWidths['LOC-306'] - renameWidths['LOC-305'])).toBeLessThanOrEqual(1);
-    expect(stateUpdates).toEqual([]);
+
+    // Saving LOC-306 dispatched an issue update
+    await expect.poll(() => stateUpdates).toEqual(['uuid-306']);
+
+    // Enabling external write mode unlocks inline editing for external rows
+    const editExternalBtn = page.getByRole('button', { name: 'Edit external' });
+    await editExternalBtn.click();
+    await expect(page.getByRole('button', { name: 'Editing external' })).toHaveAttribute('aria-pressed', 'true');
+
+    // Renaming an external row hides its project badge and status dot so the input gets the room
+    const ctrlBadge = page.locator(
+      'tr[data-task-id="CTRL-42"] td[data-column-key="task"] [data-external-project-jump]',
+    );
+    await expect(ctrlBadge).toBeVisible();
+    await expect(page.locator('[data-status-bubble="CTRL-42"]')).toBeVisible();
+    await page.locator('[data-task-title="CTRL-42"]').dblclick();
+    const ctrlInput = page.locator('input[data-inline-edit="title"]');
+    await expect(ctrlInput).toBeFocused();
+    await expect(ctrlBadge).toHaveCount(0);
+    await expect(page.locator('[data-status-bubble="CTRL-42"]')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(ctrlInput).toHaveCount(0);
+    await expect(ctrlBadge).toBeVisible();
+    await expect(page.locator('[data-status-bubble="CTRL-42"]')).toBeVisible();
+
+    // Lock external editing again
+    await page.getByRole('button', { name: 'Editing external' }).click();
+    await expect(page.getByRole('button', { name: 'Edit external' })).toBeVisible();
+
+    const dismissToasts = async () => {
+      const closeButtons = page.locator('.fixed.bottom-6 button:has-text("×")');
+      while ((await closeButtons.count()) > 0) {
+        await closeButtons.first().click();
+      }
+    };
 
     // Changing status via the dot menu works from the deepest rows
+    await dismissToasts();
     await page.locator('[data-status-bubble="LOC-303"]').click();
     const menu303 = page.locator('[data-inline-menu="Status for LOC-303"]');
     await expect(menu303).toBeVisible();
     await menu303.getByRole('option', { name: 'In Progress' }).click();
-    await expect.poll(() => stateUpdates).toEqual(['uuid-303']);
+    await expect.poll(() => stateUpdates).toEqual(['uuid-306', 'uuid-303']);
+    await dismissToasts();
     await page.locator('[data-status-bubble="LOC-305"]').click();
     const menu305 = page.locator('[data-inline-menu="Status for LOC-305"]');
     await expect(menu305).toBeVisible();
     await menu305.getByRole('option', { name: 'Done' }).click();
-    await expect.poll(() => stateUpdates).toEqual(['uuid-303', 'uuid-305']);
+    await expect.poll(() => stateUpdates).toEqual(['uuid-306', 'uuid-303', 'uuid-305']);
+    // Deepest row (depth 7 with warning) opens status menu and updates status without toast obstruction
+    await dismissToasts();
+    await page.locator('[data-status-bubble="LOC-308"]').click();
+    const menu308 = page.locator('[data-inline-menu="Status for LOC-308"]');
+    await expect(menu308).toBeVisible();
+    await menu308.getByRole('option', { name: 'In Progress' }).click();
+    await expect.poll(() => stateUpdates).toEqual(['uuid-306', 'uuid-303', 'uuid-305', 'uuid-308']);
 
     expect(errors).toEqual([]);
   });

@@ -4,7 +4,7 @@ import type { TaskBaseline } from '@/hooks/usePlanningHistory';
 import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/scheduleColumns';
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
-import { BAR_HEIGHT, CELL_HIT_PAD, INDENT_PER_DEPTH, ROW_HEIGHT } from '@/utils/ganttLayout';
+import { BAR_HEIGHT, CELL_HIT_PAD, computeTaskIndent, ROW_HEIGHT } from '@/utils/ganttLayout';
 import { priorityBadgeClasses, priorityClass, priorityColors, statusDotColorFor } from '@/utils/colors';
 import {
   buildTimeCells,
@@ -60,6 +60,8 @@ interface Props {
   /** The chevron is shown but inert — every matching row is revealed while filtering */
   toggleLocked?: boolean;
   onToggleCollapse?: (taskId: string) => void;
+  /** Force narrow-viewport layout rules (e.g. mobile 200px Issue column) */
+  isNarrow?: boolean;
   /** Days off: shaded on the row and skipped by workday math for this task's assignee */
   daysOff?: DayOff[];
 }
@@ -96,6 +98,7 @@ export default function GanttRow({
   collapsed = false,
   toggleLocked = false,
   onToggleCollapse,
+  isNarrow: isNarrowProp,
   daysOff,
 }: Props) {
   const canDragDue = Boolean(onReschedule) && !isExternalReadOnly;
@@ -224,6 +227,7 @@ export default function GanttRow({
 
   const startTitleEdit = () => {
     if (!canInlineEdit) return;
+    setMenu(null);
     titleDoneRef.current = false;
     setTitleDraft(task.title);
     setEditingTitle(true);
@@ -622,7 +626,8 @@ export default function GanttRow({
 
   function renderCell(key: ColumnKey) {
     switch (key) {
-      case 'task':
+      case 'task': {
+        const indent = computeTaskIndent(depth, { isNarrow: isNarrowProp, colWidth: colWidths.task });
         return (
           <div className="flex items-center gap-2.5 min-w-0">
             {onReorder && (
@@ -645,7 +650,7 @@ export default function GanttRow({
             )}
             <div
               className="min-w-0 flex-1 flex items-center gap-1"
-              style={depth > 0 ? { paddingLeft: depth * INDENT_PER_DEPTH } : undefined}
+              style={indent > 0 ? { paddingLeft: indent } : undefined}
               data-task-indent={depth}
             >
               {showTreeGutter && treeGutter}
@@ -729,8 +734,8 @@ export default function GanttRow({
                     {task.title}
                   </div>
                 )}
-                {/* Keep status dropdown reachable when the status column is hidden */}
-                {!showsColumn('status') && (
+                {/* Keep status dropdown reachable when the status column is hidden, stepping aside during rename */}
+                {!showsColumn('status') && !isEditingTitle && (
                   <span className="ml-auto flex items-center shrink-0">
                     {renderIssueStatusDot()}
                     {renderStatusMenu(issueStatusAnchorRef)}
@@ -740,6 +745,7 @@ export default function GanttRow({
             </div>
           </div>
         );
+      }
 
       case 'assignee':
         if (!canInlineEdit) {
