@@ -107,7 +107,7 @@ export default function SingleDatePicker({
           aria-label={popoverLabel}
           data-popover={popoverKind}
           data-popover-task={taskId}
-          className="z-[200] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-16px)]"
+          className="z-[200] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 w-max max-w-[calc(100vw-16px)]"
         >
           <DayPicker
             mode="single"
@@ -138,8 +138,8 @@ export default function SingleDatePicker({
               week: 'flex',
               day: 'w-9 h-8 text-center text-xs',
               day_button:
-                'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-inherit',
-              selected: 'bg-accent text-white rounded-md font-semibold',
+                'w-full h-full rounded-[4px] hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-inherit',
+              selected: 'bg-accent text-white rounded-[4px] font-medium',
               today: 'font-bold text-accent',
               outside: 'text-text-muted/40',
               disabled: 'text-text-muted/30',

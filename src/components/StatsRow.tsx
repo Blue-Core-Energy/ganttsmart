@@ -17,7 +17,7 @@ function FlagIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -35,7 +35,7 @@ function PlayIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -52,7 +52,7 @@ function CalendarIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -72,7 +72,7 @@ function AlertIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -91,7 +91,7 @@ function CheckIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -108,7 +108,7 @@ function ChevronIcon({ up }: { up: boolean }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -213,7 +213,7 @@ export default function StatsRow({ tasks, unscheduledTasks = [] }: Props) {
               className={`flex items-center gap-3 px-4 py-1.5 shrink-0 ${i > 0 ? 'border-l border-border-primary' : ''}`}
             >
               <div
-                className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
+                className="w-7 h-7 rounded-md flex items-center justify-center shrink-0"
                 style={{ background: `color-mix(in srgb, ${c.color} 14%, transparent)`, color: c.color }}
               >
                 <Icon />

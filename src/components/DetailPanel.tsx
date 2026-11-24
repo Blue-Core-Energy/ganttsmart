@@ -7,6 +7,8 @@ import { countWorkdaysInclusive, formatDateShort } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { calendarFor } from '@/utils/daysOff';
 import { isTaskDone } from '@/utils/tasks';
+import PriorityIcon from './PriorityIcon';
+import StatusIcon from './StatusIcon';
 import {
   closeDetailPanel,
   getDetailPanelBaselines,
@@ -98,7 +100,7 @@ export default function DetailPanel() {
       <div
         ref={panelRef}
         className={`fixed z-[151] bg-bg-card shadow-2xl flex flex-col transition-transform duration-250 ease-out print:hidden
-          inset-x-0 bottom-0 max-h-[75vh] rounded-t-2xl border-t border-border-secondary
+          inset-x-0 bottom-0 max-h-[75vh] rounded-t-lg border-t border-border-secondary
           md:inset-x-auto md:right-0 md:top-0 md:bottom-0 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-[420px] md:max-w-[90vw]
           ${visible ? 'translate-y-0 md:translate-x-0' : 'translate-y-full md:translate-y-0 md:translate-x-full'}`}
       >
@@ -110,13 +112,14 @@ export default function DetailPanel() {
             </span>
             <span className="text-[10px] text-text-muted">·</span>
             <span
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded-full"
+              className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-[4px]"
               style={priorityBadgeStyle(currentTask.priority)}
             >
-              {currentTask.priority}
+              <PriorityIcon priority={currentTask.priority} size={11} className="shrink-0" />
+              <span>{currentTask.priority}</span>
             </span>
             {currentTask.isExternal && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/25 truncate max-w-[140px]">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-[4px] bg-accent/10 text-accent border border-accent/25 truncate max-w-[140px]">
                 {currentTask.projectName || 'External'}
               </span>
             )}
@@ -136,7 +139,7 @@ export default function DetailPanel() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
@@ -156,7 +159,7 @@ export default function DetailPanel() {
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
                 strokeLinecap="round"
               >
                 <line x1="18" y1="6" x2="6" y2="18" />
@@ -219,7 +222,7 @@ export default function DetailPanel() {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Status</span>
                 <span className="inline-flex items-center gap-1.5 text-xs font-medium text-text-primary">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusDotColor }} />
+                  <StatusIcon type={currentTask.statusType} color={statusDotColor} size={14} />
                   {currentTask.status}
                 </span>
               </div>
@@ -229,10 +232,11 @@ export default function DetailPanel() {
                 <span className="text-xs text-text-muted">Priority</span>
                 <span
                   data-priority-badge
-                  className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                  className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-0.5 rounded-[4px]"
                   style={priorityBadgeStyle(currentTask.priority)}
                 >
-                  {currentTask.priority}
+                  <PriorityIcon priority={currentTask.priority} size={13} className="shrink-0" />
+                  <span>{currentTask.priority}</span>
                 </span>
               </div>
 
@@ -424,7 +428,7 @@ export default function DetailPanel() {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            strokeWidth="2.5"
+                            strokeWidth="1.5"
                             strokeLinecap="round"
                           >
                             <line x1="18" y1="6" x2="6" y2="18" />
@@ -483,7 +487,7 @@ export default function DetailPanel() {
                             viewBox="0 0 24 24"
                             fill="none"
                             stroke="currentColor"
-                            strokeWidth="2.5"
+                            strokeWidth="1.5"
                             strokeLinecap="round"
                           >
                             <line x1="18" y1="6" x2="6" y2="18" />

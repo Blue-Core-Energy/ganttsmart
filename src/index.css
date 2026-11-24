@@ -1,18 +1,18 @@
 @import 'tailwindcss';
 
-/* ---- Dark theme (default) — Zinc + Purple ---- */
+/* ---- Dark theme (default) — Linear Obsidian + Indigo ---- */
 @theme {
-  --color-bg-primary: #09090b;
-  --color-bg-card: #111113;
-  --color-bg-header: #1c1c1f;
-  --color-bg-hover: #27272a;
-  --color-border-primary: #27272a;
-  --color-border-secondary: #3f3f46;
-  --color-text-primary: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #52525b;
-  --color-accent: #7c5cfc;
-  --color-accent-light: #9d84fd;
+  --color-bg-primary: #08090a;
+  --color-bg-card: #101114;
+  --color-bg-header: #16171b;
+  --color-bg-hover: #1f2127;
+  --color-border-primary: #22242a;
+  --color-border-secondary: #2e313a;
+  --color-text-primary: #f7f8f8;
+  --color-text-secondary: #8a8f98;
+  --color-text-muted: #5c616c;
+  --color-accent: #5e6ad2;
+  --color-accent-light: #717ce1;
   --color-urgent: #ef4444;
   --color-urgent-dark: #b91c1c;
   --color-high: #f97316;
@@ -21,8 +21,8 @@
   --color-medium-dark: #b45309;
   --color-low: #22c55e;
   --color-low-dark: #15803d;
-  --color-none: #a1a1aa;
-  --color-none-dark: #52525b;
+  --color-none: #8a8f98;
+  --color-none-dark: #5c616c;
   --color-success: #22c55e;
   --color-success-hover: #16a34a;
   /* Schedule state — what a Gantt bar's colour means (see src/utils/scheduleState.ts). Four of
@@ -38,23 +38,23 @@
   --color-state-late-start-dark: #b45309;
   --color-state-not-started: #a1a1aa;
   --color-state-not-started-dark: #52525b;
-  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
 
 /* ---- Light theme overrides ---- */
 html.light {
-  --color-bg-primary: #f4f4f5;
+  --color-bg-primary: #f7f8fa;
   --color-bg-card: #ffffff;
-  --color-bg-header: #fafafa;
-  --color-bg-hover: #e4e4e7;
-  --color-border-primary: #e4e4e7;
-  --color-border-secondary: #d4d4d8;
-  --color-text-primary: #09090b;
-  --color-text-secondary: #52525b;
-  --color-text-muted: #a1a1aa;
-  --color-accent: #7c5cfc;
-  --color-accent-light: #9d84fd;
+  --color-bg-header: #fbfbfc;
+  --color-bg-hover: #eef0f4;
+  --color-border-primary: #e6e8ec;
+  --color-border-secondary: #d6d9e0;
+  --color-text-primary: #1b1d22;
+  --color-text-secondary: #5e6470;
+  --color-text-muted: #9096a2;
+  --color-accent: #5e6ad2;
+  --color-accent-light: #4e5bc4;
   --color-urgent: #dc2626;
   --color-urgent-dark: #991b1b;
   --color-high: #ea580c;
@@ -63,8 +63,8 @@ html.light {
   --color-medium-dark: #92400e;
   --color-low: #16a34a;
   --color-low-dark: #14532d;
-  --color-none: #71717a;
-  --color-none-dark: #52525b;
+  --color-none: #5e6470;
+  --color-none-dark: #9096a2;
   --color-success: #16a34a;
   --color-success-hover: #15803d;
   --color-state-done: #16a34a;
@@ -80,11 +80,10 @@ html.light {
 }
 
 body {
-  font-family:
-    'Outfit',
-    -apple-system,
-    BlinkMacSystemFont,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   min-height: 100vh;
@@ -93,7 +92,7 @@ body {
     background-color 0.2s ease,
     color 0.2s ease;
   scrollbar-gutter: stable;
-  letter-spacing: -0.005em;
+  letter-spacing: -0.011em;
 }
 
 /* Focus accessibility */
@@ -117,7 +116,7 @@ a {
 
 /* Mono utility class */
 .font-mono {
-  font-family: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 /* Tabular nums for date alignment */
@@ -141,7 +140,7 @@ a {
   background: var(--color-text-muted);
 }
 
-/* Gantt bar gradients — subtle shimmer via pseudo-element */
+/* Gantt bar gradients — subtle sheen via pseudo-element */
 .gantt-bar {
   position: relative;
   overflow: hidden;
@@ -153,8 +152,8 @@ a {
   left: 0;
   right: 0;
   height: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 6px 6px 0 0;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 4px 4px 0 0;
   pointer-events: none;
 }
 .gantt-bar::after {
@@ -163,9 +162,9 @@ a {
   right: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
-  background: rgba(0, 0, 0, 0.2);
-  border-radius: 0 6px 6px 0;
+  width: 3px;
+  background: rgba(0, 0, 0, 0.16);
+  border-radius: 0 4px 4px 0;
   pointer-events: none;
 }
 
@@ -205,11 +204,12 @@ a {
   box-shadow:
     var(--tw-ring-offset-shadow),
     var(--tw-ring-shadow),
-    0 2px 8px color-mix(in srgb, var(--bar-color, var(--color-state-not-started)) 30%, transparent);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.18);
 }
 
 html.light .gantt-bar::before {
-  background: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 /* Baseline (original plan) ghost overlay: neutral, theme-aware dashed outline visible over all 5 bar colours */

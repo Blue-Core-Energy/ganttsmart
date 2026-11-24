@@ -40,11 +40,11 @@ export default function AuthPage({ onSignIn, onSignUp, onGoogleSignIn }: Props) 
 
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center z-200">
-      <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[440px] w-full text-center">
+      <div className="bg-bg-card border border-border-secondary rounded-lg shadow-xl p-8 max-w-[440px] w-full text-center">
         <div className="flex justify-center mb-4">
           <Logo size={40} />
         </div>
-        <h1 className="text-2xl font-bold text-white mb-1 tracking-tight">GanttSmart</h1>
+        <h1 className="text-2xl font-bold text-text-primary mb-1 tracking-tight">GanttSmart</h1>
         <p className="text-[13px] text-text-secondary mb-8 leading-relaxed">
           {isSignUp ? 'Create an account to get started' : 'Sign in to your account'}
         </p>
@@ -62,7 +62,7 @@ export default function AuthPage({ onSignIn, onSignUp, onGoogleSignIn }: Props) 
             setBusy(false);
           }}
           disabled={busy}
-          className="w-full py-3 px-4 bg-white text-gray-800 rounded-lg text-sm font-semibold cursor-pointer flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors mb-6 disabled:opacity-50"
+          className="w-full py-2.5 px-4 bg-white text-gray-800 rounded-md text-sm font-medium cursor-pointer flex items-center justify-center gap-2 hover:bg-gray-100 transition-colors mb-6 disabled:opacity-50"
         >
           <svg width="18" height="18" viewBox="0 0 18 18">
             <path
@@ -99,7 +99,7 @@ export default function AuthPage({ onSignIn, onSignUp, onGoogleSignIn }: Props) 
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Email address"
             autoComplete="email"
-            className="w-full px-4 py-3 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-sm mb-3 outline-none transition-colors focus:border-accent"
+            className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-sm mb-3 outline-none transition-colors focus:border-accent"
           />
           <input
             type="password"
@@ -107,12 +107,12 @@ export default function AuthPage({ onSignIn, onSignUp, onGoogleSignIn }: Props) 
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Password"
             autoComplete={isSignUp ? 'new-password' : 'current-password'}
-            className="w-full px-4 py-3 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-sm mb-4 outline-none transition-colors focus:border-accent"
+            className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-sm mb-4 outline-none transition-colors focus:border-accent"
           />
           <button
             type="submit"
             disabled={busy}
-            className="w-full py-3 bg-success border-none rounded-lg text-white text-sm font-semibold cursor-pointer transition-colors hover:bg-success-hover disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-2.5 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer transition-colors hover:bg-accent-light disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {busy ? (isSignUp ? 'Creating account...' : 'Signing in...') : isSignUp ? 'Create Account' : 'Sign In'}
           </button>

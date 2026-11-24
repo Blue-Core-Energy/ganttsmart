@@ -1,7 +1,9 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import AnchoredPopover from '@/components/AnchoredPopover';
-import type { Filters } from '@/types';
+import StatusIcon from '@/components/StatusIcon';
+import type { Filters, Task } from '@/types';
 import { Avatar } from '@/utils/avatar';
+import { statusDotColorFor } from '@/utils/colors';
 import { MOBILE_BREAKPOINT } from '@/utils/scheduleColumns';
 import CustomDropdown from './CustomDropdown';
 import type { DropdownOption } from './CustomDropdown';
@@ -10,6 +12,8 @@ import DateRangePicker from './DateRangePicker';
 interface Props {
   assignees: string[];
   statuses: string[];
+  statusTypeByStatus?: Map<string, string> | Record<string, string>;
+  tasks?: Task[];
   filters: Filters;
   onFiltersChange: (f: Filters) => void;
   showBaselines?: boolean;
@@ -33,7 +37,7 @@ function SearchIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -51,7 +55,7 @@ function UsersIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="text-text-muted shrink-0"
@@ -64,25 +68,6 @@ function UsersIcon() {
   );
 }
 
-function StatusIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-text-muted shrink-0"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </svg>
-  );
-}
-
 function FilterIcon() {
   return (
     <svg
@@ -91,7 +76,7 @@ function FilterIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -104,7 +89,7 @@ function FilterIcon() {
 function BaselineIcon() {
   return (
     <svg width="14" height="10" viewBox="0 0 20 12" fill="none" className="shrink-0">
-      <rect x="1" y="1" width="18" height="10" rx="3" stroke="currentColor" strokeWidth="1.6" strokeDasharray="3 2.4" />
+      <rect x="1" y="1" width="18" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2.4" />
     </svg>
   );
 }
@@ -117,7 +102,7 @@ function CrossProjectIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -136,7 +121,7 @@ function LockIcon({ unlocked }: { unlocked?: boolean }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -151,7 +136,7 @@ function LockIcon({ unlocked }: { unlocked?: boolean }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -170,7 +155,7 @@ function CheckIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.5"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -188,7 +173,7 @@ function XIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.5"
+      strokeWidth="1.5"
       strokeLinecap="round"
     >
       <line x1="18" y1="6" x2="6" y2="18" />
@@ -200,6 +185,8 @@ function XIcon() {
 export default function FilterBar({
   assignees,
   statuses,
+  statusTypeByStatus,
+  tasks,
   filters,
   onFiltersChange,
   showBaselines,
@@ -264,6 +251,23 @@ export default function FilterBar({
     });
   };
 
+  const resolveStatusType = useCallback(
+    (name: string): string => {
+      if (statusTypeByStatus instanceof Map) {
+        return statusTypeByStatus.get(name) ?? name;
+      }
+      if (statusTypeByStatus) {
+        return statusTypeByStatus[name] ?? name;
+      }
+      if (tasks) {
+        const found = tasks.find((t) => t.status === name);
+        if (found?.statusType) return found.statusType;
+      }
+      return name;
+    },
+    [statusTypeByStatus, tasks],
+  );
+
   // Build dropdown options
   const assigneeOptions: DropdownOption[] = useMemo(
     () => assignees.map((a) => ({ value: a, label: a, icon: <Avatar name={a} size="sm" /> })),
@@ -271,8 +275,16 @@ export default function FilterBar({
   );
 
   const statusOptions: DropdownOption[] = useMemo(
-    () => statuses.map((s) => ({ value: s, label: s, icon: <StatusIcon /> })),
-    [statuses],
+    () =>
+      statuses.map((s) => {
+        const sType = resolveStatusType(s);
+        return {
+          value: s,
+          label: s,
+          icon: <StatusIcon type={sType} color={statusDotColorFor(sType)} size={13} />,
+        };
+      }),
+    [statuses, resolveStatusType],
   );
 
   return (
@@ -361,7 +373,7 @@ export default function FilterBar({
                     value={filters.status}
                     options={statusOptions}
                     placeholder="Any status"
-                    placeholderIcon={<StatusIcon />}
+                    placeholderIcon={<StatusIcon type="unstarted" color={statusDotColorFor('unstarted')} size={13} />}
                     onChange={(v) => onFiltersChange({ ...filters, status: v })}
                     className="w-full"
                     ariaLabel="Status"
@@ -381,7 +393,7 @@ export default function FilterBar({
                   onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
                   aria-pressed={filters.showCompleted}
                   title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
-                  className={`h-7 px-2.5 self-start rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 ${
+                  className={`h-7 px-2.5 self-start rounded-[5px] text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 ${
                     filters.showCompleted
                       ? 'border-low/60 text-low bg-low/10'
                       : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
@@ -404,7 +416,7 @@ export default function FilterBar({
               onClick={() => onFiltersChange({ ...filters, showCompleted: !filters.showCompleted })}
               aria-pressed={filters.showCompleted}
               title={filters.showCompleted ? 'Hide completed tasks' : 'Show completed tasks'}
-              className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+              className={`h-7 px-2.5 rounded-[5px] text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
                 filters.showCompleted
                   ? 'border-low/60 text-low bg-low/10'
                   : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
@@ -426,7 +438,7 @@ export default function FilterBar({
               title={
                 showBaselines ? 'Hide original plan overlay (dashed bars)' : 'Show original plan overlay (dashed bars)'
               }
-              className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+              className={`h-7 px-2.5 rounded-[5px] text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
                 showBaselines
                   ? 'border-accent/60 text-accent bg-accent/10'
                   : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
@@ -449,7 +461,7 @@ export default function FilterBar({
               title={
                 showExternal ? 'Hide cross-project dependency ghost rows' : 'Show cross-project dependency ghost rows'
               }
-              className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+              className={`h-7 px-2.5 rounded-[5px] text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
                 showExternal
                   ? 'border-accent/60 text-accent bg-accent/10'
                   : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
@@ -469,7 +481,7 @@ export default function FilterBar({
                     ? 'External issues are editable — click to lock read-only'
                     : 'External issues are read-only — click to enable inline editing'
                 }
-                className={`h-7 px-2.5 rounded-full text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
+                className={`h-7 px-2.5 rounded-[5px] text-[11px] font-medium cursor-pointer transition-all border select-none active:scale-95 inline-flex items-center gap-1.5 shrink-0 ${
                   allowExternalEdits
                     ? 'border-amber-500/60 text-amber-500 bg-amber-500/10'
                     : 'bg-bg-card border-border-primary text-text-muted hover:border-border-secondary hover:text-text-secondary'
@@ -531,11 +543,11 @@ function FilterField({ label, children }: { label: string; children: React.React
 
 function ActiveChip({ label, onClear }: { label: string; onClear: () => void }) {
   return (
-    <span className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-full bg-accent/10 border border-accent/30 text-[11px] font-medium text-accent">
+    <span className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-[5px] bg-accent/10 border border-accent/30 text-[11px] font-medium text-accent">
       <span className="truncate max-w-[180px]">{label}</span>
       <button
         onClick={onClear}
-        className="flex items-center justify-center w-4 h-4 rounded-full hover:bg-accent/20 cursor-pointer"
+        className="flex items-center justify-center w-4 h-4 rounded hover:bg-accent/20 cursor-pointer"
         title="Clear filter"
       >
         <XIcon />

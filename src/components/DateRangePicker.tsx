@@ -96,7 +96,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
           className="shrink-0"
@@ -124,7 +124,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2.5"
+            strokeWidth="1.5"
             strokeLinecap="round"
           >
             <line x1="18" y1="6" x2="6" y2="18" />
@@ -143,7 +143,7 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
           closeOnScroll={false}
           viewportMargin={VIEWPORT_MARGIN}
           data-popover="date-range"
-          className="z-[100] bg-bg-card border border-border-primary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-4rem)]"
+          className="z-[100] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 w-max max-w-[calc(100vw-4rem)]"
         >
           <DayPicker
             mode="range"
@@ -168,10 +168,10 @@ export default function DateRangePicker({ from, to, onChange }: Props) {
               week: 'flex',
               day: 'w-9 h-8 text-center text-xs',
               day_button:
-                'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
-              selected: 'bg-accent text-white rounded-md font-semibold',
-              range_start: 'bg-accent text-white rounded-l-md font-semibold',
-              range_end: 'bg-accent text-white rounded-r-md font-semibold',
+                'w-full h-full rounded-[4px] hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
+              selected: 'bg-accent text-white rounded-[4px] font-medium',
+              range_start: 'bg-accent text-white rounded-l-[4px] font-medium',
+              range_end: 'bg-accent text-white rounded-r-[4px] font-medium',
               range_middle: 'bg-accent/15 text-accent',
               today: 'font-bold text-accent',
               outside: 'text-text-muted/40',

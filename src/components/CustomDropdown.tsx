@@ -33,7 +33,7 @@ const triggerClasses = {
     'h-8 pl-2 pr-6 border border-transparent rounded-md text-text-secondary text-sm hover:bg-bg-hover hover:text-text-primary focus-visible:border-accent max-w-[240px] min-w-0',
 };
 
-const selectBgImage = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238b949e' d='M1 1l4 4 4-4'/%3E%3C/svg%3E")`;
+const selectBgImage = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%238a8f98' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1.5l4 3.5 4-3.5'/%3E%3C/svg%3E")`;
 
 export default function CustomDropdown({
   value,
@@ -235,7 +235,7 @@ export default function CustomDropdown({
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
@@ -273,7 +273,7 @@ export default function CustomDropdown({
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="2.5"
+                      strokeWidth="1.5"
                       strokeLinecap="round"
                     >
                       <line x1="18" y1="6" x2="6" y2="18" />
@@ -360,7 +360,7 @@ export default function CustomDropdown({
                         viewBox="0 0 24 24"
                         fill="none"
                         stroke="currentColor"
-                        strokeWidth="2.5"
+                        strokeWidth="1.5"
                         strokeLinecap="round"
                         strokeLinejoin="round"
                         className="shrink-0 text-accent"

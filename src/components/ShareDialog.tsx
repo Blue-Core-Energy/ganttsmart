@@ -111,7 +111,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
       onClick={onClose}
     >
       <div
-        className="bg-bg-card border border-border-secondary rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto m-4"
+        className="bg-bg-card border border-border-secondary rounded-lg shadow-xl w-full max-w-lg max-h-[80vh] overflow-y-auto m-4"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -137,7 +137,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Leave empty for public access"
-                  className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-xs outline-none focus:border-accent"
+                  className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-xs outline-none focus:border-accent"
                 />
               </div>
               <div className="w-28">
@@ -145,7 +145,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
                 <select
                   value={expiryDays}
                   onChange={(e) => setExpiryDays(Number(e.target.value))}
-                  className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-xs outline-none focus:border-accent cursor-pointer"
+                  className="w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-xs outline-none focus:border-accent cursor-pointer"
                 >
                   <option value={1}>1 day</option>
                   <option value={2}>2 days</option>
@@ -156,7 +156,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
             <button
               onClick={handleCreate}
               disabled={creating}
-              className="w-full py-2 bg-accent text-white text-xs font-semibold rounded-lg hover:bg-accent/90 transition-colors cursor-pointer disabled:opacity-50"
+              className="w-full py-2 bg-accent text-white text-xs font-semibold rounded-md hover:bg-accent/90 transition-colors cursor-pointer disabled:opacity-50"
             >
               {creating ? 'Creating...' : 'Create & Copy Link'}
             </button>
@@ -219,7 +219,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
                               viewBox="0 0 24 24"
                               fill="none"
                               stroke="currentColor"
-                              strokeWidth="2"
+                              strokeWidth="1.5"
                               strokeLinecap="round"
                             >
                               <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
@@ -241,7 +241,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
                                 viewBox="0 0 24 24"
                                 fill="none"
                                 stroke="currentColor"
-                                strokeWidth="2"
+                                strokeWidth="1.5"
                                 strokeLinecap="round"
                               >
                                 <polyline points="23 4 23 10 17 10" />
@@ -263,7 +263,7 @@ export default function ShareDialog({ projectId, projectName, onClose }: Props) 
                           viewBox="0 0 24 24"
                           fill="none"
                           stroke="currentColor"
-                          strokeWidth="2"
+                          strokeWidth="1.5"
                           strokeLinecap="round"
                         >
                           <polyline points="3 6 5 6 21 6" />

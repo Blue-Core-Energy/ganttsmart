@@ -153,11 +153,11 @@ describe('Logo component and Gantt mark geometry', () => {
 });
 
 describe('public/favicon.svg asset', () => {
-  it('uses --color-accent (#7c5cfc) and exact same staggered bar artwork as LogoIcon', () => {
+  it('uses --color-accent (#5e6ad2) and exact same staggered bar artwork as LogoIcon', () => {
     const svgContent = faviconContent;
 
     // Accent color requirement
-    expect(svgContent).toContain('#7c5cfc');
+    expect(svgContent).toContain('#5e6ad2');
     expect(svgContent).not.toContain('#58a6ff');
 
     const allRects = parseBarRects(svgContent);
@@ -167,7 +167,7 @@ describe('public/favicon.svg asset', () => {
     const tileRect = allRects[0];
     expect(tileRect.width).toBe(24);
     expect(tileRect.height).toBe(24);
-    expect(tileRect.fill).toBe('#7c5cfc');
+    expect(tileRect.fill).toBe('#5e6ad2');
 
     // Extract the 3 bars from favicon and from LogoIcon
     const faviconBars = allRects.slice(1);

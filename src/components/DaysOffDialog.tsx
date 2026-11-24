@@ -16,7 +16,7 @@ interface Props {
 }
 
 const inputCls =
-  'w-full h-8 px-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-xs outline-none focus:border-accent placeholder:text-text-muted';
+  'w-full h-8 px-2.5 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-xs outline-none focus:border-accent placeholder:text-text-muted';
 
 type Scope = 'company' | 'person';
 
@@ -101,7 +101,7 @@ export default function DaysOffDialog({ entries, assignees, loaded, shared, onAd
         role="dialog"
         aria-modal="true"
         aria-label="Days Off"
-        className="bg-bg-card border border-border-secondary rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto m-4"
+        className="bg-bg-card border border-border-secondary rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] overflow-y-auto m-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-border-primary">
@@ -216,7 +216,7 @@ export default function DaysOffDialog({ entries, assignees, loaded, shared, onAd
             <button
               type="submit"
               disabled={saving}
-              className="shrink-0 h-8 px-4 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-light transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="shrink-0 h-8 px-4 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent-light transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? 'Adding…' : 'Add'}
             </button>
@@ -254,7 +254,7 @@ function EntryGroup({
           <li
             key={e.id}
             data-day-off-entry={e.label}
-            className="flex items-center gap-3 px-3 py-2 bg-bg-primary border border-border-primary rounded-lg"
+            className="flex items-center gap-3 px-3 py-2 bg-bg-primary border border-border-primary rounded-md"
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${e.assigneeName ? 'bg-teal-500' : 'bg-rose-400'}`}

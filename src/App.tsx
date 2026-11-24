@@ -276,6 +276,16 @@ function GanttView({
     setDetailPanelTaskMap(allKnownTasks);
   }, [allKnownTasks]);
 
+  const statusTypeByStatus = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of allKnownTasks) {
+      if (t.status && t.statusType) {
+        map.set(t.status, t.statusType);
+      }
+    }
+    return map;
+  }, [allKnownTasks]);
+
   useEffect(() => {
     setDetailPanelProjectSelectHandler(selectProject);
     return () => setDetailPanelProjectSelectHandler(null);
@@ -346,6 +356,7 @@ function GanttView({
       <FilterBar
         assignees={assignees}
         statuses={statuses}
+        statusTypeByStatus={statusTypeByStatus}
         filters={filters}
         onFiltersChange={setFilters}
         showBaselines={showBaselines}
@@ -390,6 +401,7 @@ function GanttView({
           onFiltersChange={setFilters}
           assignees={assignees}
           statuses={statuses}
+          statusTypeByStatus={statusTypeByStatus}
           selectedColumns={selectedColumns}
           onVisibleColumnsChange={setSelectedColumns}
         />
