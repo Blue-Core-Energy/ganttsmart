@@ -26,8 +26,8 @@ function json(body: unknown, status = 200) {
 //   refresh (default): exchanges the caller's stored Linear refresh token for a new
 //     access token. Returns { accessToken, expiresAt } or { reconnect: true }.
 //     The refresh token itself never leaves the server.
-//   disconnect: revokes the access token at Linear (best effort), deletes both the
-//     access token and the refresh token, and returns { success: true }.
+//   disconnect: revokes both the access token and refresh token at Linear (best
+//     effort), deletes both, and returns { success: true }.
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -62,7 +62,17 @@ Deno.serve(async (req: Request) => {
         .select('linear_access_token')
         .eq('id', user.id)
         .maybeSingle();
-      if (settings?.linear_access_token) await revokeLinearToken(settings.linear_access_token);
+      const { data: rtRow } = await supabase
+        .from('linear_refresh_tokens')
+        .select('refresh_token')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      await Promise.allSettled([
+        settings?.linear_access_token ? revokeLinearToken(settings.linear_access_token) : Promise.resolve(),
+        rtRow?.refresh_token ? revokeLinearToken(rtRow.refresh_token) : Promise.resolve(),
+      ]);
+
       await clearLinearTokens(supabase, user.id);
       return json({ success: true });
     }

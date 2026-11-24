@@ -26,6 +26,7 @@ export default function Callback() {
         // Pass redirect_uri so the edge function uses the same one that initiated the flow
         const { data, error: fnError } = await supabase.functions.invoke('linear-oauth-callback', {
           body: {
+            action: 'exchange',
             code,
             state: searchParams.get('state'),
             redirect_uri: import.meta.env.VITE_LINEAR_REDIRECT_URI,
@@ -62,7 +63,7 @@ export default function Callback() {
       return;
     }
 
-    if (state !== savedState) {
+    if (!savedState || state !== savedState) {
       setError('Invalid state parameter. Please try connecting again.');
       return;
     }
