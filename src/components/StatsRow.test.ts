@@ -108,12 +108,13 @@ describe('StatsRow collapsing', () => {
     vi.unstubAllGlobals();
   });
 
-  it('is expanded by default, with an unobtrusive hide control', () => {
+  it('is expanded by default, with an unobtrusive hide control on the left', () => {
     stubCollapsed(null);
     const html = render();
     expect(html).toContain('Active');
     expect(html).toContain('aria-label="Hide summary"');
     expect(html).toContain('aria-expanded="true"');
+    expect(html.indexOf('aria-label="Hide summary"')).toBeLessThan(html.indexOf('Active'));
     expect(html).not.toContain('Show summary');
   });
 

@@ -576,6 +576,8 @@ test.describe('GanttSmart GCP app', () => {
     const bar = page.locator('[data-task-bar="ENG-200"]');
     await expect(hide).toHaveAttribute('aria-expanded', 'true');
     await expect(page.getByText('Total Span', { exact: true })).toBeVisible();
+    const hideBox = (await hide.boundingBox())!;
+    expect(hideBox.x).toBeLessThan(40);
     const expandedY = (await bar.boundingBox())!.y;
 
     await hide.focus();
