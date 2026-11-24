@@ -255,27 +255,22 @@ export function useSupabaseAuth(): AuthState {
 
   const disconnectLinear = useCallback(async () => {
     if (!user) return;
-    linearGenerationRef.current += 1;
-    clearLinearTimer();
-    // The function revokes the token at Linear and deletes both the access token
-    // and the server-only refresh token.
-    let disconnected = false;
+    // The function revokes both the access token and the server-only refresh token
+    // at Linear and deletes both from the database.
     try {
       const { data, error } = await supabase.functions.invoke('linear-token-refresh', {
         body: { action: 'disconnect' },
       });
-      disconnected = !error && data?.success === true;
-    } catch {
-      disconnected = false;
+      if (error || data?.success !== true) {
+        throw new Error(error?.message || data?.error || 'Failed to disconnect Linear');
+      }
+      linearGenerationRef.current += 1;
+      clearLinearTimer();
+      setLinearToken(null);
+    } catch (err) {
+      toastError(`Failed to disconnect Linear: ${(err as Error).message}`);
+      return;
     }
-    if (!disconnected) {
-      // Fallback: at least clear the access token the browser can see
-      await supabase
-        .from('user_settings')
-        .update({ linear_access_token: null, linear_token_expires_at: null, updated_at: new Date().toISOString() })
-        .eq('id', user.id);
-    }
-    setLinearToken(null);
   }, [user, clearLinearTimer]);
 
   const authUser = useMemo(() => (user ? { id: user.id, email: user.email ?? '' } : null), [user]);
