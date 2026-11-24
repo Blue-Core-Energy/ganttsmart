@@ -22,8 +22,11 @@ export default defineConfig(({ mode }) => {
     resolve: {
       // '@/backend/impl' must come before '@' so the more specific alias wins
       alias: [
-        { find: '@/backend/impl', replacement: path.resolve(__dirname, `./src/backend/${backend}/index.ts`) },
-        { find: '@', replacement: path.resolve(__dirname, './src') },
+        {
+          find: '@/backend/impl',
+          replacement: path.resolve(import.meta.dirname, `./src/backend/${backend}/index.ts`),
+        },
+        { find: '@', replacement: path.resolve(import.meta.dirname, './src') },
       ],
     },
     build: {
