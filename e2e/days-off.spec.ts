@@ -176,6 +176,48 @@ test.describe('GanttSmart GCP app', () => {
     expect(errors).toEqual([]);
   });
 
+  test('persists Ctrl+Z revert to Linear and coordinates with toast Undo button', async ({ page }) => {
+    const errors = trackErrors(page);
+    const mon = mondayOffset();
+    const wed = mon + 2;
+
+    const { dueUpdates } = await mockLinearIssues(page, [
+      {
+        id: 'uuid-211',
+        identifier: 'ENG-211',
+        title: 'Due on holiday',
+        assignee: 'Andrew Phillips',
+        startOffset: mon,
+        dueOffset: wed,
+      },
+    ]);
+    await mockDaysOffApi(page);
+
+    await page.goto('/app');
+    const bar = page.locator('[data-task-bar="ENG-211"]');
+    await expect(bar).toBeVisible();
+
+    await addDayOffViaDialog(page, { label: 'Retreat', start: isoOffsetDays(wed) });
+    await expect.poll(() => dueUpdates.length).toBe(1);
+    await expect.poll(async () => (await bar.boundingBox())!.width).toBeCloseTo(4 * 28, 0);
+
+    // Press Ctrl+Z: reverts schedule locally and persists Linear GraphQL mutation
+    await page.keyboard.press('Control+z');
+    await expect(page.getByText('Undone')).toBeVisible();
+    await expect.poll(async () => (await bar.boundingBox())!.width).toBeCloseTo(3 * 28, 0);
+    await expect.poll(() => dueUpdates.length).toBe(2);
+    expect(dueUpdates[1]).toEqual({ id: 'uuid-211', dueDate: isoOffsetDays(wed) });
+
+    // Toast Undo button was consumed by Ctrl+Z: clicking it does not fire a duplicate revert mutation
+    const undoButton = page.getByRole('button', { name: 'Undo' });
+    await expect(undoButton).toBeVisible();
+    await undoButton.click();
+    await page.waitForTimeout(400); // wait past the 300ms debounce window
+    expect(dueUpdates.length).toBe(2);
+
+    expect(errors).toEqual([]);
+  });
+
   test('validates the Days Off form before saving', async ({ page }) => {
     const errors = trackErrors(page);
     const mon = mondayOffset();
