@@ -86,6 +86,13 @@ describe('Header project switcher', () => {
     );
     expect(html).not.toContain('Roadmap');
   });
+
+  it('renders the brand name as "GanttSmart" alongside the Logo mark', () => {
+    const html = renderToStaticMarkup(createElement(Header, headerProps));
+    expect(html).toContain('GanttSmart');
+    expect(html).not.toContain('Ganttsmart');
+    expect(html).toContain('data-testid="ganttsmart-logo"');
+  });
 });
 
 describe('FilterBar', () => {

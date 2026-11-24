@@ -7,6 +7,7 @@ import { isSafeUrl } from '@/utils/url';
 import CustomDropdown from './CustomDropdown';
 import type { DropdownOption } from './CustomDropdown';
 import FeedbackDialog from './FeedbackDialog';
+import Logo from './Logo';
 import { toastError, toastSuccess } from './toastStore';
 
 // Loaded on demand: it pulls in the Supabase client, which only the Supabase backend has
@@ -267,24 +268,9 @@ export default memo(function Header({
     <header className="h-[52px] shrink-0 border-b border-border-primary bg-bg-header flex items-center px-2.5 sm:px-4 gap-2 sm:gap-3 print:hidden">
       {/* Left: brand + breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
-        <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center shrink-0">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="3" y="4" width="18" height="4" rx="1" />
-            <rect x="3" y="11" width="12" height="4" rx="1" />
-            <rect x="3" y="18" width="15" height="3" rx="1" />
-          </svg>
-        </div>
+        <Logo />
         <span className="hidden sm:inline text-sm font-semibold text-text-primary tracking-tight whitespace-nowrap">
-          Ganttsmart
+          GanttSmart
         </span>
         {/* The switcher renders from the project list, not the loaded name, so a project that
             fails to load can still be switched away from */}

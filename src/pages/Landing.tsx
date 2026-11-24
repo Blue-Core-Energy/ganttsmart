@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import Logo from '@/components/Logo';
 import { useTheme } from '@/hooks/useTheme';
 
 // Realistic mock data for the Gantt preview
@@ -103,21 +104,7 @@ export default function Landing() {
       >
         <div className="max-w-[1200px] mx-auto px-6 py-4 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center">
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="white"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              >
-                <line x1="4" y1="8" x2="16" y2="8" />
-                <line x1="4" y1="12" x2="20" y2="12" />
-                <line x1="4" y1="16" x2="12" y2="16" />
-              </svg>
-            </div>
+            <Logo />
             <span className="text-[15px] font-bold tracking-tight">GanttSmart</span>
           </Link>
           <div className="flex items-center gap-3">
