@@ -12,13 +12,13 @@ export default function NotFound() {
         <div className="flex items-center justify-center gap-3">
           <Link
             to="/"
-            className="px-6 py-2.5 bg-accent text-white text-sm font-semibold rounded-lg hover:bg-accent/90 transition-colors"
+            className="px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent/90 transition-colors"
           >
             Go home
           </Link>
           <Link
             to="/app"
-            className="px-6 py-2.5 bg-bg-hover border border-border-secondary text-text-primary text-sm font-medium rounded-lg hover:bg-border-secondary transition-colors"
+            className="px-5 py-2.5 bg-bg-hover border border-border-secondary text-text-primary text-sm font-medium rounded-md hover:bg-border-secondary transition-colors"
           >
             Open app
           </Link>

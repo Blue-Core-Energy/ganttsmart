@@ -92,14 +92,14 @@ export default function MilestonePanel() {
       <div
         ref={panelRef}
         className={`fixed z-[151] bg-bg-card shadow-2xl flex flex-col transition-transform duration-250 ease-out print:hidden
-          inset-x-0 bottom-0 max-h-[75vh] rounded-t-2xl border-t border-border-secondary
+          inset-x-0 bottom-0 max-h-[75vh] rounded-t-lg border-t border-border-secondary
           md:inset-x-auto md:right-0 md:top-0 md:bottom-0 md:max-h-none md:rounded-none md:border-t-0 md:border-l md:w-[420px] md:max-w-[90vw]
           ${visible ? 'translate-y-0 md:translate-x-0' : 'translate-y-full md:translate-y-0 md:translate-x-full'}`}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-primary shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <span className="w-3 h-3 rotate-45 border-2 border-amber-500 bg-amber-500/30 shrink-0" />
+            <span className="w-3 h-3 rotate-45 rounded-[2px] border-2 border-amber-500 bg-amber-500/30 shrink-0" />
             <span className="text-[10px] font-bold uppercase tracking-wider text-amber-500">Milestone</span>
           </div>
           <button
@@ -112,7 +112,7 @@ export default function MilestonePanel() {
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
             >
               <line x1="18" y1="6" x2="6" y2="18" />

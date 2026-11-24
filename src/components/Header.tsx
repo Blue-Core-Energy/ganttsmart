@@ -51,7 +51,7 @@ function FolderIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="text-text-muted shrink-0"
@@ -69,7 +69,7 @@ function SunIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -87,7 +87,7 @@ function MoonIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -104,7 +104,7 @@ function FeedbackIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -123,7 +123,7 @@ function LinkPlusIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -142,7 +142,7 @@ function ExternalLinkIcon({ className = 'shrink-0' }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -161,7 +161,7 @@ function CalendarOffIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -183,7 +183,7 @@ function CheckCircleIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -201,7 +201,7 @@ function ChevronDownIcon({ className }: { className?: string }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className={className}
@@ -362,7 +362,7 @@ export default memo(function Header({
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
@@ -387,7 +387,7 @@ export default memo(function Header({
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
             >
@@ -445,7 +445,7 @@ export default memo(function Header({
             <Avatar name={userName?.trim() || ''} size="sm" className="pointer-events-none" />
           </button>
           {showAccountMenu && (
-            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] max-w-[calc(100vw-1rem)] py-1">
+            <div className="absolute top-full mt-1 right-0 bg-bg-card border border-border-secondary rounded-lg shadow-xl z-50 min-w-[220px] max-w-[calc(100vw-1rem)] p-1">
               {/* Linear project resource link */}
               {projectId && onAddToLinear && (
                 <>
@@ -456,7 +456,7 @@ export default memo(function Header({
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={() => closeAccountMenu()}
-                        className="w-full text-left px-3 py-2 text-xs text-low hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                        className="w-full text-left px-2.5 py-1.5 text-xs text-low hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between"
                         aria-label="Open in Linear"
                         title="Linked in Linear — open project in Linear"
                       >
@@ -468,7 +468,7 @@ export default memo(function Header({
                       </a>
                     ) : (
                       <span
-                        className="w-full text-left px-3 py-2 text-xs text-low flex items-center gap-2"
+                        className="w-full text-left px-2.5 py-1.5 text-xs text-low rounded-[5px] flex items-center gap-2"
                         aria-label="Linked in Linear"
                         title="Open in GanttSmart link is on this project's Linear page"
                       >
@@ -484,7 +484,7 @@ export default memo(function Header({
                         onAddToLinear();
                       }}
                       disabled={linkingToLinear || loading}
-                      className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       aria-label={linkingToLinear ? 'Linking to Linear' : 'Add to Linear'}
                       title="Add an 'Open in GanttSmart' link to this project's Linear page"
                     >
@@ -496,7 +496,7 @@ export default memo(function Header({
                       <span>{linkingToLinear ? 'Linking…' : 'Add to Linear'}</span>
                     </button>
                   )}
-                  <div className="border-t border-border-primary my-0.5" />
+                  <div className="border-t border-border-primary my-1" />
                 </>
               )}
 
@@ -509,7 +509,7 @@ export default memo(function Header({
                       closeAccountMenu();
                       onOpenDaysOff();
                     }}
-                    className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                    className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between"
                     title="Manage company-wide closures and each person's time off"
                   >
                     <span className="flex items-center gap-2">
@@ -520,7 +520,7 @@ export default memo(function Header({
                       <span className="font-mono tabular-nums text-[11px] text-text-muted">{daysOffCount}</span>
                     )}
                   </button>
-                  <div className="border-t border-border-primary my-0.5" />
+                  <div className="border-t border-border-primary my-1" />
                 </>
               )}
 
@@ -531,7 +531,7 @@ export default memo(function Header({
                 onClick={() => setShowExportSubmenu((v) => !v)}
                 aria-expanded={showExportSubmenu}
                 aria-controls={showExportSubmenu ? exportSubmenuId : undefined}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between"
               >
                 <span className="flex items-center gap-2">
                   <span>Export</span>
@@ -558,13 +558,13 @@ export default memo(function Header({
                   id={exportSubmenuId}
                   role="group"
                   aria-label="Export options"
-                  className="bg-bg-hover/30 border-y border-border-primary/50 py-0.5"
+                  className="bg-bg-hover/30 border-y border-border-primary/50 py-0.5 rounded-[5px]"
                 >
                   <button
                     type="button"
                     onClick={() => handleExport('png')}
                     disabled={exportingFormat !== null}
-                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full text-left pl-6 pr-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span>Export as PNG</span>
                     {exportingFormat === 'png' && (
@@ -578,7 +578,7 @@ export default memo(function Header({
                     type="button"
                     onClick={() => handleExport('pdf')}
                     disabled={exportingFormat !== null}
-                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full text-left pl-6 pr-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <span>Export as PDF</span>
                     {exportingFormat === 'pdf' && (
@@ -595,20 +595,20 @@ export default memo(function Header({
                       window.print();
                     }}
                     disabled={exportingFormat !== null}
-                    className="w-full text-left pl-6 pr-3 py-1.5 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full text-left pl-6 pr-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Print
                   </button>
                 </div>
               )}
 
-              <div className="border-t border-border-primary my-0.5" />
+              <div className="border-t border-border-primary my-1" />
 
               {/* Theme toggle */}
               <button
                 type="button"
                 onClick={toggleTheme}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer flex items-center justify-between"
+                className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer flex items-center justify-between"
                 title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
                 aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
               >
@@ -619,7 +619,7 @@ export default memo(function Header({
                 <span className="text-[11px] text-text-muted capitalize">{theme}</span>
               </button>
 
-              <div className="border-t border-border-primary my-0.5" />
+              <div className="border-t border-border-primary my-1" />
 
               {/* Account management */}
               <button
@@ -628,20 +628,20 @@ export default memo(function Header({
                   closeAccountMenu();
                   onDisconnectLinear();
                 }}
-                className="w-full text-left px-3 py-2 text-xs text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                className="w-full text-left px-2.5 py-1.5 text-xs text-text-primary hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer"
               >
                 Disconnect Linear
               </button>
               {backend.capabilities.signOut !== false && (
                 <>
-                  <div className="border-t border-border-primary my-0.5" />
+                  <div className="border-t border-border-primary my-1" />
                   <button
                     type="button"
                     onClick={() => {
                       closeAccountMenu();
                       onSignOut();
                     }}
-                    className="w-full text-left px-3 py-2 text-xs text-urgent hover:bg-bg-hover transition-colors cursor-pointer"
+                    className="w-full text-left px-2.5 py-1.5 text-xs text-urgent hover:bg-bg-hover rounded-[5px] transition-colors cursor-pointer"
                   >
                     Sign out of GanttSmart
                   </button>

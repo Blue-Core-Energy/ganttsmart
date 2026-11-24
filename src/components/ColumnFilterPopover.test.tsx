@@ -161,6 +161,34 @@ describe('ColumnFilterPopover', () => {
     });
   });
 
+  it('resolves custom status names with statusTypeByStatus map', async () => {
+    const onFiltersChange = vi.fn();
+    const onClose = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <ColumnFilterPopover
+          columnKey="status"
+          anchorRef={{ current: anchorEl }}
+          onClose={onClose}
+          filters={baseFilters}
+          onFiltersChange={onFiltersChange}
+          assignees={[]}
+          statuses={['QA Ready']}
+          statusTypeByStatus={new Map([['QA Ready', 'started']])}
+        />,
+      );
+    });
+
+    const popover = document.querySelector('[data-popover="filter-status"]');
+    expect(popover?.textContent).toContain('QA Ready');
+    // Started icon renders a path (the filled half-circle)
+    const qaOption = Array.from(popover?.querySelectorAll('button[role="option"]') ?? []).find((b) =>
+      b.textContent?.includes('QA Ready'),
+    );
+    expect(qaOption?.querySelector('path')).not.toBeNull();
+  });
+
   it('renders Date Range filter popover and clears active range', async () => {
     const onFiltersChange = vi.fn();
     const onClose = vi.fn();

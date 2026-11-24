@@ -36,7 +36,7 @@ export function LogoIcon({ size = 24, className = '' }: { size?: number; classNa
 
 /**
  * Standalone presentational GanttSmart logo mark:
- * A rounded square tile in accent color (#7c5cfc) containing the staggered Gantt bars.
+ * A rounded square tile in accent color (#5e6ad2) containing the staggered Gantt bars.
  */
 export default function Logo({ size = 28, iconSize, className = '', 'aria-label': ariaLabel }: LogoProps) {
   const computedIconSize = iconSize ?? size;

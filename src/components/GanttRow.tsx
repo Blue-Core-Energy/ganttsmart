@@ -5,7 +5,7 @@ import { getColumnDef, type ColumnKey, type ColumnWidths } from '@/utils/schedul
 import { Avatar } from '@/utils/avatar';
 import { isSafeUrl } from '@/utils/url';
 import { BAR_HEIGHT, CELL_HIT_PAD, computeTaskIndent, ROW_HEIGHT } from '@/utils/ganttLayout';
-import { priorityBadgeClasses, priorityClass, priorityColors, statusDotColorFor } from '@/utils/colors';
+import { priorityBadgeClasses, priorityClass, statusDotColorFor } from '@/utils/colors';
 import {
   buildTimeCells,
   computeBarDayRange,
@@ -22,7 +22,9 @@ import { findWorkflowStateForTask, sortWorkflowStatesForMenu } from '@/utils/wor
 import CellMenu, { type CellMenuOption } from './CellMenu';
 import { openDetailPanel } from './detailPanelStore';
 import DueDatePicker from './DueDatePicker';
+import PriorityIcon from './PriorityIcon';
 import SingleDatePicker from './SingleDatePicker';
+import StatusIcon from './StatusIcon';
 
 interface Props {
   task: Task;
@@ -186,7 +188,7 @@ export default function GanttRow({
       sortWorkflowStatesForMenu(teamStates ?? []).map((s) => ({
         value: s.id,
         label: s.name,
-        icon: <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: statusDotColorFor(s.type) }} />,
+        icon: <StatusIcon type={s.type} color={statusDotColorFor(s.type)} size={14} />,
       })),
     [teamStates],
   );
@@ -526,10 +528,11 @@ export default function GanttRow({
       return (
         <span
           data-status-bubble={task.id}
-          className="w-2 h-2 rounded-full shrink-0"
-          style={{ backgroundColor: statusDotColor }}
+          className="w-4 h-4 flex items-center justify-center shrink-0"
           title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
-        />
+        >
+          <StatusIcon type={task.statusType} color={statusDotColor} size={14} />
+        </span>
       );
     }
     return (
@@ -546,12 +549,11 @@ export default function GanttRow({
           toggleMenu('status');
         }}
         onMouseDown={(e) => e.stopPropagation()}
-        className="group/status w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group/status w-5 h-5 -m-0.5 flex items-center justify-center rounded shrink-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <span
-          className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
-          style={{ backgroundColor: statusDotColor }}
-        />
+        <span className="transition-transform group-hover/status:scale-110 flex items-center justify-center">
+          <StatusIcon type={task.statusType} color={statusDotColor} size={14} />
+        </span>
       </button>
     );
   };
@@ -605,7 +607,7 @@ export default function GanttRow({
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth="2.5"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
           className="transition-transform duration-150"
@@ -810,10 +812,11 @@ export default function GanttRow({
             <div className="flex items-center gap-2 min-w-0">
               <span
                 data-status-bubble={task.id}
-                className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: statusDotColor }}
+                className="w-4 h-4 flex items-center justify-center shrink-0"
                 title={task.isExternal ? `${task.status} · ${task.projectName || 'External'} (read-only)` : task.status}
-              />
+              >
+                <StatusIcon type={task.statusType} color={statusDotColor} size={14} />
+              </span>
               <span className="text-[11.5px] text-text-secondary truncate" title={task.status}>
                 {task.status}
               </span>
@@ -842,11 +845,10 @@ export default function GanttRow({
               title={`${task.status} — click to change`}
               className="group/status flex items-center gap-2 min-w-0 text-left cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
             >
-              <span className="w-5 h-5 -m-1.5 flex items-center justify-center rounded-full shrink-0">
-                <span
-                  className="w-2 h-2 rounded-full transition-transform group-hover/status:scale-125"
-                  style={{ backgroundColor: statusDotColor }}
-                />
+              <span className="w-5 h-5 -m-0.5 flex items-center justify-center rounded shrink-0">
+                <span className="transition-transform group-hover/status:scale-110 flex items-center justify-center">
+                  <StatusIcon type={task.statusType} color={statusDotColor} size={14} />
+                </span>
               </span>
               <span className="text-[11.5px] text-text-secondary truncate group-hover/status:text-text-primary">
                 {task.status}
@@ -936,13 +938,10 @@ export default function GanttRow({
       case 'priority':
         return (
           <span
-            className={`flex w-fit items-center gap-1.5 text-[11px] font-semibold py-[3px] pl-[7px] pr-2 rounded-full ${priorityBadgeClasses[pCls]}`}
+            className={`flex w-fit items-center gap-1.5 text-[11px] font-medium py-[2px] px-2 rounded-[4px] ${priorityBadgeClasses[pCls]}`}
           >
-            <span
-              className="w-[6px] h-[6px] rounded-full shrink-0"
-              style={{ backgroundColor: priorityColors[pCls], boxShadow: `0 0 5px ${priorityColors[pCls]}` }}
-            />
-            {task.priority}
+            <PriorityIcon priority={task.priorityVal} size={13} className="shrink-0" />
+            <span>{task.priority}</span>
           </span>
         );
 
@@ -1177,7 +1176,7 @@ export default function GanttRow({
           {baselineBar && (
             <div
               data-baseline-bar={task.id}
-              className="baseline-ghost-bar absolute rounded-md top-1/2 -translate-y-1/2 z-[3] pointer-events-none"
+              className="baseline-ghost-bar absolute rounded-[4px] top-1/2 -translate-y-1/2 z-[3] pointer-events-none"
               style={{
                 height: BAR_HEIGHT,
                 left: baselineBar.left,
@@ -1197,7 +1196,7 @@ export default function GanttRow({
               data-task-bar={task.id}
               data-external-bar={task.isExternal ? 'true' : undefined}
               data-highlighted={isHighlighted ? 'true' : undefined}
-              className={`gantt-bar absolute rounded-md top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-bold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${scheduleStateClass(barState)} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
+              className={`gantt-bar absolute rounded-[4px] top-1/2 -translate-y-1/2 flex items-center ${barIsNarrow ? 'justify-center' : 'justify-start pl-2.5'} text-[10.5px] font-semibold text-white/95 z-[2] min-w-[20px] transition-[filter,box-shadow] duration-150 hover:brightness-115 ${isHighlighted ? 'ring-2 ring-accent ring-offset-1 ring-offset-bg-card brightness-110 shadow-lg' : isConnecting ? 'ring-2 ring-accent/40 ring-offset-1 ring-offset-transparent' : ''} ${scheduleStateClass(barState)} ${isAnyDrag ? '!transition-none opacity-80' : ''} ${task.isExternal && isExternalReadOnly ? 'opacity-80 hover:opacity-95' : task.isDueImplicit ? 'opacity-75' : ''} ${canDragDue || canDragStart ? (isMoving ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-pointer'}`}
               style={{
                 left: 0,
                 width: displayBarWidth,
@@ -1220,14 +1219,14 @@ export default function GanttRow({
               {/* Left drag handle (start date — works for setting new or editing existing) */}
               {canDragStart && (
                 <div
-                  className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-l-md"
+                  className="absolute left-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-l-[4px]"
                   onMouseDown={handleStartDragStart}
                   onClick={(e) => e.stopPropagation()}
                 />
               )}
               {progressWidth && (
                 <div
-                  className="absolute left-0 top-0 bottom-0 rounded-md opacity-30 bg-white"
+                  className="absolute left-0 top-0 bottom-0 rounded-[4px] opacity-30 bg-white"
                   style={{ width: progressWidth }}
                 />
               )}
@@ -1251,7 +1250,7 @@ export default function GanttRow({
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="2.5"
+                      strokeWidth="1.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       className="shrink-0 opacity-85"
@@ -1267,7 +1266,7 @@ export default function GanttRow({
 
               {canDragDue && (
                 <div
-                  className="absolute right-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-r-md"
+                  className="absolute right-0 top-0 bottom-0 w-[6px] cursor-col-resize z-[3] hover:bg-white/20 rounded-r-[4px]"
                   onMouseDown={handleDragStart}
                   onClick={(e) => e.stopPropagation()}
                 />

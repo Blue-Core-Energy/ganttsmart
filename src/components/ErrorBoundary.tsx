@@ -30,7 +30,7 @@ export default class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) return this.props.fallback;
 
       return (
-        <div className="bg-bg-card rounded-xl border border-border-primary overflow-hidden">
+        <div className="bg-bg-card rounded-lg border border-border-primary overflow-hidden">
           <div className="text-center py-20 px-6">
             <div className="w-12 h-12 mx-auto mb-4 rounded-full bg-urgent/10 flex items-center justify-center">
               <svg
@@ -39,7 +39,7 @@ export default class ErrorBoundary extends Component<Props, State> {
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 className="text-urgent"
               >
@@ -54,7 +54,7 @@ export default class ErrorBoundary extends Component<Props, State> {
             </p>
             <button
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="px-4 py-2 rounded-lg bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-md bg-accent text-white text-sm font-medium hover:bg-accent/90 transition-colors cursor-pointer"
             >
               Try Again
             </button>

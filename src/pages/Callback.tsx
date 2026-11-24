@@ -75,14 +75,14 @@ export default function Callback() {
 
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center">
-      <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[440px] w-full text-center">
+      <div className="bg-bg-card border border-border-secondary rounded-lg shadow-xl p-8 max-w-[440px] w-full text-center">
         {error ? (
           <>
-            <h2 className="text-xl font-bold text-white mb-3">Connection Failed</h2>
+            <h2 className="text-xl font-bold text-text-primary mb-3">Connection Failed</h2>
             <p className="text-sm text-urgent mb-6">{error}</p>
             <button
               onClick={() => navigate(resolvePostOAuthRedirectPath(window.location.search), { replace: true })}
-              className="px-6 py-2.5 bg-bg-hover border border-border-secondary rounded-lg text-text-primary text-sm font-medium cursor-pointer hover:bg-border-secondary transition-colors"
+              className="px-5 py-2.5 bg-bg-hover border border-border-secondary rounded-md text-text-primary text-sm font-medium cursor-pointer hover:bg-border-secondary transition-colors"
             >
               Back to App
             </button>

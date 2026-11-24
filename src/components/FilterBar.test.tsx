@@ -263,4 +263,44 @@ describe('FilterBar', () => {
 
     expect(document.querySelector('[role="group"][aria-label="Filters"]')).toBeNull();
   });
+
+  it('resolves custom status names in FilterBar using statusTypeByStatus', async () => {
+    const onFiltersChange = vi.fn();
+
+    await act(async () => {
+      root?.render(
+        <FilterBar
+          assignees={[]}
+          statuses={['In Review']}
+          statusTypeByStatus={new Map([['In Review', 'started']])}
+          filters={baseFilters}
+          onFiltersChange={onFiltersChange}
+          isNarrow={true}
+        />,
+      );
+    });
+
+    // Open mobile filter panel
+    const filterBtn = Array.from(container?.querySelectorAll('button') ?? []).find((b) =>
+      b.textContent?.includes('Filter'),
+    );
+    await act(async () => {
+      filterBtn?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    // Open Status dropdown
+    const statusDropdown = Array.from(document.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('Any status'),
+    );
+    await act(async () => {
+      statusDropdown?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const option = Array.from(document.querySelectorAll('[role="option"]')).find((el) =>
+      el.textContent?.includes('In Review'),
+    );
+    expect(option).toBeDefined();
+    // In progress / started icon has a path element for the half fill
+    expect(option?.querySelector('path')).not.toBeNull();
+  });
 });

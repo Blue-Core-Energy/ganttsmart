@@ -175,7 +175,7 @@ export default function CellMenu({
                   onSelect(opt.value);
                   close(true);
                 }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left cursor-pointer transition-colors ${
+                className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-xs text-left cursor-pointer transition-colors ${
                   selected
                     ? highlighted
                       ? 'bg-accent/15 text-accent'
@@ -198,7 +198,7 @@ export default function CellMenu({
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="3"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     aria-hidden="true"

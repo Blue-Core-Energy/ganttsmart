@@ -43,7 +43,7 @@ export default function Onboarding({ onComplete }: Props) {
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[300] p-4">
-      <div className="bg-bg-card border border-border-secondary rounded-2xl p-8 max-w-md w-full shadow-2xl">
+      <div className="bg-bg-card border border-border-secondary rounded-lg p-8 max-w-md w-full shadow-xl">
         {/* Progress dots */}
         <div className="flex justify-center gap-2 mb-6">
           {steps.map((_, i) => (
@@ -61,7 +61,7 @@ export default function Onboarding({ onComplete }: Props) {
         <p className="text-sm text-text-secondary leading-relaxed text-center mb-4">{current.description}</p>
 
         {current.tip && (
-          <div className="bg-accent/10 border border-accent/20 rounded-lg px-4 py-2.5 mb-6">
+          <div className="bg-accent/10 border border-accent/20 rounded-md px-4 py-2.5 mb-6">
             <p className="text-xs text-accent">💡 {current.tip}</p>
           </div>
         )}
@@ -79,7 +79,7 @@ export default function Onboarding({ onComplete }: Props) {
             {step > 0 && (
               <button
                 onClick={() => setStep(step - 1)}
-                className="px-4 py-2 bg-bg-hover border border-border-secondary rounded-lg text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+                className="px-4 py-2 bg-bg-hover border border-border-secondary rounded-md text-sm text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
               >
                 Back
               </button>
@@ -89,7 +89,7 @@ export default function Onboarding({ onComplete }: Props) {
                 if (isLast) onComplete();
                 else setStep(step + 1);
               }}
-              className="px-5 py-2 bg-accent text-white rounded-lg text-sm font-medium hover:opacity-90 transition-opacity cursor-pointer"
+              className="px-5 py-2 bg-accent text-white rounded-md text-sm font-medium hover:opacity-90 transition-opacity cursor-pointer"
             >
               {isLast ? 'Get Started' : 'Next'}
             </button>

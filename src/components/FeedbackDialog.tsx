@@ -21,7 +21,7 @@ interface Props {
 }
 
 const inputCls =
-  'w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-xs outline-none focus:border-accent placeholder:text-text-muted';
+  'w-full px-3 py-2 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-xs outline-none focus:border-accent placeholder:text-text-muted';
 
 const textareaCls = `${inputCls} resize-y leading-relaxed`;
 
@@ -167,7 +167,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
         role="dialog"
         aria-modal="true"
         aria-labelledby="feedback-dialog-title"
-        className="bg-bg-card border border-border-secondary rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
+        className="bg-bg-card border border-border-secondary rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -195,7 +195,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
           <div
             role="tablist"
             aria-label="Feedback type"
-            className="grid grid-cols-2 gap-1 p-1 rounded-lg bg-bg-primary border border-border-primary"
+            className="grid grid-cols-2 gap-1 p-1 rounded-md bg-bg-primary border border-border-primary"
           >
             <button
               type="button"
@@ -214,7 +214,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
@@ -241,7 +241,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
@@ -265,7 +265,7 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
         {/* Body */}
         {createdIssue ? (
           <div className="px-6 py-6 flex flex-col gap-4 overflow-y-auto">
-            <div className="rounded-xl border border-success/30 bg-success/10 p-4 flex items-start gap-3">
+            <div className="rounded-lg border border-success/30 bg-success/10 p-4 flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-success text-white flex items-center justify-center text-xs font-bold shrink-0 mt-0.5">
                 ✓
               </span>
@@ -285,21 +285,21 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
                 href={createdUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent-light transition-colors"
+                className="flex-1 min-w-[180px] inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-light transition-colors"
               >
                 Open {createdIssue.identifier} in Linear ↗
               </a>
               <button
                 type="button"
                 onClick={handleReset}
-                className="px-3.5 py-2 rounded-lg border border-border-secondary bg-bg-hover/60 text-xs font-medium text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-md border border-border-secondary bg-bg-hover/60 text-xs font-medium text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
               >
                 Submit another
               </button>
               <button
                 type="button"
                 onClick={onClose}
-                className="px-3.5 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                className="px-3.5 py-2 rounded-md text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
               >
                 Done
               </button>
@@ -470,14 +470,14 @@ export default function FeedbackDialog({ initialType, linearToken, projectName, 
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
+                  className="px-3 py-2 rounded-md text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 rounded-lg bg-accent text-white text-xs font-semibold hover:bg-accent-light transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                  className="px-4 py-2 rounded-md bg-accent text-white text-xs font-semibold hover:bg-accent-light transition-colors cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
                 >
                   {submitting && (
                     <span className="inline-block w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />

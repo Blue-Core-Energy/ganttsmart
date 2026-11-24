@@ -4,6 +4,8 @@ import { priorityBadgeStyle, priorityColorFor, statusDotColorFor } from '@/utils
 import { formatDate } from '@/utils/date';
 import { stripMarkdown } from '@/utils/markdown';
 import { isTaskDone } from '@/utils/tasks';
+import PriorityIcon from './PriorityIcon';
+import StatusIcon from './StatusIcon';
 import { registerTooltipSetter, type TooltipState } from './tooltipStore';
 
 export default function Tooltip() {
@@ -53,8 +55,8 @@ export default function Tooltip() {
   return (
     <div
       ref={ref}
-      className="fixed bg-bg-header border border-border-secondary rounded-xl py-4 px-5 z-100 pointer-events-none max-w-[480px] min-w-[300px] w-max"
-      style={{ left, top, boxShadow: '0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05)' }}
+      className="fixed bg-bg-header border border-border-secondary rounded-lg py-4 px-5 z-100 pointer-events-none max-w-[480px] min-w-[300px] w-max shadow-xl"
+      style={{ left, top }}
     >
       {/* Header: Avatar + ID + Title */}
       <div className="flex items-start gap-3 mb-3.5">
@@ -65,7 +67,7 @@ export default function Tooltip() {
               {task.id}
             </span>
             {task.isExternal && (
-              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/25">
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-[4px] bg-accent/10 text-accent border border-accent/25">
                 {task.projectName || 'External'}
               </span>
             )}
@@ -80,9 +82,10 @@ export default function Tooltip() {
         <div>
           <div className="text-text-muted text-[10px] mb-0.5">Priority</div>
           <span
-            className="inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-full"
+            className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-[4px]"
             style={priorityBadgeStyle(task.priority)}
           >
+            <PriorityIcon priority={task.priority} size={12} className="shrink-0" />
             {task.priority}
           </span>
         </div>
@@ -90,8 +93,8 @@ export default function Tooltip() {
         {/* Status */}
         <div>
           <div className="text-text-muted text-[10px] mb-0.5">Status</div>
-          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-text-secondary">
-            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: statusDotColor }} />
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-text-secondary">
+            <StatusIcon type={task.statusType} color={statusDotColor} size={12} />
             {task.status}
           </span>
         </div>

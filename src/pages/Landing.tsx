@@ -130,7 +130,7 @@ export default function Landing() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                 >
                   <circle cx="12" cy="12" r="5" />
@@ -150,7 +150,7 @@ export default function Landing() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="2"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                 >
                   <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
@@ -188,7 +188,7 @@ export default function Landing() {
           <div className="flex items-center gap-4 mb-10 sm:mb-14 flex-wrap">
             <Link
               to="/app"
-              className="group flex items-center gap-2 px-6 py-2.5 bg-text-primary text-bg-primary text-sm font-semibold rounded-lg hover:opacity-90 transition-all"
+              className="group flex items-center gap-2 px-5 py-2.5 bg-text-primary text-bg-primary text-sm font-medium rounded-md hover:opacity-90 transition-all"
             >
               Start using it
               <svg
@@ -197,7 +197,7 @@ export default function Landing() {
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="1.5"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 className="transition-transform group-hover:translate-x-0.5"
@@ -210,7 +210,7 @@ export default function Landing() {
           </div>
 
           {/* The product mock — this IS the hero */}
-          <div className="rounded-xl border border-border-secondary bg-bg-card overflow-hidden shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)]">
+          <div className="rounded-lg border border-border-secondary bg-bg-card overflow-hidden shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)]">
             {/* Window chrome */}
             <div className="flex items-center gap-2 px-4 py-2.5 bg-bg-header border-b border-border-primary">
               <div className="flex gap-1.5">
@@ -401,7 +401,7 @@ export default function Landing() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="3"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                 >
                   <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
@@ -419,7 +419,7 @@ export default function Landing() {
                 {['Urgent', 'High', 'Medium', 'Low'].map((p, i) => (
                   <div
                     key={i}
-                    className={`px-2.5 py-1 rounded-full text-[10px] font-medium border ${i < 3 ? 'border-accent/30 text-accent bg-accent/8' : 'border-border-secondary text-text-muted'}`}
+                    className={`px-2 py-0.5 rounded-[5px] text-[10px] font-medium border ${i < 3 ? 'border-accent/30 text-accent bg-accent/8' : 'border-border-secondary text-text-muted'}`}
                   >
                     {p}
                   </div>
@@ -433,7 +433,7 @@ export default function Landing() {
                   All Statuses
                 </div>
                 <div className="flex-1 px-2.5 py-1.5 rounded bg-bg-primary border border-border-primary text-[10px] text-text-muted flex items-center gap-1">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="11" cy="11" r="7" />
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
@@ -453,7 +453,7 @@ export default function Landing() {
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth="3"
+                  strokeWidth="1.5"
                   strokeLinecap="round"
                 >
                   <polyline points="20 6 9 17 4 12" />
@@ -499,7 +499,7 @@ export default function Landing() {
           <p className="text-sm text-text-muted mb-8">Connect in 10 seconds. No vendor lock-in, no hidden fees.</p>
           <Link
             to="/app"
-            className="group inline-flex items-center gap-2 px-8 py-3 bg-text-primary text-bg-primary text-sm font-semibold rounded-lg hover:opacity-90 transition-all"
+            className="group inline-flex items-center gap-2 px-6 py-2.5 bg-text-primary text-bg-primary text-sm font-medium rounded-md hover:opacity-90 transition-all"
           >
             Open GanttSmart
             <svg
@@ -508,7 +508,7 @@ export default function Landing() {
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2.5"
+              strokeWidth="1.5"
               strokeLinecap="round"
               strokeLinejoin="round"
               className="transition-transform group-hover:translate-x-0.5"

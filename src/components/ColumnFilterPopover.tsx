@@ -2,8 +2,10 @@ import { useEffect, useId, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { DayPicker, type DateRange } from 'react-day-picker';
 import AnchoredPopover from '@/components/AnchoredPopover';
+import StatusIcon from '@/components/StatusIcon';
 import type { Filters } from '@/types';
 import { Avatar } from '@/utils/avatar';
+import { statusDotColorFor } from '@/utils/colors';
 import type { ColumnKey } from '@/utils/scheduleColumns';
 
 interface Props {
@@ -14,6 +16,7 @@ interface Props {
   onFiltersChange: (filters: Filters) => void;
   assignees: string[];
   statuses: string[];
+  statusTypeByStatus?: Map<string, string> | Record<string, string>;
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   anchorKey?: unknown;
 }
@@ -37,7 +40,7 @@ function CheckIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2.5"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="shrink-0"
@@ -55,7 +58,7 @@ function UsersIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
       className="text-text-muted shrink-0"
@@ -64,25 +67,6 @@ function UsersIcon() {
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 00-3-3.87" />
       <path d="M16 3.13a4 4 0 010 7.75" />
-    </svg>
-  );
-}
-
-function StatusIcon() {
-  return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="text-text-muted shrink-0"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
     </svg>
   );
 }
@@ -96,7 +80,7 @@ function SearchIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="2"
+      strokeWidth="1.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
@@ -114,6 +98,7 @@ export default function ColumnFilterPopover({
   onFiltersChange,
   assignees,
   statuses,
+  statusTypeByStatus,
   returnFocusRef,
   anchorKey,
 }: Props) {
@@ -162,6 +147,7 @@ export default function ColumnFilterPopover({
       returnFocusRef={returnFocusRef}
       onClose={onClose}
       statuses={statuses}
+      statusTypeByStatus={statusTypeByStatus}
       selectedStatus={filters.status}
       showCompleted={filters.showCompleted}
       onSelectStatus={(status) => onFiltersChange({ ...filters, status })}
@@ -309,6 +295,7 @@ interface StatusPopoverProps {
   returnFocusRef?: React.RefObject<HTMLElement | null>;
   onClose: (restoreFocus?: boolean) => void;
   statuses: string[];
+  statusTypeByStatus?: Map<string, string> | Record<string, string>;
   selectedStatus: string;
   showCompleted: boolean;
   onSelectStatus: (status: string) => void;
@@ -322,6 +309,7 @@ function StatusFilterPopover({
   returnFocusRef,
   onClose,
   statuses,
+  statusTypeByStatus,
   selectedStatus,
   showCompleted,
   onSelectStatus,
@@ -330,6 +318,16 @@ function StatusFilterPopover({
 }: StatusPopoverProps) {
   const dialogId = useId();
   const isFiltering = Boolean(selectedStatus) || !showCompleted;
+
+  const resolveStatusType = (name: string): string => {
+    if (statusTypeByStatus instanceof Map) {
+      return statusTypeByStatus.get(name) ?? name;
+    }
+    if (statusTypeByStatus) {
+      return statusTypeByStatus[name] ?? name;
+    }
+    return name;
+  };
 
   return (
     <AnchoredPopover
@@ -379,7 +377,7 @@ function StatusFilterPopover({
           }`}
         >
           <span className="inline-flex items-center gap-2 truncate">
-            <StatusIcon />
+            <StatusIcon type="unstarted" color={statusDotColorFor('unstarted')} size={13} />
             <span className="truncate">All statuses</span>
           </span>
           {!selectedStatus && <CheckIcon />}
@@ -387,6 +385,7 @@ function StatusFilterPopover({
 
         {statuses.map((s) => {
           const isSelected = selectedStatus === s;
+          const sType = resolveStatusType(s);
           return (
             <button
               key={s}
@@ -402,7 +401,7 @@ function StatusFilterPopover({
               }`}
             >
               <span className="inline-flex items-center gap-2 truncate">
-                <StatusIcon />
+                <StatusIcon type={sType} color={statusDotColorFor(sType)} size={13} />
                 <span className="truncate">{s}</span>
               </span>
               {isSelected && <CheckIcon />}
@@ -521,7 +520,7 @@ function DateRangeFilterPopover({
       role="dialog"
       aria-label="Filter by date range"
       data-popover="date-range"
-      className="z-[100] bg-bg-card border border-border-secondary rounded-xl shadow-2xl p-3 w-max max-w-[calc(100vw-16px)] normal-case tracking-normal"
+      className="z-[100] bg-bg-card border border-border-secondary rounded-lg shadow-xl p-3 w-max max-w-[calc(100vw-16px)] normal-case tracking-normal"
     >
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-border-primary/60">
         <span className="text-xs font-semibold text-text-primary">Date range</span>
@@ -555,10 +554,11 @@ function DateRangeFilterPopover({
           weekday: 'w-9 text-center text-[10px] font-medium text-text-muted py-1',
           week: 'flex',
           day: 'w-9 h-8 text-center text-xs',
-          day_button: 'w-full h-full rounded-md hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
-          selected: 'bg-accent text-white rounded-md font-semibold',
-          range_start: 'bg-accent text-white rounded-l-md font-semibold',
-          range_end: 'bg-accent text-white rounded-r-md font-semibold',
+          day_button:
+            'w-full h-full rounded-[4px] hover:bg-accent/10 hover:text-accent transition-colors cursor-pointer',
+          selected: 'bg-accent text-white rounded-[4px] font-medium',
+          range_start: 'bg-accent text-white rounded-l-[4px] font-medium',
+          range_end: 'bg-accent text-white rounded-r-[4px] font-medium',
           range_middle: 'bg-accent/15 text-accent',
           today: 'font-bold text-accent',
           outside: 'text-text-muted/40',
@@ -572,7 +572,7 @@ function DateRangeFilterPopover({
           <button
             type="button"
             onClick={() => onClose(true)}
-            className="px-2.5 py-1 rounded text-text-muted hover:text-text-primary hover:bg-bg-hover text-xs cursor-pointer transition-colors"
+            className="px-2.5 py-1 rounded-md text-text-muted hover:text-text-primary hover:bg-bg-hover text-xs cursor-pointer transition-colors"
           >
             Cancel
           </button>
@@ -580,7 +580,7 @@ function DateRangeFilterPopover({
             type="button"
             onClick={handleApply}
             disabled={!draftComplete}
-            className={`px-3 py-1 rounded text-white text-xs font-medium transition-colors shadow-sm ${
+            className={`px-3 py-1 rounded-md text-white text-xs font-medium transition-colors shadow-sm ${
               draftComplete
                 ? 'bg-accent cursor-pointer hover:bg-accent/90'
                 : 'bg-accent/50 cursor-not-allowed opacity-60'

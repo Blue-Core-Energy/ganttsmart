@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import FilterBar from '@/components/FilterBar';
 import GanttChart from '@/components/GanttChart';
@@ -28,6 +28,7 @@ export default function SharedView() {
   useTheme();
 
   const {
+    tasks,
     filteredTasks,
     unscheduledTasks,
     milestones,
@@ -52,6 +53,16 @@ export default function SharedView() {
   const [password, setPassword] = useState('');
   const [selectedColumns, setSelectedColumns] = useState<ColumnKey[]>(loadVisibleColumns);
 
+  const statusTypeByStatus = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const t of [...(tasks ?? filteredTasks), ...unscheduledTasks]) {
+      if (t.status && t.statusType) {
+        map.set(t.status, t.statusType);
+      }
+    }
+    return map;
+  }, [tasks, filteredTasks, unscheduledTasks]);
+
   // Keyboard zoom
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -71,15 +82,15 @@ export default function SharedView() {
   if (needsPassword) {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center p-6">
-        <div className="bg-bg-card border border-border-secondary rounded-2xl p-8 max-w-sm w-full text-center">
-          <div className="w-10 h-10 rounded-lg bg-accent/10 text-accent flex items-center justify-center mx-auto mb-4">
+        <div className="bg-bg-card border border-border-secondary rounded-lg shadow-xl p-8 max-w-sm w-full text-center">
+          <div className="w-10 h-10 rounded-md bg-accent/10 text-accent flex items-center justify-center mx-auto mb-4">
             <svg
               width="20"
               height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
             >
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
@@ -101,13 +112,13 @@ export default function SharedView() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Enter password"
-              className="w-full px-4 py-2.5 bg-bg-primary border border-border-secondary rounded-lg text-text-primary text-sm mb-3 outline-none focus:border-accent"
+              className="w-full px-3.5 py-2.5 bg-bg-primary border border-border-secondary rounded-md text-text-primary text-sm mb-3 outline-none focus:border-accent"
               autoFocus
             />
             {passwordError && <p className="text-xs text-urgent mb-3">{passwordError}</p>}
             <button
               type="submit"
-              className="w-full py-2.5 bg-accent text-white text-sm font-semibold rounded-lg hover:bg-accent/90 transition-colors cursor-pointer"
+              className="w-full py-2.5 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent/90 transition-colors cursor-pointer"
             >
               View Roadmap
             </button>
@@ -121,15 +132,15 @@ export default function SharedView() {
   if (error) {
     return (
       <div className="min-h-screen bg-bg-primary flex items-center justify-center p-6">
-        <div className="bg-bg-card border border-border-secondary rounded-2xl p-8 max-w-sm w-full text-center">
-          <div className="w-10 h-10 rounded-lg bg-urgent/10 text-urgent flex items-center justify-center mx-auto mb-4">
+        <div className="bg-bg-card border border-border-secondary rounded-lg shadow-xl p-8 max-w-sm w-full text-center">
+          <div className="w-10 h-10 rounded-md bg-urgent/10 text-urgent flex items-center justify-center mx-auto mb-4">
             <svg
               width="20"
               height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
             >
               <circle cx="12" cy="12" r="10" />
@@ -141,7 +152,7 @@ export default function SharedView() {
           <p className="text-sm text-text-secondary mb-6">{error}</p>
           <Link
             to="/"
-            className="inline-flex px-6 py-2.5 bg-accent text-white text-sm font-semibold rounded-lg hover:bg-accent/90 transition-colors"
+            className="inline-flex px-5 py-2.5 bg-accent text-white text-sm font-medium rounded-md hover:bg-accent/90 transition-colors"
           >
             Go to GanttSmart
           </Link>
@@ -182,6 +193,7 @@ export default function SharedView() {
         <FilterBar
           assignees={assignees}
           statuses={statuses}
+          statusTypeByStatus={statusTypeByStatus}
           filters={filters}
           onFiltersChange={setFilters}
           statusColumnHidden={!selectedColumns.includes('status')}
@@ -207,6 +219,7 @@ export default function SharedView() {
           onFiltersChange={setFilters}
           assignees={assignees}
           statuses={statuses}
+          statusTypeByStatus={statusTypeByStatus}
           selectedColumns={selectedColumns}
           onVisibleColumnsChange={setSelectedColumns}
         />

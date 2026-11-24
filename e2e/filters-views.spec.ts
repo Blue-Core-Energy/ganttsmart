@@ -1249,15 +1249,15 @@ test.describe('GanttSmart GCP app', () => {
     await expect(bar102).not.toHaveAttribute('data-highlighted', 'true');
 
     // IT-146: Highlighted bar's computed box-shadow renders the purple accent ring; unhighlighted bar does not
-    await expect(bar100).toHaveCSS('box-shadow', /rgb\(124, 92, 252\) 0px 0px 0px 3px/);
-    await expect(bar102).not.toHaveCSS('box-shadow', /rgba?\(124, 92, 252/);
+    await expect(bar100).toHaveCSS('box-shadow', /rgb\(94, 106, 210\) 0px 0px 0px 3px/);
+    await expect(bar102).not.toHaveCSS('box-shadow', /rgba?\(94, 106, 210/);
 
     // Pressing Escape clears arrow selection and unhighlights issues
     await page.keyboard.press('Escape');
     await expect(arrow).not.toHaveAttribute('data-selected', 'true');
     await expect(row100).not.toHaveAttribute('data-highlighted', 'true');
     await expect(row101).not.toHaveAttribute('data-highlighted', 'true');
-    await expect(bar100).not.toHaveCSS('box-shadow', /rgba?\(124, 92, 252/);
+    await expect(bar100).not.toHaveCSS('box-shadow', /rgba?\(94, 106, 210/);
 
     // Clicking arrow again selects it; clicking empty timeline background clears selection
     await clickArrowMidpoint();
@@ -1491,7 +1491,7 @@ test.describe('GanttSmart GCP app', () => {
     expect(backgrounds[3]).toContain('rgb(161, 161, 170)'); // not-started grey
     expect(new Set(backgrounds).size).toBe(4);
     // ...and the in-progress blue stays clear of the accent purple used for selection
-    expect(backgrounds[1]).not.toContain('rgb(124, 92, 252)');
+    expect(backgrounds[1]).not.toContain('rgb(94, 106, 210)');
 
     // Baseline ghost overlay: visible over the amber late-start bar (ENG-303) and overdue red bar (ENG-301)
     const ghostAmber = page.locator('[data-baseline-bar="ENG-303"]');
@@ -1512,11 +1512,11 @@ test.describe('GanttSmart GCP app', () => {
     });
     expect(darkGhostStyle.borderStyle).toBe('dashed');
     expect(darkGhostStyle.borderWidth).toBe('2px');
-    // Dark theme: crisp neutral border (text-primary #fafafa) and dark contrast halo
-    expect(darkGhostStyle.borderColor).toBe('rgb(250, 250, 250)');
+    // Dark theme: crisp neutral border (text-primary #f7f8f8) and dark contrast halo
+    expect(darkGhostStyle.borderColor).toBe('rgb(247, 248, 248)');
     expect(darkGhostStyle.filter).toContain('rgba(0, 0, 0');
 
-    // In light theme, the ghost border inverts to dark neutral (#09090b) and halo to light
+    // In light theme, the ghost border inverts to dark neutral (#1b1d22) and halo to light
     await page.evaluate(() => {
       document.documentElement.classList.remove('dark');
       document.documentElement.classList.add('light');
@@ -1528,7 +1528,7 @@ test.describe('GanttSmart GCP app', () => {
         filter: s.filter,
       };
     });
-    expect(lightGhostStyle.borderColor).toBe('rgb(9, 9, 11)');
+    expect(lightGhostStyle.borderColor).toBe('rgb(27, 29, 34)');
     expect(lightGhostStyle.filter).toContain('rgba(255, 255, 255');
 
     expect(errors).toEqual([]);

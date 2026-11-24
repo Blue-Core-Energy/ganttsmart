@@ -81,6 +81,8 @@ interface Props {
   assignees?: string[];
   /** Available workflow statuses for status column filter */
   statuses?: string[];
+  /** Optional map of workflow status display name -> statusType for filter icon rendering */
+  statusTypeByStatus?: Map<string, string> | Record<string, string>;
   /** Controlled visible column keys */
   selectedColumns?: ColumnKey[];
   /** Callback fired when visible column selection changes */
@@ -149,6 +151,7 @@ export default function GanttChart({
   onFiltersChange,
   assignees,
   statuses,
+  statusTypeByStatus: propStatusTypeByStatus,
   selectedColumns: propSelectedColumns,
   onVisibleColumnsChange,
 }: Props) {
@@ -753,6 +756,17 @@ export default function GanttChart({
     return map;
   }, [tasks, unscheduledTasks]);
 
+  const statusTypeByStatus = useMemo(() => {
+    if (propStatusTypeByStatus) return propStatusTypeByStatus;
+    const map = new Map<string, string>();
+    for (const t of [...tasks, ...unscheduledTasks]) {
+      if (t.status && t.statusType) {
+        map.set(t.status, t.statusType);
+      }
+    }
+    return map;
+  }, [propStatusTypeByStatus, tasks, unscheduledTasks]);
+
   // Drag a milestone horizontally to reschedule it; a click without movement opens the drawer.
   const handleMilestoneMouseDown = useCallback(
     (e: React.MouseEvent, milestone: Milestone & { dayOffset: number }) => {
@@ -876,7 +890,7 @@ export default function GanttChart({
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="2"
+              strokeWidth="1.5"
               strokeLinecap="round"
               className="text-urgent"
             >
@@ -1039,7 +1053,7 @@ export default function GanttChart({
               <span className="font-medium">Unscheduled</span>
               <span
                 data-testid="unscheduled-count"
-                className="text-xs text-text-muted bg-bg-hover rounded-full px-2 py-0.5"
+                className="text-xs text-text-muted bg-bg-hover rounded-[4px] px-1.5 py-0.5 font-mono tabular-nums"
               >
                 {unscheduledTasks.length}
               </span>
@@ -1320,7 +1334,7 @@ export default function GanttChart({
                             }
                           >
                             <span
-                              className={`w-2.5 h-2.5 rotate-45 transition-transform ${
+                              className={`w-2.5 h-2.5 rotate-45 rounded-[2px] transition-transform ${
                                 dragging
                                   ? 'bg-accent border-2 border-accent scale-125 shadow-md'
                                   : 'bg-amber-500 border border-amber-600 dark:border-amber-400 shadow-sm hover:scale-125'
@@ -1448,6 +1462,7 @@ export default function GanttChart({
           onFiltersChange={onFiltersChange}
           assignees={assignees ?? []}
           statuses={statuses ?? []}
+          statusTypeByStatus={statusTypeByStatus}
         />
       )}
     </div>

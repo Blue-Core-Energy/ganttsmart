@@ -11,8 +11,8 @@ interface Props {
 export default function LinearConnect({ userEmail, error, onConnect, onSignOut }: Props) {
   return (
     <div className="fixed inset-0 bg-bg-primary flex items-center justify-center z-200">
-      <div className="bg-bg-card border border-border-secondary rounded-2xl p-10 max-w-[480px] w-full text-center">
-        <h2 className="text-xl font-bold text-white mb-2">Connect to Linear</h2>
+      <div className="bg-bg-card border border-border-secondary rounded-lg shadow-xl p-8 max-w-[480px] w-full text-center">
+        <h2 className="text-xl font-bold text-text-primary mb-2">Connect to Linear</h2>
         <p className="text-[13px] text-text-secondary mb-2 leading-relaxed">
           Signed in as <strong className="text-text-primary">{userEmail}</strong>
         </p>
@@ -28,7 +28,7 @@ export default function LinearConnect({ userEmail, error, onConnect, onSignOut }
 
         <button
           onClick={onConnect}
-          className="w-full py-3.5 px-4 bg-[#5E6AD2] border-none rounded-lg text-white text-sm font-semibold cursor-pointer flex items-center justify-center gap-2.5 hover:bg-[#4E5BBF] transition-colors mb-4"
+          className="w-full py-3 px-4 bg-accent border-none rounded-md text-white text-sm font-medium cursor-pointer flex items-center justify-center gap-2.5 hover:bg-accent-light transition-colors mb-4"
         >
           <svg width="20" height="20" viewBox="0 0 100 100" fill="none">
             <path
